@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node:*)",
+      "Bash(npm --version:*)",
+      "Bash(npm install:*)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(curl:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npx tsx:*)",
+      "Bash(start /B npx tsx:*)",
+      "Bash(powershell -command \"Start-Sleep -Seconds 5\")",
+      "Bash(taskkill:*)",
+      "Bash(powershell:*)",
+      "Bash(set \"DATABASE_URL=postgresql://postgres:sleeperfordaddy35@db.afbntzoibafahnduxixb.supabase.co:5432/postgres\")",
+      "Bash(npx:*)"
+    ]
+  }
+}
