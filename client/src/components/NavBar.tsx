@@ -12,6 +12,7 @@ const NAV_ITEMS = [
   { path: "market", label: "Market", icon: "📈" },
   { path: "action", label: "Action", icon: "🎯" },
   { path: "arbitrage", label: "Arbitrage", icon: "🔀" },
+  { path: "grades", label: "Grades", icon: "📋" },
 ];
 
 export default function NavBar({ username, avatarId }: NavBarProps) {
