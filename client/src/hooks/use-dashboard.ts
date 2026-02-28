@@ -15,6 +15,7 @@ export interface DashboardRec {
   position: string | null;
   team: string | null;
   fc_at_rec: number | null;
+  current_value: number | null;
   rationale: string | null;
 }
 

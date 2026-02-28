@@ -20,6 +20,7 @@ export interface BuyOpportunity {
   position: string | null;
   team: string | null;
   fc_at_rec: number | null;
+  current_value: number | null;
   rationale: string | null;
   confidence: number | null;
   owned_leagues: number;
@@ -71,9 +72,10 @@ export async function getBuyOpportunities(
     SELECT
       r.player_name,
       r.direction,
-      r.position,
-      r.team,
+      COALESCE(r.position, fc.position) AS position,
+      COALESCE(r.team, fc.team) AS team,
       r.fc_at_rec,
+      fc.dynasty_value::int AS current_value,
       r.rationale,
       r.confidence,
       COALESCE(pe.league_count, 0)::int AS owned_leagues,
@@ -82,6 +84,9 @@ export async function getBuyOpportunities(
          WHERE LOWER(username) = LOWER(${username}))
       )::int AS total_leagues
     FROM recommendations r
+    LEFT JOIN fantasycalc_daily fc
+      ON LOWER(r.player_name) = LOWER(fc.player_name)
+      AND fc.snapshot_date = (SELECT MAX(snapshot_date) FROM fantasycalc_daily)
     LEFT JOIN player_exposure pe
       ON LOWER(r.player_name) = LOWER(pe.player_name)
       AND LOWER(pe.username) = LOWER(${username})

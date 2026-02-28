@@ -18,6 +18,7 @@ export interface BuyOpportunity {
   position: string | null;
   team: string | null;
   fc_at_rec: number | null;
+  current_value: number | null;
   rationale: string | null;
   confidence: number | null;
   owned_leagues: number;

@@ -11,6 +11,7 @@ export interface Recommendation {
   position: string | null;
   team: string | null;
   fc_at_rec: number | null;
+  current_value: number | null;
   rationale: string | null;
   confidence: number | null;
 }
@@ -57,10 +58,16 @@ export interface Signal {
 
 export async function getRecommendations(): Promise<Recommendation[]> {
   const rows = await db.execute(sql`
-    SELECT id, rec_date, player_name, direction, position, team,
-           fc_at_rec, rationale, confidence
-    FROM recommendations
-    ORDER BY rec_date DESC, confidence DESC NULLS LAST
+    SELECT r.id, r.rec_date, r.player_name, r.direction,
+           COALESCE(r.position, fc.position) AS position,
+           COALESCE(r.team, fc.team) AS team,
+           r.fc_at_rec, fc.dynasty_value::int AS current_value,
+           r.rationale, r.confidence
+    FROM recommendations r
+    LEFT JOIN fantasycalc_daily fc
+      ON LOWER(r.player_name) = LOWER(fc.player_name)
+      AND fc.snapshot_date = (SELECT MAX(snapshot_date) FROM fantasycalc_daily)
+    ORDER BY r.rec_date DESC, r.confidence DESC NULLS LAST
   `);
   return rows as unknown as Recommendation[];
 }

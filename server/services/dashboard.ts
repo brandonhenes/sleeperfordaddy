@@ -17,6 +17,7 @@ export interface DashboardRec {
   position: string | null;
   team: string | null;
   fc_at_rec: number | null;
+  current_value: number | null;
   rationale: string | null;
 }
 
@@ -79,10 +80,16 @@ export async function getDashboard(
 
     // Top 3 recommendations
     db.execute(sql`
-      SELECT id, player_name, direction, position, team, fc_at_rec, rationale
-      FROM recommendations
-      WHERE rec_date = (SELECT MAX(rec_date) FROM recommendations)
-      ORDER BY confidence DESC NULLS LAST
+      SELECT r.id, r.player_name, r.direction,
+             COALESCE(r.position, fc.position) AS position,
+             COALESCE(r.team, fc.team) AS team,
+             r.fc_at_rec, fc.dynasty_value::int AS current_value, r.rationale
+      FROM recommendations r
+      LEFT JOIN fantasycalc_daily fc
+        ON LOWER(r.player_name) = LOWER(fc.player_name)
+        AND fc.snapshot_date = (SELECT MAX(snapshot_date) FROM fantasycalc_daily)
+      WHERE r.rec_date = (SELECT MAX(rec_date) FROM recommendations)
+      ORDER BY r.confidence DESC NULLS LAST
       LIMIT 3
     `),
 
