@@ -70,12 +70,13 @@ export async function getRosterGrades(username: string): Promise<RosterGradesRes
   const userId = (userRows as unknown as { user_id: string }[])[0]?.user_id;
   if (!userId) return { leagues: [] };
 
-  // Get user's leagues
+  // Get user's current-season leagues only
   const leagueRows = await db.execute(sql`
     SELECT DISTINCT rp.league_id, l.name AS league_name, l.total_rosters
     FROM roster_players rp
     JOIN leagues l ON rp.league_id = l.league_id
     WHERE rp.owner_id = ${userId}
+      AND l.season = (SELECT MAX(season) FROM leagues)
     ORDER BY l.name
   `);
   const leagues = leagueRows as unknown as {

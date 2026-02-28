@@ -32,22 +32,28 @@ export async function getFreeAgentGaps(
   if (!userId) return [];
 
   const rows = await db.execute(sql`
-    WITH my_leagues AS (
-      SELECT DISTINCT league_id
-      FROM roster_players
-      WHERE owner_id = ${userId}
+    WITH current_leagues AS (
+      SELECT league_id FROM leagues WHERE season = (SELECT MAX(season) FROM leagues)
+    ),
+    my_leagues AS (
+      SELECT DISTINCT rp.league_id
+      FROM roster_players rp
+      JOIN current_leagues cl ON rp.league_id = cl.league_id
+      WHERE rp.owner_id = ${userId}
     ),
     my_players AS (
       SELECT DISTINCT rp.player_id, pm.full_name AS player_name
       FROM roster_players rp
       JOIN players_master pm ON rp.player_id = pm.player_id
+      JOIN current_leagues cl ON rp.league_id = cl.league_id
       WHERE rp.owner_id = ${userId}
     ),
     owned_counts AS (
-      SELECT player_id, COUNT(DISTINCT league_id)::int AS owned_league_count
-      FROM roster_players
-      WHERE owner_id = ${userId}
-      GROUP BY player_id
+      SELECT rp.player_id, COUNT(DISTINCT rp.league_id)::int AS owned_league_count
+      FROM roster_players rp
+      JOIN current_leagues cl ON rp.league_id = cl.league_id
+      WHERE rp.owner_id = ${userId}
+      GROUP BY rp.player_id
     ),
     rostered_anywhere AS (
       SELECT DISTINCT rp.league_id, rp.player_id
