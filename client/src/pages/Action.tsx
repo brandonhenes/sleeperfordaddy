@@ -1,6 +1,6 @@
 import { useParams } from "wouter";
 import AppShell from "../components/AppShell";
-import { SectionHeader, Tag, TrendArrow } from "../components/ui";
+import { SectionHeader, Tag, TrendArrow, PlayerLink } from "../components/ui";
 import { posColor, dirColor } from "../lib/position-colors";
 import {
   useSellCandidates,
@@ -28,8 +28,8 @@ function SellRow({ player: p }: { player: SellCandidate }) {
       }}
     >
       {p.composite_tag && <Tag tag={p.composite_tag} />}
-      <span style={{ fontWeight: 600, fontSize: 14, minWidth: 140 }}>
-        {p.player_name}
+      <span style={{ minWidth: 140 }}>
+        <PlayerLink name={p.player_name} />
       </span>
       <span
         style={{ fontSize: 12, fontWeight: 600, color: posColor(p.position ?? "") }}
@@ -116,7 +116,7 @@ function BuyCard({ opp: o }: { opp: BuyOpportunity }) {
         >
           BUY
         </span>
-        <span style={{ fontWeight: 700, fontSize: 15 }}>{o.player_name}</span>
+        <PlayerLink name={o.player_name} style={{ fontSize: 15 }} />
         {o.position && (
           <span style={{ fontSize: 12, fontWeight: 600, color: posColor(o.position) }}>
             {o.position}

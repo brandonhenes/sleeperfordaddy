@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { useProspects, type Prospect } from "../../hooks/use-market";
 import { posColor } from "../../lib/position-colors";
+import { PlayerLink } from "../ui";
 
 const TIER_STYLES: Record<string, { bg: string; text: string; label: string }> = {
   elite:  { bg: "rgba(245,158,11,0.15)", text: "var(--amber)", label: "ELITE" },
@@ -117,7 +118,7 @@ function ProspectRow({ prospect: p }: { prospect: Prospect }) {
         {p.fantasypros_rank ?? "—"}
       </td>
       <td style={{ padding: "10px 14px" }}>
-        <div style={{ fontWeight: 600, fontSize: 14 }}>{p.player_name}</div>
+        <PlayerLink name={p.player_name} />
         {p.notes && (
           <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
             {p.notes}

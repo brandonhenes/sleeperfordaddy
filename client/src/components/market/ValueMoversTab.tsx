@@ -1,5 +1,6 @@
 import { useMovers, type Mover } from "../../hooks/use-market";
 import { posColor } from "../../lib/position-colors";
+import { PlayerLink } from "../ui";
 
 function MoverRow({ mover, type }: { mover: Mover; type: "riser" | "faller" }) {
   const color = type === "riser" ? "var(--green)" : "var(--red)";
@@ -25,7 +26,7 @@ function MoverRow({ mover, type }: { mover: Mover; type: "riser" | "faller" }) {
         >
           {mover.position}
         </span>
-        <span style={{ fontWeight: 600, fontSize: 14 }}>{mover.player_name}</span>
+        <PlayerLink name={mover.player_name} />
         {mover.team && (
           <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
             {mover.team}

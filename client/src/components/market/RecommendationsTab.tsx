@@ -1,5 +1,6 @@
 import { useRecommendations, type Recommendation } from "../../hooks/use-market";
 import { posColor, dirColor } from "../../lib/position-colors";
+import { PlayerLink } from "../ui";
 
 function DirectionBadge({ direction }: { direction: string }) {
   const color = dirColor(direction);
@@ -36,9 +37,7 @@ function RecCard({ rec }: { rec: Recommendation }) {
     >
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <DirectionBadge direction={rec.direction} />
-        <span style={{ fontWeight: 700, fontSize: 15 }}>
-          {rec.player_name}
-        </span>
+        <PlayerLink name={rec.player_name} style={{ fontSize: 15 }} />
         {rec.position && (
           <span
             style={{

@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { path: "portfolio", label: "Portfolio", icon: "📊" },
   { path: "market", label: "Market", icon: "📈" },
   { path: "action", label: "Action", icon: "🎯" },
+  { path: "arbitrage", label: "Arbitrage", icon: "🔀" },
 ];
 
 export default function NavBar({ username, avatarId }: NavBarProps) {

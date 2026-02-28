@@ -1,6 +1,6 @@
 import { useParams } from "wouter";
 import AppShell from "../components/AppShell";
-import { StatCard, SectionHeader, Tag, ExposureBar } from "../components/ui";
+import { StatCard, SectionHeader, Tag, ExposureBar, PlayerLink } from "../components/ui";
 import { posColor, dirColor } from "../lib/position-colors";
 import {
   useDashboard,
@@ -54,7 +54,7 @@ function RecRow({ rec }: { rec: DashboardRec }) {
       >
         {rec.direction}
       </span>
-      <span style={{ fontWeight: 600, fontSize: 14 }}>{rec.player_name}</span>
+      <PlayerLink name={rec.player_name} />
       {rec.position && (
         <span style={{ fontSize: 12, fontWeight: 600, color: posColor(rec.position) }}>
           {rec.position}
@@ -106,8 +106,8 @@ function AlertRow({ player: p }: { player: ExposureAlert }) {
         gap: 10,
       }}
     >
-      <span style={{ fontWeight: 600, fontSize: 14, minWidth: 130 }}>
-        {p.player_name}
+      <span style={{ minWidth: 130 }}>
+        <PlayerLink name={p.player_name} />
       </span>
       {p.composite_tag && <Tag tag={p.composite_tag} />}
       <span style={{ fontSize: 12, fontWeight: 600, color: posColor(p.position ?? "") }}>

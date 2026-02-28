@@ -6,6 +6,8 @@ import marketRoutes from "./market.js";
 import actionRoutes from "./action.js";
 import dashboardRoutes from "./dashboard.js";
 import adminRoutes from "./admin.js";
+import playerRoutes from "./player.js";
+import arbitrageRoutes from "./arbitrage.js";
 
 const router = Router();
 
@@ -22,5 +24,7 @@ router.use(marketRoutes);
 router.use(actionRoutes);
 router.use(dashboardRoutes);
 router.use(adminRoutes);
+router.use(playerRoutes);
+router.use(arbitrageRoutes);
 
 export default router;

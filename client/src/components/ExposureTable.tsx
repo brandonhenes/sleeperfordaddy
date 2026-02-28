@@ -1,5 +1,5 @@
 import type { PortfolioPlayer } from "../hooks/use-portfolio";
-import { Tag, TrendArrow, ExposureBar } from "./ui";
+import { Tag, TrendArrow, ExposureBar, PlayerLink } from "./ui";
 import { posColor } from "../lib/position-colors";
 
 interface ExposureTableProps {
@@ -59,9 +59,7 @@ export default function ExposureTable({ players }: ExposureTableProps) {
         >
           {/* PLAYER + Tag */}
           <div>
-            <span style={{ color: "var(--text)", fontWeight: 600, fontSize: 14 }}>
-              {p.player_name}
-            </span>
+            <PlayerLink name={p.player_name} />
             {p.composite_tag && (
               <div style={{ marginTop: 2 }}>
                 <Tag tag={p.composite_tag} />
