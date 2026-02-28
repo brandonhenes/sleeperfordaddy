@@ -1,17 +1,22 @@
 import { Route, Switch } from "wouter";
-import Layout from "./components/Layout";
-import Home from "./pages/Home";
-import Profile from "./pages/Profile";
+import Landing from "./pages/Landing";
+import Dashboard from "./pages/Dashboard";
+import Portfolio from "./pages/Portfolio";
+import Market from "./pages/Market";
+import Action from "./pages/Action";
 import NotFound from "./pages/NotFound";
 
 export default function App() {
   return (
-    <Layout>
-      <Switch>
-        <Route path="/" component={Home} />
-        <Route path="/user/:username" component={Profile} />
-        <Route component={NotFound} />
-      </Switch>
-    </Layout>
+    <Switch>
+      <Route path="/" component={Landing} />
+      <Route path="/dashboard/:username" component={Dashboard} />
+      <Route path="/portfolio/:username" component={Portfolio} />
+      <Route path="/market" component={Market} />
+      <Route path="/action/:username" component={Action} />
+      {/* Keep legacy route working */}
+      <Route path="/user/:username" component={Dashboard} />
+      <Route component={NotFound} />
+    </Switch>
   );
 }

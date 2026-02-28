@@ -2,12 +2,34 @@ import { Link } from "wouter";
 
 export default function NotFound() {
   return (
-    <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
-      <h1 className="text-4xl font-bold">404</h1>
-      <p className="text-sleeper-muted">Page not found</p>
+    <div
+      style={{
+        minHeight: "100vh",
+        background: "var(--dark)",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 16,
+      }}
+    >
+      <h1
+        className="font-mono"
+        style={{ fontSize: 48, fontWeight: 800, color: "var(--amber)" }}
+      >
+        404
+      </h1>
+      <p style={{ color: "var(--text-muted)" }}>Page not found</p>
       <Link href="/">
-        <span className="text-sleeper-accent hover:underline cursor-pointer">
-          Back to home
+        <span
+          style={{
+            color: "var(--amber)",
+            cursor: "pointer",
+            fontSize: 14,
+            fontWeight: 600,
+          }}
+        >
+          Back to The Edge
         </span>
       </Link>
     </div>
