@@ -17,7 +17,7 @@ router.post("/api/admin/recompute-tags", async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error("[admin/recompute-tags] Error:", err);
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ message: (err as Error).message ?? "Internal server error" });
   }
 });
 
@@ -28,7 +28,7 @@ router.post("/api/admin/sync-crosswalk", async (_req, res) => {
     res.json(stats);
   } catch (err) {
     console.error("[admin/sync-crosswalk] Error:", err);
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ message: (err as Error).message ?? "Internal server error" });
   }
 });
 
@@ -39,7 +39,7 @@ router.post("/api/admin/sync-ktc", async (_req, res) => {
     res.json(stats);
   } catch (err) {
     console.error("[admin/sync-ktc] Error:", err);
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ message: (err as Error).message ?? "Internal server error" });
   }
 });
 
@@ -50,7 +50,7 @@ router.post("/api/admin/sync-dynastyprocess", async (_req, res) => {
     res.json(stats);
   } catch (err) {
     console.error("[admin/sync-dynastyprocess] Error:", err);
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ message: (err as Error).message ?? "Internal server error" });
   }
 });
 
@@ -63,7 +63,7 @@ router.post("/api/admin/sync-values", async (_req, res) => {
     res.json({ crosswalk, ktc, dp });
   } catch (err) {
     console.error("[admin/sync-values] Error:", err);
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ message: (err as Error).message ?? "Internal server error" });
   }
 });
 

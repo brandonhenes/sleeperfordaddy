@@ -11,16 +11,31 @@ interface DPSyncStats {
   picks: number;
 }
 
+function splitCSVLine(line: string): string[] {
+  const fields: string[] = [];
+  let current = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') { inQuotes = !inQuotes; continue; }
+    if (ch === "," && !inQuotes) { fields.push(current.trim()); current = ""; continue; }
+    current += ch;
+  }
+  fields.push(current.trim());
+  return fields;
+}
+
 function parseCSV(text: string): Record<string, string>[] {
   const lines = text.split("\n").filter((l) => l.trim());
   if (lines.length < 2) return [];
-  const headers = lines[0].split(",").map((h) => h.trim().replace(/^"|"$/g, ""));
+  const headers = splitCSVLine(lines[0]);
   const rows: Record<string, string>[] = [];
   for (let i = 1; i < lines.length; i++) {
-    const vals = lines[i].split(",").map((v) => v.trim().replace(/^"|"$/g, ""));
+    const vals = splitCSVLine(lines[i]);
     const row: Record<string, string> = {};
     for (let j = 0; j < headers.length; j++) {
-      row[headers[j]] = vals[j] ?? "";
+      const v = vals[j] ?? "";
+      row[headers[j]] = v === "NA" ? "" : v;
     }
     rows.push(row);
   }
@@ -121,7 +136,7 @@ export async function syncDynastyProcessValues(): Promise<DPSyncStats> {
   }
 
   // Upsert in batches
-  const BATCH_SIZE = 200;
+  const BATCH_SIZE = 50;
   for (let i = 0; i < batch.length; i += BATCH_SIZE) {
     const chunk = batch.slice(i, i + BATCH_SIZE);
     const fragments = chunk.map(

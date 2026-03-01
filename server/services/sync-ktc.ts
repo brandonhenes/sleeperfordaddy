@@ -130,7 +130,7 @@ export async function syncKtcValues(): Promise<KtcSyncStats> {
   }
 
   // Upsert in batches
-  const BATCH_SIZE = 100;
+  const BATCH_SIZE = 30;
   for (let i = 0; i < batch.length; i += BATCH_SIZE) {
     const chunk = batch.slice(i, i + BATCH_SIZE);
     const fragments = chunk.map(
