@@ -7,6 +7,7 @@ import Action from "./pages/Action";
 import PlayerDetail from "./pages/PlayerDetail";
 import Arbitrage from "./pages/Arbitrage";
 import RosterGrades from "./pages/RosterGrades";
+import PowerRankings from "./pages/PowerRankings";
 import NotFound from "./pages/NotFound";
 
 export default function App() {
@@ -19,6 +20,7 @@ export default function App() {
       <Route path="/action/:username" component={Action} />
       <Route path="/arbitrage/:username" component={Arbitrage} />
       <Route path="/grades/:username" component={RosterGrades} />
+      <Route path="/power/:username" component={PowerRankings} />
       <Route path="/player/:playerName" component={PlayerDetail} />
       {/* Keep legacy route working */}
       <Route path="/user/:username" component={Dashboard} />

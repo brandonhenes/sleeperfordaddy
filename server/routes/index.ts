@@ -9,6 +9,7 @@ import adminRoutes from "./admin.js";
 import playerRoutes from "./player.js";
 import arbitrageRoutes from "./arbitrage.js";
 import rosterGradesRoutes from "./roster-grades.js";
+import powerRankingsRoutes from "./power-rankings.js";
 
 const router = Router();
 
@@ -28,5 +29,6 @@ router.use(adminRoutes);
 router.use(playerRoutes);
 router.use(arbitrageRoutes);
 router.use(rosterGradesRoutes);
+router.use(powerRankingsRoutes);
 
 export default router;
