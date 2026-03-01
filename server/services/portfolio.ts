@@ -1,7 +1,7 @@
 import { db } from "../db/connection.js";
 import { sql } from "drizzle-orm";
 
-export interface PortfolioPlayer {
+export type PortfolioPlayer = {
   player_name: string;
   position: string | null;
   team: string | null;
@@ -11,7 +11,8 @@ export interface PortfolioPlayer {
   dynasty_value: number | null;
   trend_30day: number | null;
   overall_rank: number | null;
-}
+  [key: string]: unknown;
+};
 
 export interface PortfolioStats {
   weighted_value: number;

@@ -1,4 +1,4 @@
-import type { Express } from "express";
+import express, { type Express } from "express";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -37,14 +37,13 @@ export async function setupVite(app: Express) {
 }
 
 export function serveStatic(app: Express) {
-  const distPath = path.resolve(__dirname, "../dist/public");
+  const distPath = path.resolve(process.cwd(), "dist/public");
 
   if (!fs.existsSync(distPath)) {
     console.warn("[server] No dist/public found, skipping static serving");
     return;
   }
 
-  const express = require("express");
   app.use(express.static(distPath));
 
   // SPA fallback for production
