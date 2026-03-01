@@ -1,14 +1,14 @@
 import { useState } from "react";
 
 interface SourceBadgeProps {
-  fc_value: number | null;
-  ktc_value: number | null;
-  dp_value: number | null;
+  fc_score: number | null;
+  ktc_score: number | null;
+  dp_score: number | null;
   sources_available: number;
   source_agreement: "high" | "medium" | "low";
 }
 
-export default function SourceBadge({ fc_value, ktc_value, dp_value, sources_available, source_agreement }: SourceBadgeProps) {
+export default function SourceBadge({ fc_score, ktc_score, dp_score, sources_available, source_agreement }: SourceBadgeProps) {
   const [showDetail, setShowDetail] = useState(false);
   const n = sources_available;
   const color = n >= 3 ? "var(--green)" : n === 2 ? "var(--amber)" : "var(--text-muted)";
@@ -32,9 +32,9 @@ export default function SourceBadge({ fc_value, ktc_value, dp_value, sources_ava
           border: "1px solid var(--border)", borderRadius: 6, padding: "6px 10px",
           fontSize: 10, whiteSpace: "nowrap", zIndex: 10, color: "var(--text-dim)",
         }}>
-          {fc_value != null && <div>FC: {fc_value.toLocaleString()}</div>}
-          {ktc_value != null && <div>KTC: {ktc_value.toLocaleString()}</div>}
-          {dp_value != null && <div>DP: {dp_value.toLocaleString()}</div>}
+          {fc_score != null && <div>FC: {fc_score}</div>}
+          {ktc_score != null && <div>KTC: {ktc_score}</div>}
+          {dp_score != null && <div>DP: {dp_score}</div>}
           {n === 0 && <div>No data</div>}
         </div>
       )}

@@ -11,12 +11,15 @@ export interface CoreAsset {
   player_id: string;
   full_name: string;
   position: string;
-  value: number;
+  edge_score: number;
   age: number | null;
   age_curve: AgeCurveStatus;
   fc_value: number | null;
   ktc_value: number | null;
   dp_value: number | null;
+  fc_score: number | null;
+  ktc_score: number | null;
+  dp_score: number | null;
   sources_available: number;
   source_agreement: "high" | "medium" | "low";
 }
@@ -27,6 +30,7 @@ export interface RosterRanking {
   display_name: string;
   is_user: boolean;
   starters_value: number;
+  avg_starter_score: number;
   power_pct: number;
   draft_value: number;
   draft_pct: number;
@@ -98,7 +102,6 @@ export async function getPowerRankings(
   const leagueIdFragments = leagues.map((l) => sql`${l.league_id}`);
   const inClause = sql.join(leagueIdFragments, sql`, `);
 
-  // Get roster players (no FC join — composite handles values)
   const rosterRows = await db.execute(sql`
     SELECT rp.league_id, rp.owner_id, rp.player_id,
            pm.full_name, pm.position, pm.age
@@ -113,7 +116,6 @@ export async function getPowerRankings(
   };
   const rows = rosterRows as unknown as RosterRow[];
 
-  // Roster ID + display name maps
   const [rosterIdRows, nameRows] = await Promise.all([
     db.execute(sql`SELECT league_id, owner_id, roster_id FROM rosters WHERE league_id IN (${inClause})`),
     db.execute(sql`SELECT league_id, user_id, display_name FROM league_users WHERE league_id IN (${inClause})`),
@@ -127,7 +129,6 @@ export async function getPowerRankings(
     nameMap.set(`${r.league_id}:${r.user_id}`, r.display_name ?? r.user_id);
   }
 
-  // Group: league -> owner -> players[]
   const nested: Record<string, Record<string, RosterRow[]>> = {};
   for (const r of rows) {
     nested[r.league_id] ??= {};
@@ -135,7 +136,6 @@ export async function getPowerRankings(
     nested[r.league_id][r.owner_id].push(r);
   }
 
-  // Fetch league settings from Sleeper
   const leagueSettingsMap = new Map<string, { sf: boolean; starterSlots: number }>();
   await Promise.all(
     leagues.map(async (l) => {
@@ -151,10 +151,6 @@ export async function getPowerRankings(
     })
   );
 
-  // Collect all unique player IDs and get composite values
-  const allPlayerIds = [...new Set(rows.map((r) => r.player_id))];
-
-  // Process each league
   const results: LeaguePowerRanking[] = [];
 
   for (const league of leagues) {
@@ -163,22 +159,21 @@ export async function getPowerRankings(
     const settings = leagueSettingsMap.get(lid) ?? { sf: false, starterSlots: 9 };
     const mode = settings.sf ? "sf" : "1qb";
 
-    // Get composite values for players in this league
     const leaguePlayerIds = Object.values(leagueTeams).flat().map((p) => p.player_id);
     const compositeMap = await getCompositeValues([...new Set(leaguePlayerIds)], mode);
 
     const rosterData = Object.entries(leagueTeams).map(([ownerId, players]) => {
-      // Attach composite value to each player
       const withValue = players.map((p) => ({
         ...p,
-        composite: compositeMap.get(p.player_id)?.composite_value ?? 0,
+        edgeScore: compositeMap.get(p.player_id)?.edge_score ?? 0,
         cv: compositeMap.get(p.player_id),
       }));
-      const sorted = [...withValue].sort((a, b) => b.composite - a.composite);
+      const sorted = [...withValue].sort((a, b) => b.edgeScore - a.edgeScore);
 
-      const startersValue = sorted
-        .slice(0, settings.starterSlots)
-        .reduce((s, p) => s + p.composite, 0);
+      const starters = sorted.slice(0, settings.starterSlots);
+      const startersValue = starters.reduce((s, p) => s + p.edgeScore, 0);
+      const avgStarterScore = starters.length > 0
+        ? Math.round((startersValue / starters.length) * 10) / 10 : 0;
 
       const withCurve = sorted.map((p) => ({
         ...p,
@@ -189,26 +184,29 @@ export async function getPowerRankings(
       const corePlayers = withCurve.slice(0, coreSize);
 
       const windowCoreRaw = computeWindowRaw(
-        corePlayers.map((p) => ({ value: p.composite, age_score: p.age_curve.score }))
+        corePlayers.map((p) => ({ value: p.edgeScore, age_score: p.age_curve.score }))
       );
       const windowTotalRaw = computeWindowRaw(
-        withCurve.map((p) => ({ value: p.composite, age_score: p.age_curve.score }))
+        withCurve.map((p) => ({ value: p.edgeScore, age_score: p.age_curve.score }))
       );
       const coreCoverage = corePlayers.length > 0
-        ? (corePlayers.filter((p) => p.composite > 0).length / coreSize) * 100 : 0;
+        ? (corePlayers.filter((p) => p.edgeScore > 0).length / coreSize) * 100 : 0;
       const totalCoverage = withCurve.length > 0
-        ? (withCurve.filter((p) => p.composite > 0).length / withCurve.length) * 100 : 0;
+        ? (withCurve.filter((p) => p.edgeScore > 0).length / withCurve.length) * 100 : 0;
 
       const coreAssets: CoreAsset[] = withCurve.slice(0, 12).map((p) => ({
         player_id: p.player_id,
         full_name: p.full_name,
         position: p.position,
-        value: p.composite,
+        edge_score: p.edgeScore,
         age: p.age,
         age_curve: p.age_curve,
         fc_value: p.cv?.fc_value ?? null,
         ktc_value: p.cv?.ktc_value ?? null,
         dp_value: p.cv?.dp_value ?? null,
+        fc_score: p.cv?.fc_score ?? null,
+        ktc_score: p.cv?.ktc_score ?? null,
+        dp_score: p.cv?.dp_score ?? null,
         sources_available: p.cv?.sources_available ?? 0,
         source_agreement: p.cv?.source_agreement ?? "high",
       }));
@@ -217,7 +215,7 @@ export async function getPowerRankings(
       const avgSources = srcCounts.length > 0
         ? Math.round((srcCounts.reduce((s, v) => s + v, 0) / srcCounts.length) * 10) / 10 : 0;
 
-      return { ownerId, startersValue, windowCoreRaw, windowTotalRaw,
+      return { ownerId, startersValue, avgStarterScore, windowCoreRaw, windowTotalRaw,
         coreCoverage, totalCoverage, coreAssets, avgSources };
     });
 
@@ -238,6 +236,7 @@ export async function getPowerRankings(
         display_name: nameMap.get(`${lid}:${r.ownerId}`) ?? r.ownerId,
         is_user: r.ownerId === userId,
         starters_value: r.startersValue,
+        avg_starter_score: r.avgStarterScore,
         power_pct: Math.round(powerPct * 10) / 10,
         draft_value: 0, draft_pct: draftPct,
         window_core_raw: Math.round(r.windowCoreRaw * 10) / 10,

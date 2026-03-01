@@ -17,12 +17,15 @@ export interface CoreAsset {
   player_id: string;
   full_name: string;
   position: string;
-  value: number;
+  edge_score: number;
   age: number | null;
   age_curve: AgeCurveStatus;
   fc_value: number | null;
   ktc_value: number | null;
   dp_value: number | null;
+  fc_score: number | null;
+  ktc_score: number | null;
+  dp_score: number | null;
   sources_available: number;
   source_agreement: "high" | "medium" | "low";
 }
@@ -33,6 +36,7 @@ export interface RosterRanking {
   display_name: string;
   is_user: boolean;
   starters_value: number;
+  avg_starter_score: number;
   power_pct: number;
   draft_value: number;
   draft_pct: number;

@@ -4,6 +4,7 @@ import AppShell from "../components/AppShell";
 import { StatCard } from "../components/ui";
 import AgeScaleBar from "../components/AgeScaleBar";
 import SourceBadge from "../components/SourceBadge";
+import EdgeScoreBadge from "../components/EdgeScoreBadge";
 import { posColor } from "../lib/position-colors";
 import {
   usePowerRankings,
@@ -71,49 +72,22 @@ function PctBar({ label, value }: { label: string; value: number }) {
 
 function CoreAssetsRow({ roster }: { roster: RosterRanking }) {
   return (
-    <div
-      style={{
-        background: "var(--dark-base)",
-        borderRadius: 8,
-        padding: "12px 16px",
-        marginTop: 8,
-      }}
-    >
+    <div style={{ background: "var(--dark-base)", borderRadius: 8, padding: "12px 16px", marginTop: 8 }}>
       <div style={{ fontSize: 10, color: "var(--text-muted)", marginBottom: 8, fontWeight: 600 }}>
         CORE ASSETS
       </div>
       <div style={{ display: "grid", gap: 6 }}>
         {roster.core_assets.map((p) => (
-          <div
-            key={p.player_id}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              fontSize: 12,
-            }}
-          >
-            <span
-              style={{
-                color: posColor(p.position),
-                fontWeight: 700,
-                fontSize: 10,
-                width: 24,
-              }}
-            >
+          <div key={p.player_id} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12 }}>
+            <span style={{ color: posColor(p.position), fontWeight: 700, fontSize: 10, width: 24 }}>
               {p.position}
             </span>
             <span style={{ flex: 1, fontWeight: 500 }}>{p.full_name}</span>
+            <EdgeScoreBadge score={p.edge_score} size="sm" />
             <SourceBadge
-              fc_value={p.fc_value} ktc_value={p.ktc_value} dp_value={p.dp_value}
+              fc_score={p.fc_score} ktc_score={p.ktc_score} dp_score={p.dp_score}
               sources_available={p.sources_available} source_agreement={p.source_agreement}
             />
-            <span
-              className="font-mono"
-              style={{ color: "var(--amber)", fontSize: 11, width: 50, textAlign: "right" }}
-            >
-              {p.value.toLocaleString()}
-            </span>
             <AgeScaleBar ageCurve={p.age_curve} />
           </div>
         ))}
@@ -135,6 +109,7 @@ function RosterRow({ roster, rank }: { roster: RosterRanking; rank: number }) {
         <span className="font-mono" style={{ width: 24, fontSize: 12, color: "var(--text-muted)" }}>
           #{rank}
         </span>
+        <EdgeScoreBadge score={Math.round(roster.avg_starter_score)} size="md" />
         <span style={{ flex: 1, textAlign: "left", fontWeight: roster.is_user ? 700 : 500, fontSize: 13 }}>
           {roster.display_name}
         </span>
@@ -145,7 +120,7 @@ function RosterRow({ roster, rank }: { roster: RosterRanking; rank: number }) {
           <PctBar label="Draft" value={roster.draft_pct} />
         </div>
         <span style={{ fontSize: 12, color: "var(--text-muted)", marginLeft: 4 }}>
-          {open ? "▲" : "▼"}
+          {open ? "\u25B2" : "\u25BC"}
         </span>
       </button>
       {open && <CoreAssetsRow roster={roster} />}
@@ -160,26 +135,13 @@ function LeagueCard({ league }: { league: LeaguePowerRanking }) {
   const userRoster = league.rosters.find((r) => r.is_user);
 
   return (
-    <div
-      style={{
-        background: "var(--card)",
-        border: "1px solid var(--border)",
-        borderRadius: 10,
-      }}
-    >
+    <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10 }}>
       <button
         onClick={() => setExpanded(!expanded)}
         style={{
-          width: "100%",
-          display: "flex",
-          alignItems: "center",
-          gap: 12,
-          padding: "14px 20px",
-          background: "none",
-          border: "none",
-          color: "var(--text)",
-          cursor: "pointer",
-          fontFamily: "inherit",
+          width: "100%", display: "flex", alignItems: "center", gap: 12,
+          padding: "14px 20px", background: "none", border: "none",
+          color: "var(--text)", cursor: "pointer", fontFamily: "inherit",
         }}
       >
         <div style={{ flex: 1, textAlign: "left" }}>
@@ -188,6 +150,7 @@ function LeagueCard({ league }: { league: LeaguePowerRanking }) {
             {league.rosters.length} teams · {league.mode.toUpperCase()} · Values: {valueSources(league)}
           </span>
         </div>
+        {userRoster && <EdgeScoreBadge score={Math.round(userRoster.avg_starter_score)} size="md" />}
         {userRoster && <ArchetypeBadge archetype={userRoster.archetype} />}
         {userRoster && (
           <div style={{ display: "flex", gap: 8, marginLeft: 8 }}>
@@ -197,10 +160,9 @@ function LeagueCard({ league }: { league: LeaguePowerRanking }) {
           </div>
         )}
         <span style={{ fontSize: 12, color: "var(--text-muted)", marginLeft: 4 }}>
-          {expanded ? "▲" : "▼"}
+          {expanded ? "\u25B2" : "\u25BC"}
         </span>
       </button>
-
       {expanded && (
         <div style={{ padding: "0 16px 16px", display: "grid", gap: 6 }}>
           {league.rosters.map((r, i) => (
@@ -218,7 +180,7 @@ function SummaryCards({ leagues }: { leagues: LeaguePowerRanking[] }) {
   const archs = leagues.map((l) => l.rosters.find((r) => r.is_user)?.archetype).filter(Boolean) as string[];
   const counts: Record<string, number> = {};
   for (const a of archs) counts[a] = (counts[a] ?? 0) + 1;
-  const top = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "—";
+  const top = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "\u2014";
   return (
     <div style={{ display: "flex", gap: 16, marginTop: 16, flexWrap: "wrap" }}>
       <StatCard label="Leagues Analyzed" value={leagues.length} />
@@ -244,7 +206,7 @@ export default function PowerRankings() {
       <div style={{ padding: "28px 0 8px" }}>
         <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>Power Rankings</h1>
         <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 4 }}>
-          Value-weighted windows and team archetypes across all leagues
+          Edge Score dynasty ratings across all leagues (39-99 scale)
         </p>
       </div>
 

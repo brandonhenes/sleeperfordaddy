@@ -1,5 +1,6 @@
 import { db } from "../db/connection.js";
 import { sql } from "drizzle-orm";
+import { computeEdgeScores } from "./edge-score.js";
 
 // ─── Types ───
 
@@ -8,24 +9,21 @@ export interface CompositeValue {
   fc_value: number | null;
   ktc_value: number | null;
   dp_value: number | null;
-  fc_norm: number | null;
-  ktc_norm: number | null;
-  dp_norm: number | null;
-  composite_value: number;
+  edge_score: number;
+  fc_score: number | null;
+  ktc_score: number | null;
+  dp_score: number | null;
   sources_available: number;
   source_agreement: "high" | "medium" | "low";
 }
 
 // ─── Helpers ───
 
-function computeAgreement(values: number[]): "high" | "medium" | "low" {
-  if (values.length <= 1) return "high";
-  const mean = values.reduce((s, v) => s + v, 0) / values.length;
-  if (mean === 0) return "high";
-  const variance = values.reduce((s, v) => s + (v - mean) ** 2, 0) / values.length;
-  const cv = Math.sqrt(variance) / mean;
-  if (cv < 0.15) return "high";
-  if (cv <= 0.30) return "medium";
+function computeAgreement(scores: number[]): "high" | "medium" | "low" {
+  if (scores.length <= 1) return "high";
+  const spread = Math.max(...scores) - Math.min(...scores);
+  if (spread < 5) return "high";
+  if (spread <= 12) return "medium";
   return "low";
 }
 
@@ -38,7 +36,6 @@ export async function getCompositeValues(
   const result = new Map<string, CompositeValue>();
   if (playerIds.length === 0) return result;
 
-  // Build IN clause
   const idFragments = playerIds.map((id) => sql`${id}`);
   const inClause = sql.join(idFragments, sql`, `);
 
@@ -69,44 +66,32 @@ export async function getCompositeValues(
   };
   const rawRows = rows as unknown as Row[];
 
-  // Find max values for normalization
-  let fcMax = 0, ktcMax = 0, dpMax = 0;
-  for (const r of rawRows) {
-    const fc = r.fc_value ?? 0;
-    const ktc = mode === "sf" ? (r.ktc_sf ?? 0) : (r.ktc_1qb ?? 0);
-    const dp = mode === "sf" ? (r.dp_2qb ?? 0) : (r.dp_1qb ?? 0);
-    if (fc > fcMax) fcMax = fc;
-    if (ktc > ktcMax) ktcMax = ktc;
-    if (dp > dpMax) dpMax = dp;
-  }
+  // Build inputs for edge scoring
+  const inputs = rawRows.map((r) => ({
+    sleeper_id: r.sleeper_id,
+    fc_value: r.fc_value ?? null,
+    ktc_value: mode === "sf" ? (r.ktc_sf ?? null) : (r.ktc_1qb ?? null),
+    dp_value: mode === "sf" ? (r.dp_2qb ?? null) : (r.dp_1qb ?? null),
+  }));
 
-  for (const r of rawRows) {
-    const fcRaw = r.fc_value ?? null;
-    const ktcRaw = mode === "sf" ? (r.ktc_sf ?? null) : (r.ktc_1qb ?? null);
-    const dpRaw = mode === "sf" ? (r.dp_2qb ?? null) : (r.dp_1qb ?? null);
+  const edgeMap = computeEdgeScores(inputs);
 
-    // Normalize to 0-10000
-    const fcNorm = fcRaw != null && fcMax > 0 ? Math.round((fcRaw / fcMax) * 10000) : null;
-    const ktcNorm = ktcRaw != null && ktcMax > 0 ? Math.round((ktcRaw / ktcMax) * 10000) : null;
-    const dpNorm = dpRaw != null && dpMax > 0 ? Math.round((dpRaw / dpMax) * 10000) : null;
+  for (const inp of inputs) {
+    const edge = edgeMap.get(inp.sleeper_id);
+    const sourceScores = [edge?.fc_score, edge?.ktc_score, edge?.dp_score]
+      .filter((s): s is number => s != null);
 
-    const normValues = [fcNorm, ktcNorm, dpNorm].filter((v): v is number => v != null);
-    const sourcesAvailable = normValues.length;
-    const composite = sourcesAvailable > 0
-      ? Math.round(normValues.reduce((s, v) => s + v, 0) / sourcesAvailable)
-      : 0;
-
-    result.set(r.sleeper_id, {
-      sleeper_id: r.sleeper_id,
-      fc_value: fcRaw,
-      ktc_value: ktcRaw,
-      dp_value: dpRaw,
-      fc_norm: fcNorm,
-      ktc_norm: ktcNorm,
-      dp_norm: dpNorm,
-      composite_value: composite,
-      sources_available: sourcesAvailable,
-      source_agreement: computeAgreement(normValues),
+    result.set(inp.sleeper_id, {
+      sleeper_id: inp.sleeper_id,
+      fc_value: inp.fc_value,
+      ktc_value: inp.ktc_value,
+      dp_value: inp.dp_value,
+      edge_score: edge?.score ?? 0,
+      fc_score: edge?.fc_score ?? null,
+      ktc_score: edge?.ktc_score ?? null,
+      dp_score: edge?.dp_score ?? null,
+      sources_available: edge?.sources_used ?? 0,
+      source_agreement: computeAgreement(sourceScores),
     });
   }
 
