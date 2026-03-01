@@ -135,10 +135,14 @@ export async function syncDynastyProcessValues(): Promise<DPSyncStats> {
     });
   }
 
+  // Deduplicate by sleeper_id (CSV may have multiple rows mapping to same player)
+  const deduped = [...new Map(batch.map((r) => [r.sleeper_id, r])).values()];
+  console.log(`[dp] Deduplicated to ${deduped.length} unique entries`);
+
   // Upsert in batches
   const BATCH_SIZE = 50;
-  for (let i = 0; i < batch.length; i += BATCH_SIZE) {
-    const chunk = batch.slice(i, i + BATCH_SIZE);
+  for (let i = 0; i < deduped.length; i += BATCH_SIZE) {
+    const chunk = deduped.slice(i, i + BATCH_SIZE);
     const fragments = chunk.map(
       (r) => sql`(
         ${r.sleeper_id}, ${r.player_name}, ${r.position}, ${r.team}, ${r.age},
