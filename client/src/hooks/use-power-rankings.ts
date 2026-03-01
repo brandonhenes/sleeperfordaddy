@@ -20,6 +20,11 @@ export interface CoreAsset {
   value: number;
   age: number | null;
   age_curve: AgeCurveStatus;
+  fc_value: number | null;
+  ktc_value: number | null;
+  dp_value: number | null;
+  sources_available: number;
+  source_agreement: "high" | "medium" | "low";
 }
 
 export interface RosterRanking {
@@ -40,6 +45,7 @@ export interface RosterRanking {
   archetype: string;
   reasons: string[];
   core_assets: CoreAsset[];
+  avg_sources_available: number;
 }
 
 export interface LeaguePowerRanking {

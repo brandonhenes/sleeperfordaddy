@@ -3,6 +3,7 @@ import { sql } from "drizzle-orm";
 import { getLeague } from "../sleeper/leagues.js";
 import { getAgeCurveStatus, type AgeCurveStatus } from "./age-curves.js";
 import { classifyTeam, percentileRank } from "./archetypes.js";
+import { getCompositeValues } from "./composite-values.js";
 
 // ─── Types ───
 
@@ -13,6 +14,11 @@ export interface CoreAsset {
   value: number;
   age: number | null;
   age_curve: AgeCurveStatus;
+  fc_value: number | null;
+  ktc_value: number | null;
+  dp_value: number | null;
+  sources_available: number;
+  source_agreement: "high" | "medium" | "low";
 }
 
 export interface RosterRanking {
@@ -33,6 +39,7 @@ export interface RosterRanking {
   archetype: string;
   reasons: string[];
   core_assets: CoreAsset[];
+  avg_sources_available: number;
 }
 
 export interface LeaguePowerRanking {
@@ -69,14 +76,12 @@ function computeWindowRaw(
 export async function getPowerRankings(
   username: string
 ): Promise<LeaguePowerRanking[]> {
-  // Resolve user_id
   const userRows = await db.execute(sql`
     SELECT user_id FROM users WHERE LOWER(username) = LOWER(${username}) LIMIT 1
   `);
   const userId = (userRows as unknown as { user_id: string }[])[0]?.user_id;
   if (!userId) return [];
 
-  // Get user's current-season leagues (deduplicated by name)
   const leagueRows = await db.execute(sql`
     SELECT DISTINCT ON (l.name)
       l.league_id, l.name AS league_name, l.total_rosters
@@ -86,68 +91,39 @@ export async function getPowerRankings(
     ORDER BY l.name ASC, l.season DESC
   `);
   const leagues = leagueRows as unknown as {
-    league_id: string;
-    league_name: string;
-    total_rosters: number;
+    league_id: string; league_name: string; total_rosters: number;
   }[];
-
   if (leagues.length === 0) return [];
 
-  // Build league_id IN clause
   const leagueIdFragments = leagues.map((l) => sql`${l.league_id}`);
   const inClause = sql.join(leagueIdFragments, sql`, `);
 
-  // Get ALL roster players for these leagues with values + ages
+  // Get roster players (no FC join — composite handles values)
   const rosterRows = await db.execute(sql`
-    SELECT
-      rp.league_id,
-      rp.owner_id,
-      rp.player_id,
-      pm.full_name,
-      pm.position,
-      pm.age,
-      COALESCE(fc.dynasty_value, 0)::int AS dynasty_value
+    SELECT rp.league_id, rp.owner_id, rp.player_id,
+           pm.full_name, pm.position, pm.age
     FROM roster_players rp
     JOIN players_master pm ON rp.player_id = pm.player_id
-    LEFT JOIN fantasycalc_daily fc
-      ON LOWER(pm.full_name) = LOWER(fc.player_name)
-      AND fc.snapshot_date = (SELECT MAX(snapshot_date) FROM fantasycalc_daily)
     WHERE rp.league_id IN (${inClause})
       AND pm.position IN ('QB', 'RB', 'WR', 'TE')
   `);
-
   type RosterRow = {
-    league_id: string;
-    owner_id: string;
-    player_id: string;
-    full_name: string;
-    position: string;
-    age: number | null;
-    dynasty_value: number;
+    league_id: string; owner_id: string; player_id: string;
+    full_name: string; position: string; age: number | null;
   };
   const rows = rosterRows as unknown as RosterRow[];
 
-  // Get rosters table for roster_id mapping
-  const rosterIdRows = await db.execute(sql`
-    SELECT league_id, owner_id, roster_id
-    FROM rosters
-    WHERE league_id IN (${inClause})
-  `);
-  type RosterIdRow = { league_id: string; owner_id: string; roster_id: number };
+  // Roster ID + display name maps
+  const [rosterIdRows, nameRows] = await Promise.all([
+    db.execute(sql`SELECT league_id, owner_id, roster_id FROM rosters WHERE league_id IN (${inClause})`),
+    db.execute(sql`SELECT league_id, user_id, display_name FROM league_users WHERE league_id IN (${inClause})`),
+  ]);
   const rosterIdMap = new Map<string, number>();
-  for (const r of rosterIdRows as unknown as RosterIdRow[]) {
+  for (const r of rosterIdRows as unknown as { league_id: string; owner_id: string; roster_id: number }[]) {
     rosterIdMap.set(`${r.league_id}:${r.owner_id}`, r.roster_id);
   }
-
-  // Get display names
-  const nameRows = await db.execute(sql`
-    SELECT league_id, user_id, display_name
-    FROM league_users
-    WHERE league_id IN (${inClause})
-  `);
-  type NameRow = { league_id: string; user_id: string; display_name: string | null };
   const nameMap = new Map<string, string>();
-  for (const r of nameRows as unknown as NameRow[]) {
+  for (const r of nameRows as unknown as { league_id: string; user_id: string; display_name: string | null }[]) {
     nameMap.set(`${r.league_id}:${r.user_id}`, r.display_name ?? r.user_id);
   }
 
@@ -159,7 +135,7 @@ export async function getPowerRankings(
     nested[r.league_id][r.owner_id].push(r);
   }
 
-  // Fetch roster_positions from Sleeper for SF detection + starter count
+  // Fetch league settings from Sleeper
   const leagueSettingsMap = new Map<string, { sf: boolean; starterSlots: number }>();
   await Promise.all(
     leagues.map(async (l) => {
@@ -171,11 +147,12 @@ export async function getPowerRankings(
             starterSlots: countStarterSlots(detail.roster_positions),
           });
         }
-      } catch {
-        // fallback handled below
-      }
+      } catch { /* fallback below */ }
     })
   );
+
+  // Collect all unique player IDs and get composite values
+  const allPlayerIds = [...new Set(rows.map((r) => r.player_id))];
 
   // Process each league
   const results: LeaguePowerRanking[] = [];
@@ -184,72 +161,75 @@ export async function getPowerRankings(
     const lid = league.league_id;
     const leagueTeams = nested[lid] ?? {};
     const settings = leagueSettingsMap.get(lid) ?? { sf: false, starterSlots: 9 };
+    const mode = settings.sf ? "sf" : "1qb";
+
+    // Get composite values for players in this league
+    const leaguePlayerIds = Object.values(leagueTeams).flat().map((p) => p.player_id);
+    const compositeMap = await getCompositeValues([...new Set(leaguePlayerIds)], mode);
 
     const rosterData = Object.entries(leagueTeams).map(([ownerId, players]) => {
-      const sorted = [...players].sort((a, b) => b.dynasty_value - a.dynasty_value);
+      // Attach composite value to each player
+      const withValue = players.map((p) => ({
+        ...p,
+        composite: compositeMap.get(p.player_id)?.composite_value ?? 0,
+        cv: compositeMap.get(p.player_id),
+      }));
+      const sorted = [...withValue].sort((a, b) => b.composite - a.composite);
 
-      // Starters value: top N by value
       const startersValue = sorted
         .slice(0, settings.starterSlots)
-        .reduce((s, p) => s + p.dynasty_value, 0);
+        .reduce((s, p) => s + p.composite, 0);
 
-      // Age curve for each player
       const withCurve = sorted.map((p) => ({
         ...p,
         age_curve: getAgeCurveStatus(p.position, p.age),
       }));
 
-      // Window core: top min(12, starterSlots + 3)
       const coreSize = Math.min(12, settings.starterSlots + 3);
       const corePlayers = withCurve.slice(0, coreSize);
-      const allPlayers = withCurve;
 
       const windowCoreRaw = computeWindowRaw(
-        corePlayers.map((p) => ({ value: p.dynasty_value, age_score: p.age_curve.score }))
+        corePlayers.map((p) => ({ value: p.composite, age_score: p.age_curve.score }))
       );
       const windowTotalRaw = computeWindowRaw(
-        allPlayers.map((p) => ({ value: p.dynasty_value, age_score: p.age_curve.score }))
+        withCurve.map((p) => ({ value: p.composite, age_score: p.age_curve.score }))
       );
-
       const coreCoverage = corePlayers.length > 0
-        ? (corePlayers.filter((p) => p.dynasty_value > 0).length / coreSize) * 100
-        : 0;
-      const totalCoverage = allPlayers.length > 0
-        ? (allPlayers.filter((p) => p.dynasty_value > 0).length / allPlayers.length) * 100
-        : 0;
+        ? (corePlayers.filter((p) => p.composite > 0).length / coreSize) * 100 : 0;
+      const totalCoverage = withCurve.length > 0
+        ? (withCurve.filter((p) => p.composite > 0).length / withCurve.length) * 100 : 0;
 
-      // Core assets: top 12
       const coreAssets: CoreAsset[] = withCurve.slice(0, 12).map((p) => ({
         player_id: p.player_id,
         full_name: p.full_name,
         position: p.position,
-        value: p.dynasty_value,
+        value: p.composite,
         age: p.age,
         age_curve: p.age_curve,
+        fc_value: p.cv?.fc_value ?? null,
+        ktc_value: p.cv?.ktc_value ?? null,
+        dp_value: p.cv?.dp_value ?? null,
+        sources_available: p.cv?.sources_available ?? 0,
+        source_agreement: p.cv?.source_agreement ?? "high",
       }));
 
-      return {
-        ownerId,
-        startersValue,
-        windowCoreRaw,
-        windowTotalRaw,
-        coreCoverage,
-        totalCoverage,
-        coreAssets,
-      };
+      const srcCounts = withCurve.map((p) => p.cv?.sources_available ?? 0);
+      const avgSources = srcCounts.length > 0
+        ? Math.round((srcCounts.reduce((s, v) => s + v, 0) / srcCounts.length) * 10) / 10 : 0;
+
+      return { ownerId, startersValue, windowCoreRaw, windowTotalRaw,
+        coreCoverage, totalCoverage, coreAssets, avgSources };
     });
 
-    // Compute percentiles across all rosters in this league
-    const allStartersValues = rosterData.map((r) => r.startersValue);
-    const allWindowCoreRaws = rosterData.map((r) => r.windowCoreRaw);
-    const allWindowTotalRaws = rosterData.map((r) => r.windowTotalRaw);
+    const allStarters = rosterData.map((r) => r.startersValue);
+    const allCoreRaws = rosterData.map((r) => r.windowCoreRaw);
+    const allTotalRaws = rosterData.map((r) => r.windowTotalRaw);
 
     const rosters: RosterRanking[] = rosterData.map((r) => {
-      const powerPct = percentileRank(allStartersValues, r.startersValue);
-      const windowCorePct = percentileRank(allWindowCoreRaws, r.windowCoreRaw);
-      const windowTotalPct = percentileRank(allWindowTotalRaws, r.windowTotalRaw);
-      const draftPct = 50; // placeholder
-
+      const powerPct = percentileRank(allStarters, r.startersValue);
+      const windowCorePct = percentileRank(allCoreRaws, r.windowCoreRaw);
+      const windowTotalPct = percentileRank(allTotalRaws, r.windowTotalRaw);
+      const draftPct = 50;
       const { archetype, reasons } = classifyTeam(powerPct, draftPct, windowCorePct);
 
       return {
@@ -259,34 +239,26 @@ export async function getPowerRankings(
         is_user: r.ownerId === userId,
         starters_value: r.startersValue,
         power_pct: Math.round(powerPct * 10) / 10,
-        draft_value: 0,
-        draft_pct: draftPct,
+        draft_value: 0, draft_pct: draftPct,
         window_core_raw: Math.round(r.windowCoreRaw * 10) / 10,
         window_core_pct: Math.round(windowCorePct * 10) / 10,
         window_total_raw: Math.round(r.windowTotalRaw * 10) / 10,
         window_total_pct: Math.round(windowTotalPct * 10) / 10,
         window_core_coverage_pct: Math.round(r.coreCoverage),
         window_total_coverage_pct: Math.round(r.totalCoverage),
-        archetype,
-        reasons,
+        archetype, reasons,
         core_assets: r.coreAssets,
+        avg_sources_available: r.avgSources,
       };
     });
 
-    // Sort by power_pct descending
     rosters.sort((a, b) => b.power_pct - a.power_pct);
-
     results.push({
-      league_id: lid,
-      league_name: league.league_name,
-      mode: settings.sf ? "sf" : "1qb",
-      draft_data_available: false,
-      rosters,
+      league_id: lid, league_name: league.league_name,
+      mode, draft_data_available: false, rosters,
     });
   }
 
-  // Sort leagues by name
   results.sort((a, b) => a.league_name.localeCompare(b.league_name));
-
   return results;
 }

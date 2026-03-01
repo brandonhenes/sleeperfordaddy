@@ -3,12 +3,23 @@ import { useParams } from "wouter";
 import AppShell from "../components/AppShell";
 import { StatCard } from "../components/ui";
 import AgeScaleBar from "../components/AgeScaleBar";
+import SourceBadge from "../components/SourceBadge";
 import { posColor } from "../lib/position-colors";
 import {
   usePowerRankings,
   type LeaguePowerRanking,
   type RosterRanking,
 } from "../hooks/use-power-rankings";
+
+// ─── Helpers ───
+
+function valueSources(league: LeaguePowerRanking): string {
+  const user = league.rosters.find((r) => r.is_user);
+  const avg = user?.avg_sources_available ?? 0;
+  if (avg >= 2.5) return "FC + KTC + DP";
+  if (avg >= 1.5) return "FC + partial";
+  return "FC only";
+}
 
 // ─── Archetype Badge ───
 
@@ -44,26 +55,14 @@ function ArchetypeBadge({ archetype }: { archetype: string }) {
 
 function PctBar({ label, value }: { label: string; value: number }) {
   const w = Math.max(2, Math.min(100, value));
-  const color =
-    value > 70 ? "var(--green)" : value > 40 ? "var(--amber)" : "var(--red)";
+  const color = value > 70 ? "var(--green)" : value > 40 ? "var(--amber)" : "var(--red)";
   return (
     <div style={{ flex: 1, minWidth: 70 }}>
-      <div style={{ fontSize: 9, color: "var(--text-muted)", marginBottom: 2 }}>
-        {label}
-      </div>
-      <div
-        style={{
-          background: "var(--dark-base)",
-          borderRadius: 4,
-          height: 6,
-          overflow: "hidden",
-        }}
-      >
+      <div style={{ fontSize: 9, color: "var(--text-muted)", marginBottom: 2 }}>{label}</div>
+      <div style={{ background: "var(--dark-base)", borderRadius: 4, height: 6, overflow: "hidden" }}>
         <div style={{ width: `${w}%`, height: "100%", background: color, borderRadius: 4 }} />
       </div>
-      <div className="font-mono" style={{ fontSize: 10, color: "var(--text-dim)", marginTop: 1 }}>
-        {Math.round(value)}%
-      </div>
+      <div className="font-mono" style={{ fontSize: 10, color: "var(--text-dim)", marginTop: 1 }}>{Math.round(value)}%</div>
     </div>
   );
 }
@@ -105,6 +104,10 @@ function CoreAssetsRow({ roster }: { roster: RosterRanking }) {
               {p.position}
             </span>
             <span style={{ flex: 1, fontWeight: 500 }}>{p.full_name}</span>
+            <SourceBadge
+              fc_value={p.fc_value} ktc_value={p.ktc_value} dp_value={p.dp_value}
+              sources_available={p.sources_available} source_agreement={p.source_agreement}
+            />
             <span
               className="font-mono"
               style={{ color: "var(--amber)", fontSize: 11, width: 50, textAlign: "right" }}
@@ -124,24 +127,11 @@ function CoreAssetsRow({ roster }: { roster: RosterRanking }) {
 function RosterRow({ roster, rank }: { roster: RosterRanking; rank: number }) {
   const [open, setOpen] = useState(false);
   const border = roster.is_user ? "2px solid var(--amber)" : "1px solid var(--border)";
-
+  const btnStyle = { width: "100%", display: "flex" as const, alignItems: "center" as const, gap: 12,
+    padding: "10px 14px", background: "none", border: "none", color: "var(--text)", cursor: "pointer" as const, fontFamily: "inherit" };
   return (
     <div style={{ border, borderRadius: 8, background: "var(--card)" }}>
-      <button
-        onClick={() => setOpen(!open)}
-        style={{
-          width: "100%",
-          display: "flex",
-          alignItems: "center",
-          gap: 12,
-          padding: "10px 14px",
-          background: "none",
-          border: "none",
-          color: "var(--text)",
-          cursor: "pointer",
-          fontFamily: "inherit",
-        }}
-      >
+      <button onClick={() => setOpen(!open)} style={btnStyle}>
         <span className="font-mono" style={{ width: 24, fontSize: 12, color: "var(--text-muted)" }}>
           #{rank}
         </span>
@@ -195,7 +185,7 @@ function LeagueCard({ league }: { league: LeaguePowerRanking }) {
         <div style={{ flex: 1, textAlign: "left" }}>
           <div style={{ fontWeight: 600, fontSize: 14 }}>{league.league_name}</div>
           <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
-            {league.rosters.length} teams · {league.mode.toUpperCase()}
+            {league.rosters.length} teams · {league.mode.toUpperCase()} · Values: {valueSources(league)}
           </span>
         </div>
         {userRoster && <ArchetypeBadge archetype={userRoster.archetype} />}
@@ -225,25 +215,16 @@ function LeagueCard({ league }: { league: LeaguePowerRanking }) {
 // ─── Summary ───
 
 function SummaryCards({ leagues }: { leagues: LeaguePowerRanking[] }) {
-  const userArchetypes = leagues
-    .map((l) => l.rosters.find((r) => r.is_user)?.archetype)
-    .filter(Boolean) as string[];
-
-  const juggernauts = userArchetypes.filter((a) => a === "Dynasty Juggernaut").length;
-  const deadZones = userArchetypes.filter((a) => a === "Dead Zone").length;
-
-  // Most common archetype
+  const archs = leagues.map((l) => l.rosters.find((r) => r.is_user)?.archetype).filter(Boolean) as string[];
   const counts: Record<string, number> = {};
-  for (const a of userArchetypes) counts[a] = (counts[a] ?? 0) + 1;
-  const mostCommon =
-    Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "—";
-
+  for (const a of archs) counts[a] = (counts[a] ?? 0) + 1;
+  const top = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "—";
   return (
     <div style={{ display: "flex", gap: 16, marginTop: 16, flexWrap: "wrap" }}>
       <StatCard label="Leagues Analyzed" value={leagues.length} />
-      <StatCard label="Juggernauts" value={juggernauts} accent="var(--amber)" />
-      <StatCard label="Dead Zones" value={deadZones} accent="var(--red)" />
-      <StatCard label="Most Common" value={mostCommon} accent="var(--blue)" />
+      <StatCard label="Juggernauts" value={counts["Dynasty Juggernaut"] ?? 0} accent="var(--amber)" />
+      <StatCard label="Dead Zones" value={counts["Dead Zone"] ?? 0} accent="var(--red)" />
+      <StatCard label="Most Common" value={top} accent="var(--blue)" />
     </div>
   );
 }
@@ -290,11 +271,7 @@ export default function PowerRankings() {
 
 // ─── Shared ───
 
-const skel = {
-  background: "var(--card)",
-  border: "1px solid var(--border)",
-  borderRadius: 10,
-} as const;
+const skel = { background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10 } as const;
 
 function LoadingSkeleton() {
   return (
@@ -303,21 +280,13 @@ function LoadingSkeleton() {
         <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>Power Rankings</h1>
       </div>
       <div style={{ display: "flex", gap: 16, marginTop: 16 }}>
-        {[1, 2, 3, 4].map((i) => (
-          <div key={i} className="animate-pulse" style={{ ...skel, flex: 1, minWidth: 120, height: 90 }} />
-        ))}
+        {[1, 2, 3, 4].map((i) => <div key={i} className="animate-pulse" style={{ ...skel, flex: 1, minWidth: 120, height: 90 }} />)}
       </div>
-      {[1, 2, 3].map((i) => (
-        <div key={i} className="animate-pulse" style={{ ...skel, height: 80, marginTop: 12 }} />
-      ))}
+      {[1, 2, 3].map((i) => <div key={i} className="animate-pulse" style={{ ...skel, height: 80, marginTop: 12 }} />)}
     </>
   );
 }
 
 function ErrorCard({ message }: { message: string }) {
-  return (
-    <div style={{ ...skel, padding: 40, textAlign: "center", color: "var(--red)" }}>
-      Error: {message}
-    </div>
-  );
+  return <div style={{ ...skel, padding: 40, textAlign: "center", color: "var(--red)" }}>Error: {message}</div>;
 }
