@@ -111,9 +111,9 @@ export async function getDashboard(
       LIMIT 4
     `),
 
-    // Leagues with roster record
+    // Leagues with roster record — most recent season per league name only
     db.execute(sql`
-      SELECT
+      SELECT DISTINCT ON (l.name)
         l.league_id, l.name, l.total_rosters,
         COALESCE(r.wins, 0)::int AS wins,
         COALESCE(r.losses, 0)::int AS losses,
@@ -123,7 +123,7 @@ export async function getDashboard(
       JOIN leagues l ON ul.league_id = l.league_id
       LEFT JOIN rosters r ON l.league_id = r.league_id AND r.owner_id = ${userId}
       WHERE ul.user_id = ${userId}
-      ORDER BY l.name ASC
+      ORDER BY l.name ASC, l.season DESC
     `),
   ]);
 
@@ -134,10 +134,15 @@ export async function getDashboard(
     open_recs: 0,
   };
 
+  const leagues = leagueRows as unknown as LeagueSummary[];
+
+  // Derive league_count from the deduplicated list so the stat card matches
+  stats.league_count = leagues.length;
+
   return {
     stats,
     top_recs: recRows as unknown as DashboardRec[],
     exposure_alerts: alertRows as unknown as ExposureAlert[],
-    leagues: leagueRows as unknown as LeagueSummary[],
+    leagues,
   };
 }
