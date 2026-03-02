@@ -32,11 +32,20 @@ export async function getFreeAgentGaps(username: string): Promise<ArbitrageGap[]
     WITH current_leagues AS (
       SELECT league_id FROM leagues WHERE season = (SELECT MAX(season) FROM leagues)
     ),
+    league_sync AS (
+      SELECT rp.league_id, COUNT(DISTINCT rp.owner_id) AS synced_owners
+      FROM roster_players rp
+      JOIN current_leagues cl ON rp.league_id = cl.league_id
+      GROUP BY rp.league_id
+    ),
     my_leagues AS (
       SELECT DISTINCT rp.league_id
       FROM roster_players rp
       JOIN current_leagues cl ON rp.league_id = cl.league_id
+      JOIN leagues l ON rp.league_id = l.league_id
+      JOIN league_sync ls ON rp.league_id = ls.league_id
       WHERE rp.owner_id = ${userId}
+        AND ls.synced_owners >= l.total_rosters
     ),
     my_players AS (
       SELECT DISTINCT rp.player_id
