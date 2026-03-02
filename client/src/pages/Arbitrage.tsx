@@ -1,33 +1,33 @@
 import { useState } from "react";
 import { useParams } from "wouter";
 import AppShell from "../components/AppShell";
-import { TrendArrow, PlayerLink } from "../components/ui";
+import { PlayerLink } from "../components/ui";
+import EdgeScoreBadge from "../components/EdgeScoreBadge";
 import { posColor } from "../lib/position-colors";
 import {
   useFreeAgentGaps,
   type ArbitrageGap,
-  type FreeAgentLeague,
 } from "../hooks/use-arbitrage";
 
-type SortKey = "gaps" | "value" | "owned";
+type SortKey = "score" | "free" | "owned";
 
 function sortLabel(k: SortKey): string {
-  if (k === "gaps") return "Free Agent Leagues";
-  if (k === "value") return "FC Value";
+  if (k === "score") return "Edge Score";
+  if (k === "free") return "Free Leagues";
   return "Owned Leagues";
 }
 
 function sorted(data: ArbitrageGap[], key: SortKey): ArbitrageGap[] {
   return [...data].sort((a, b) => {
-    if (key === "gaps") return b.free_agent_leagues.length - a.free_agent_leagues.length;
-    if (key === "value") return (b.dynasty_value ?? 0) - (a.dynasty_value ?? 0);
-    return b.owned_league_count - a.owned_league_count;
+    if (key === "score") return b.edge_score - a.edge_score;
+    if (key === "free") return b.free_count - a.free_count || b.edge_score - a.edge_score;
+    return b.owned_count - a.owned_count || b.edge_score - a.edge_score;
   });
 }
 
 // ─── League Badge ───
 
-function LeagueBadge({ league }: { league: FreeAgentLeague }) {
+function LeagueBadge({ league }: { league: { league_id: string; league_name: string } }) {
   return (
     <a
       href={`https://sleeper.com/leagues/${league.league_id}`}
@@ -73,44 +73,31 @@ function GapCard({ gap }: { gap: ArbitrageGap }) {
         gap: 10,
       }}
     >
-      {/* Row 1: name, pos, team, value, trend */}
+      {/* Row 1: score, name, pos, team */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-        <PlayerLink name={gap.player_name} style={{ fontSize: 15 }} />
-        {gap.position && (
-          <span style={{ fontSize: 12, fontWeight: 600, color: posColor(gap.position) }}>
-            {gap.position}
-          </span>
-        )}
+        <EdgeScoreBadge score={gap.edge_score} size="md" />
+        <PlayerLink name={gap.full_name} style={{ fontSize: 15 }} />
+        <span style={{ fontSize: 12, fontWeight: 600, color: posColor(gap.position) }}>
+          {gap.position}
+        </span>
         {gap.team && (
           <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{gap.team}</span>
         )}
-        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 12 }}>
-          {gap.dynasty_value != null && (
-            <span
-              className="font-mono"
-              style={{ fontSize: 14, fontWeight: 600, color: "var(--amber)" }}
-            >
-              {gap.dynasty_value.toLocaleString()}
-            </span>
-          )}
-          <TrendArrow value={gap.trend_30day} />
-        </div>
       </div>
 
       {/* Row 2: ownership summary */}
       <div style={{ display: "flex", alignItems: "center", gap: 16, fontSize: 13 }}>
         <span style={{ color: "var(--green)", fontWeight: 600 }}>
-          Owned in {gap.owned_league_count} league{gap.owned_league_count !== 1 ? "s" : ""}
+          Owned in {gap.owned_count} league{gap.owned_count !== 1 ? "s" : ""}
         </span>
         <span style={{ color: "var(--text-muted)" }}>
-          Free agent in {gap.free_agent_leagues.length} league
-          {gap.free_agent_leagues.length !== 1 ? "s" : ""}:
+          Free in {gap.free_count} league{gap.free_count !== 1 ? "s" : ""}:
         </span>
       </div>
 
-      {/* Row 3: league badges */}
+      {/* Row 3: free league badges */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-        {gap.free_agent_leagues.map((l) => (
+        {gap.free_leagues.map((l) => (
           <LeagueBadge key={l.league_id} league={l} />
         ))}
       </div>
@@ -120,7 +107,7 @@ function GapCard({ gap }: { gap: ArbitrageGap }) {
 
 // ─── Sort Toggle ───
 
-const SORT_OPTIONS: SortKey[] = ["gaps", "value", "owned"];
+const SORT_OPTIONS: SortKey[] = ["score", "free", "owned"];
 
 function SortBar({ active, onChange }: { active: SortKey; onChange: (k: SortKey) => void }) {
   return (
@@ -156,7 +143,7 @@ function SortBar({ active, onChange }: { active: SortKey; onChange: (k: SortKey)
 export default function Arbitrage() {
   const { username } = useParams<{ username: string }>();
   const { data, isLoading, error } = useFreeAgentGaps(username ?? "");
-  const [sortKey, setSortKey] = useState<SortKey>("gaps");
+  const [sortKey, setSortKey] = useState<SortKey>("score");
 
   if (isLoading) return <AppShell><LoadingSkeleton /></AppShell>;
 
@@ -187,7 +174,7 @@ export default function Arbitrage() {
           </div>
           <div style={{ display: "grid", gap: 12 }}>
             {gaps.map((g) => (
-              <GapCard key={g.player_name} gap={g} />
+              <GapCard key={g.player_id} gap={g} />
             ))}
           </div>
         </>

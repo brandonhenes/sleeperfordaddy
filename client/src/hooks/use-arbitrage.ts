@@ -1,20 +1,19 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "../lib/api";
 
-export interface FreeAgentLeague {
-  league_id: string;
-  league_name: string;
-}
-
 export interface ArbitrageGap {
-  player_name: string;
-  position: string | null;
+  player_id: string;
+  full_name: string;
+  position: string;
   team: string | null;
-  dynasty_value: number | null;
-  trend_30day: number | null;
-  owned_league_count: number;
-  total_league_count: number;
-  free_agent_leagues: FreeAgentLeague[];
+  edge_score: number;
+  fc_value: number | null;
+  ktc_value: number | null;
+  dp_value: number | null;
+  owned_leagues: { league_id: string; league_name: string }[];
+  free_leagues: { league_id: string; league_name: string }[];
+  owned_count: number;
+  free_count: number;
 }
 
 export function useFreeAgentGaps(username: string) {
