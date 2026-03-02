@@ -46,29 +46,49 @@ const ROUND_NAMES: Record<number, string> = {
   1: "1st", 2: "2nd", 3: "3rd", 4: "4th",
 };
 
-// ─── Build Item 1: Fetch Draft Picks from Sleeper ───
+// ─── Build Item 1: Build Complete Draft Pick Inventory ───
 
 export async function getLeagueDraftPicks(
-  leagueId: string
+  leagueId: string,
+  totalRosters: number,
+  draftRounds: number
 ): Promise<DraftPick[]> {
   const raw = await jget<SleeperTradedPick[]>(
     `/league/${leagueId}/traded_picks`
   );
-  if (!raw) return [];
 
   const currentYear = new Date().getFullYear();
+  const seasons = [currentYear, currentYear + 1, currentYear + 2];
 
-  return raw
-    .filter((p) => {
-      const season = parseInt(p.season, 10);
-      return season >= currentYear && season <= currentYear + 3;
-    })
-    .map((p) => ({
-      season: p.season,
-      round: p.round,
-      roster_id: p.owner_id,            // current owner
-      original_owner_id: p.roster_id,   // whose draft slot
-    }));
+  // Default: every roster owns their own pick for each round/season
+  const picks = new Map<string, DraftPick>();
+  for (const season of seasons) {
+    for (let round = 1; round <= draftRounds; round++) {
+      for (let rid = 1; rid <= totalRosters; rid++) {
+        picks.set(`${season}|${round}|${rid}`, {
+          season: String(season),
+          round,
+          roster_id: rid,
+          original_owner_id: rid,
+        });
+      }
+    }
+  }
+
+  // Apply trades: transfer ownership
+  if (raw) {
+    for (const t of raw) {
+      const season = parseInt(t.season, 10);
+      if (season < currentYear || season > currentYear + 2) continue;
+      const key = `${t.season}|${t.round}|${t.roster_id}`;
+      const pick = picks.get(key);
+      if (pick) {
+        pick.roster_id = t.owner_id; // current owner
+      }
+    }
+  }
+
+  return [...picks.values()];
 }
 
 // ─── Build Item 2: Estimate Pick Tiers ───

@@ -131,13 +131,16 @@ export async function getPowerRankings(username: string): Promise<LeaguePowerRan
   const nested: Record<string, Record<string, RR[]>> = {};
   for (const r of rows) { nested[r.league_id] ??= {}; nested[r.league_id][r.owner_id] ??= []; nested[r.league_id][r.owner_id].push(r); }
 
-  // Fetch league settings AND draft picks in parallel (spec rule #3)
+  // Fetch league settings, then draft picks (picks need roster/round counts)
   const settingsMap = new Map<string, { sf: boolean; slots: number }>();
   const dpMap = new Map<string, DraftPick[]>();
   await Promise.all(leagues.map(async (l) => {
     try {
-      const [detail, picks] = await Promise.all([getLeague(l.league_id), getLeagueDraftPicks(l.league_id)]);
+      const detail = await getLeague(l.league_id);
       if (detail?.roster_positions) settingsMap.set(l.league_id, { sf: detectSF(detail.roster_positions), slots: countStarterSlots(detail.roster_positions) });
+      const totalRosters = detail?.total_rosters ?? l.total_rosters;
+      const draftRounds = Number(detail?.settings?.draft_rounds) || 4;
+      const picks = await getLeagueDraftPicks(l.league_id, totalRosters, draftRounds);
       dpMap.set(l.league_id, picks);
     } catch { /* fallback */ }
   }));
