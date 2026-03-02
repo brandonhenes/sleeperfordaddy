@@ -1,7 +1,6 @@
 import { useState, useMemo } from "react";
 import { useParams } from "wouter";
 import AppShell from "../components/AppShell";
-import { StatCard } from "../components/ui";
 import EdgeScoreBadge from "../components/EdgeScoreBadge";
 import { posColor } from "../lib/position-colors";
 import {
@@ -81,9 +80,81 @@ function SignalCard({ sig }: { sig: MarketSignal }) {
   );
 }
 
+// ─── Clickable Stat Card ───
+
+function ClickableStatCard({ label, value, accent, active, onClick }: {
+  label: string; value: number; accent: string; active: boolean; onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        background: "var(--card)",
+        border: active ? `2px solid ${accent}` : "1px solid var(--border)",
+        borderRadius: 10, padding: "20px 24px", flex: 1, minWidth: 140,
+        cursor: "pointer", textAlign: "left", fontFamily: "inherit",
+        outline: active ? `1px solid ${accent}` : "none",
+      }}
+    >
+      <div className="label" style={{ marginBottom: 8 }}>{label}</div>
+      <div className="font-mono" style={{ fontSize: 28, fontWeight: 800, color: accent }}>{value}</div>
+    </button>
+  );
+}
+
+// ─── Signal Explainer ───
+
+const SIGNAL_EXPLAINERS: { key: string; label: string; color: string; text: string }[] = [
+  { key: "SMART_MONEY_BUY", label: "Smart Money Buy", color: "#16a34a",
+    text: "Real trade values (FantasyCalc) are significantly higher than crowd sentiment (KTC). Managers are actually paying more for this player than the community thinks they're worth. The crowd tends to catch up to real trade data over time. Consider buying before they do." },
+  { key: "HYPE_SELL", label: "Hype Sell", color: "#dc2626",
+    text: "Crowd sentiment (KTC) is significantly higher than real trade values (FantasyCalc). The community thinks this player is worth more than what managers are actually paying in trades. Sell into the hype before real values pull crowd sentiment down." },
+  { key: "EXPERT_BUY", label: "Expert Buy", color: "#7c3aed",
+    text: "Top analyst rankings (FP-Elite) are significantly higher than crowd sentiment (KTC). The best analysts see something the average dynasty manager doesn't. Expert consensus tends to predict future value shifts. Buy before the crowd catches on." },
+  { key: "EXPERT_FADE", label: "Expert Fade", color: "#ea580c",
+    text: "Top analyst rankings (FP-Elite) are significantly lower than crowd sentiment and trade values. The experts are fading this player while the market still values them highly. Consider selling before the market follows the expert view." },
+  { key: "CONSENSUS_LOCK", label: "Locked Value", color: "#64748b",
+    text: "All sources agree within a few points. This player is fairly priced by everyone. Don't overpay in trades and don't sell cheap. Focus your trade energy on disagreement players where you can find value." },
+];
+
+function SignalExplainer() {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ marginTop: 16 }}>
+      <button
+        onClick={() => setOpen(!open)}
+        style={{
+          background: "none", border: "none", cursor: "pointer", fontFamily: "inherit",
+          color: "var(--text-dim)", fontSize: 12, fontWeight: 600, padding: 0,
+          display: "flex", alignItems: "center", gap: 6,
+        }}
+      >
+        <span>{open ? "\u25BC" : "\u25B6"}</span>
+        What do these signals mean?
+      </button>
+      {open && (
+        <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: 16, marginTop: 10, display: "flex", flexDirection: "column", gap: 12 }}>
+          {SIGNAL_EXPLAINERS.map((s) => (
+            <div key={s.key} style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+              <span className="font-mono" style={{
+                background: s.color, color: "#fff", padding: "2px 8px",
+                borderRadius: 4, fontSize: 10, fontWeight: 700, whiteSpace: "nowrap", marginTop: 2,
+              }}>
+                {s.label}
+              </span>
+              <span style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.6 }}>{s.text}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Filters ───
 
 type FilterType = "all" | "buys" | "sells" | "locked" | "mine";
+type SignalFilter = SignalType | null;
 type SortType = "strength" | "edge" | "name";
 
 // ─── Page ───
@@ -91,18 +162,41 @@ type SortType = "strength" | "edge" | "name";
 export default function MarketSignals() {
   const { username } = useParams<{ username: string }>();
   const [filter, setFilter] = useState<FilterType>("all");
+  const [signalFilter, setSignalFilter] = useState<SignalFilter>(null);
   const [sort, setSort] = useState<SortType>("strength");
 
   const isMine = filter === "mine";
   const { data, isLoading, error } = useMarketSignals(isMine ? username : undefined);
 
+  // When a stat card is clicked, clear the filter-bar filter and set signal-type filter (or toggle off)
+  function handleStatClick(signal: SignalType) {
+    if (signalFilter === signal) {
+      setSignalFilter(null);
+    } else {
+      setSignalFilter(signal);
+      setFilter("all");
+    }
+  }
+
+  // When a filter-bar button is clicked, clear any stat-card filter
+  function handleFilterClick(f: FilterType) {
+    setFilter(f);
+    setSignalFilter(null);
+  }
+
   const signals = useMemo(() => {
     let items = data ?? [];
 
-    // Filter by signal type
-    if (filter === "buys") items = items.filter((s) => s.action === "BUY");
-    else if (filter === "sells") items = items.filter((s) => s.action === "SELL");
-    else if (filter === "locked") items = items.filter((s) => s.signal === "CONSENSUS_LOCK");
+    // Direct signal-type filter from stat cards takes priority
+    if (signalFilter) {
+      items = items.filter((s) => s.signal === signalFilter);
+    } else if (filter === "buys") {
+      items = items.filter((s) => s.action === "BUY");
+    } else if (filter === "sells") {
+      items = items.filter((s) => s.action === "SELL");
+    } else if (filter === "locked") {
+      items = items.filter((s) => s.signal === "CONSENSUS_LOCK");
+    }
 
     // Sort
     if (sort === "edge") items = [...items].sort((a, b) => b.edge_score - a.edge_score);
@@ -110,7 +204,7 @@ export default function MarketSignals() {
     // default "strength" is already sorted from API
 
     return items;
-  }, [data, filter, sort]);
+  }, [data, filter, signalFilter, sort]);
 
   // Summary counts
   const counts = useMemo(() => {
@@ -138,34 +232,40 @@ export default function MarketSignals() {
         <ErrorCard message={(error as Error).message} />
       ) : (
         <>
-          {/* Stat Cards */}
+          {/* Stat Cards — clickable to filter */}
           <div style={{ display: "flex", gap: 16, marginTop: 16, flexWrap: "wrap" }}>
-            <StatCard label="Smart Money Buys" value={counts.smartMoney} accent="#16a34a" />
-            <StatCard label="Hype Sells" value={counts.hype} accent="#dc2626" />
-            <StatCard label="Expert Buys" value={counts.expert} accent="#7c3aed" />
-            <StatCard label="Locked Values" value={counts.locked} accent="#64748b" />
+            <ClickableStatCard label="Smart Money Buys" value={counts.smartMoney} accent="#16a34a" active={signalFilter === "SMART_MONEY_BUY"} onClick={() => handleStatClick("SMART_MONEY_BUY")} />
+            <ClickableStatCard label="Hype Sells" value={counts.hype} accent="#dc2626" active={signalFilter === "HYPE_SELL"} onClick={() => handleStatClick("HYPE_SELL")} />
+            <ClickableStatCard label="Expert Buys" value={counts.expert} accent="#7c3aed" active={signalFilter === "EXPERT_BUY"} onClick={() => handleStatClick("EXPERT_BUY")} />
+            <ClickableStatCard label="Locked Values" value={counts.locked} accent="#64748b" active={signalFilter === "CONSENSUS_LOCK"} onClick={() => handleStatClick("CONSENSUS_LOCK")} />
           </div>
+
+          {/* Signal Explainer */}
+          <SignalExplainer />
 
           {/* Filter Bar */}
           <div style={{
             display: "flex", alignItems: "center", gap: 8, marginTop: 20,
             flexWrap: "wrap",
           }}>
-            {(["all", "buys", "sells", "locked", "mine"] as FilterType[]).map((f) => (
-              <button
-                key={f}
-                onClick={() => setFilter(f)}
-                style={{
-                  background: filter === f ? "var(--amber)" : "var(--card)",
-                  color: filter === f ? "var(--dark-base)" : "var(--text-muted)",
-                  border: "1px solid var(--border)", borderRadius: 6,
-                  padding: "6px 14px", fontSize: 12, fontWeight: 600,
-                  cursor: "pointer", fontFamily: "inherit",
-                }}
-              >
-                {f === "all" ? "All" : f === "buys" ? "Buys" : f === "sells" ? "Sells" : f === "locked" ? "Locked" : "My Players"}
-              </button>
-            ))}
+            {(["all", "buys", "sells", "locked", "mine"] as FilterType[]).map((f) => {
+              const isActive = filter === f && signalFilter === null;
+              return (
+                <button
+                  key={f}
+                  onClick={() => handleFilterClick(f)}
+                  style={{
+                    background: isActive ? "var(--amber)" : "var(--card)",
+                    color: isActive ? "var(--dark-base)" : "var(--text-muted)",
+                    border: "1px solid var(--border)", borderRadius: 6,
+                    padding: "6px 14px", fontSize: 12, fontWeight: 600,
+                    cursor: "pointer", fontFamily: "inherit",
+                  }}
+                >
+                  {f === "all" ? "All" : f === "buys" ? "Buys" : f === "sells" ? "Sells" : f === "locked" ? "Locked" : "My Players"}
+                </button>
+              );
+            })}
 
             <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
               <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Sort:</span>
