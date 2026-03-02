@@ -16,6 +16,12 @@ export interface Recommendation {
   confidence: number | null;
 }
 
+export interface ProspectComp {
+  comp: string;
+  date: string;
+  source: string;
+}
+
 export interface Prospect {
   player_name: string;
   position: string | null;
@@ -23,11 +29,24 @@ export interface Prospect {
   tier: string | null;
   fantasypros_rank: number | null;
   consensus_comp: string | null;
+  all_comps: ProspectComp[] | null;
   key_strengths: string[] | null;
+  key_concerns: string[] | null;
+  scouting_notes: string | null;
+  fp_scouting_notes: string | null;
   total_mentions: number | null;
   last_update_summary: string | null;
   age: number | null;
   notes: string | null;
+  height: string | null;
+  weight: string | null;
+  draft_capital: string | null;
+  landing_spot: string | null;
+  current_adp: string | null;
+  combine_40: string | null;
+  combine_vertical: string | null;
+  combine_shuttle: string | null;
+  combine_bench: string | null;
 }
 
 export interface Mover {
@@ -83,9 +102,22 @@ export async function getProspects(): Promise<Prospect[]> {
       p26.age,
       p26.notes,
       pp.consensus_comp,
+      pp.all_comps,
       pp.key_strengths,
+      pp.key_concerns,
+      pp.scouting_notes,
+      pp.fp_scouting_notes,
       pp.total_mentions,
-      pp.last_update_summary
+      pp.last_update_summary,
+      pp.height,
+      pp.weight,
+      pp.draft_capital,
+      pp.landing_spot,
+      pp.current_adp,
+      pp.combine_40,
+      pp.combine_vertical,
+      pp.combine_shuttle,
+      pp.combine_bench
     FROM prospects_2026 p26
     LEFT JOIN prospect_profiles pp
       ON LOWER(p26.player_name) = LOWER(pp.player_name)

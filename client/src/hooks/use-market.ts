@@ -16,6 +16,12 @@ export interface Recommendation {
   confidence: number | null;
 }
 
+export interface ProspectComp {
+  comp: string;
+  date: string;
+  source: string;
+}
+
 export interface Prospect {
   player_name: string;
   position: string | null;
@@ -23,11 +29,24 @@ export interface Prospect {
   tier: string | null;
   fantasypros_rank: number | null;
   consensus_comp: string | null;
+  all_comps: ProspectComp[] | null;
   key_strengths: string[] | null;
+  key_concerns: string[] | null;
+  scouting_notes: string | null;
+  fp_scouting_notes: string | null;
   total_mentions: number | null;
   last_update_summary: string | null;
   age: number | null;
   notes: string | null;
+  height: string | null;
+  weight: string | null;
+  draft_capital: string | null;
+  landing_spot: string | null;
+  current_adp: string | null;
+  combine_40: string | null;
+  combine_vertical: string | null;
+  combine_shuttle: string | null;
+  combine_bench: string | null;
 }
 
 export interface Mover {
