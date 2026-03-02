@@ -90,6 +90,8 @@ export interface SleeperDraft {
   season: string;
   settings: Record<string, unknown>;
   metadata?: Record<string, unknown>;
+  draft_order?: Record<string, number> | null;
+  slot_to_roster_id?: Record<string, number> | null;
 }
 
 export interface SleeperDraftPick {

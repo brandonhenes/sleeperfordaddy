@@ -6,7 +6,7 @@ import { classifyTeam, percentileRank } from "./archetypes.js";
 import { getCompositeValues } from "./composite-values.js";
 import { computeEdgeScores } from "./edge-score.js";
 import {
-  getLeagueDraftPicks, estimatePickTiers, scoreDraftPicks,
+  getLeagueDraftPicks, getRookieDraftOrder, estimatePickTiers, scoreDraftPicks,
   type ScoredPick, type DraftPick,
 } from "./draft-picks.js";
 
@@ -131,13 +131,18 @@ export async function getPowerRankings(username: string): Promise<LeaguePowerRan
   const nested: Record<string, Record<string, RR[]>> = {};
   for (const r of rows) { nested[r.league_id] ??= {}; nested[r.league_id][r.owner_id] ??= []; nested[r.league_id][r.owner_id].push(r); }
 
-  // Fetch league settings, then draft picks (picks need roster/round counts)
+  // Fetch league settings, draft picks, and draft order
   const settingsMap = new Map<string, { sf: boolean; slots: number }>();
   const dpMap = new Map<string, DraftPick[]>();
+  const draftOrderMap = new Map<string, Map<string, number>>(); // league_id → user_id → position
   await Promise.all(leagues.map(async (l) => {
     try {
-      const detail = await getLeague(l.league_id);
+      const [detail, draftOrder] = await Promise.all([
+        getLeague(l.league_id),
+        getRookieDraftOrder(l.league_id),
+      ]);
       if (detail?.roster_positions) settingsMap.set(l.league_id, { sf: detectSF(detail.roster_positions), slots: countStarterSlots(detail.roster_positions) });
+      if (draftOrder) draftOrderMap.set(l.league_id, draftOrder);
       const totalRosters = detail?.total_rosters ?? l.total_rosters;
       const draftRounds = Number(detail?.settings?.draft_rounds) || 4;
       const picks = await getLeagueDraftPicks(l.league_id, totalRosters, draftRounds);
@@ -168,7 +173,19 @@ export async function getPowerRankings(username: string): Promise<LeaguePowerRan
     for (const r of initSV) rPower.set(ridMap.get(`${lid}:${r.oid}`) ?? 0, percentileRank(allInit, r.sv));
 
     // Step 3: Draft picks — tiers, values, combined scoring
-    const tiered = estimatePickTiers(dpMap.get(lid) ?? [], rPower);
+    // Build roster_id → draft position from draft_order (user_id → position)
+    let rosterDraftOrder: Map<number, number> | undefined;
+    const userDraftOrder = draftOrderMap.get(lid);
+    if (userDraftOrder) {
+      rosterDraftOrder = new Map();
+      for (const [oid] of owners) {
+        const rid = ridMap.get(`${lid}:${oid}`) ?? 0;
+        const pos = userDraftOrder.get(oid);
+        if (rid && pos != null) rosterDraftOrder.set(rid, pos);
+      }
+    }
+
+    const tiered = estimatePickTiers(dpMap.get(lid) ?? [], rPower, rosterDraftOrder);
     const valued = await scoreDraftPicks(tiered, mode);
 
     const pInputs = [...compMap.values()].map((c) => ({
@@ -189,9 +206,12 @@ export async function getPowerRankings(username: string): Promise<LeaguePowerRan
       if (e) { p.edge_score = e.score; p.ktc_score = e.ktc_score; p.dp_score = e.dp_score; }
     }
 
-    // Group picks by owner roster_id
+    // Group picks by owner roster_id, filter out zero-value picks
     const picksByRid = new Map<number, ScoredPick[]>();
-    for (const p of valued) { const a = picksByRid.get(p.roster_id) ?? []; a.push(p); picksByRid.set(p.roster_id, a); }
+    for (const p of valued) {
+      if (p.edge_score <= 0) continue;
+      const a = picksByRid.get(p.roster_id) ?? []; a.push(p); picksByRid.set(p.roster_id, a);
+    }
 
     // Step 4: Build roster data
     const rosterData = owners.map(([oid, players]) => {

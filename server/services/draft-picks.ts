@@ -1,4 +1,5 @@
 import { jget } from "../sleeper/client.js";
+import { getLeagueDrafts } from "../sleeper/drafts.js";
 import { db } from "../db/connection.js";
 import { sql } from "drizzle-orm";
 
@@ -46,6 +47,8 @@ const ROUND_NAMES: Record<number, string> = {
   1: "1st", 2: "2nd", 3: "3rd", 4: "4th",
 };
 
+const MAX_ROUNDS = 4;
+
 // ─── Build Item 1: Build Complete Draft Pick Inventory ───
 
 export async function getLeagueDraftPicks(
@@ -57,13 +60,14 @@ export async function getLeagueDraftPicks(
     `/league/${leagueId}/traded_picks`
   );
 
+  const rounds = Math.min(draftRounds, MAX_ROUNDS);
   const currentYear = new Date().getFullYear();
   const seasons = [currentYear, currentYear + 1, currentYear + 2];
 
   // Default: every roster owns their own pick for each round/season
   const picks = new Map<string, DraftPick>();
   for (const season of seasons) {
-    for (let round = 1; round <= draftRounds; round++) {
+    for (let round = 1; round <= rounds; round++) {
       for (let rid = 1; rid <= totalRosters; rid++) {
         picks.set(`${season}|${round}|${rid}`, {
           season: String(season),
@@ -91,15 +95,65 @@ export async function getLeagueDraftPicks(
   return [...picks.values()];
 }
 
-// ─── Build Item 2: Estimate Pick Tiers ───
+// ─── Build Item 1b: Fetch Rookie Draft Order ───
 
+/**
+ * Fetches the current-year rookie draft order for a league.
+ * Returns a Map of user_id → pick_position (1-based), or null if unavailable.
+ */
+export async function getRookieDraftOrder(
+  leagueId: string
+): Promise<Map<string, number> | null> {
+  const drafts = await getLeagueDrafts(leagueId);
+  const currentYear = String(new Date().getFullYear());
+
+  // Find the rookie draft: current season, not complete, ≤ 5 rounds
+  const rookieDraft = drafts.find(
+    (d) =>
+      d.season === currentYear &&
+      d.status !== "complete" &&
+      Number(d.settings?.rounds ?? 99) <= 5
+  );
+  if (!rookieDraft?.draft_order) return null;
+
+  const order = new Map<string, number>();
+  for (const [userId, pos] of Object.entries(rookieDraft.draft_order)) {
+    order.set(userId, pos as number);
+  }
+  return order;
+}
+
+// ─── Build Item 2: Classify Picks ───
+
+/**
+ * For current-year picks with known draft order: exact position label ("1.03").
+ * For future picks or unknown order: tier estimate label ("2027 Early 1st").
+ *
+ * @param draftOrder - Map of roster_id → pick_position (1-based) for current year.
+ */
 export function estimatePickTiers(
   picks: DraftPick[],
-  rosterPower: Map<number, number>
+  rosterPower: Map<number, number>,
+  draftOrder?: Map<number, number>
 ): TieredPick[] {
+  const currentYear = String(new Date().getFullYear());
+
   return picks.map((p) => {
+    const pos = draftOrder?.get(p.original_owner_id);
+
+    // Current year with known draft position → exact label
+    if (p.season === currentYear && pos != null) {
+      const tier = tierFromPosition(pos, draftOrder?.size ?? 12);
+      return {
+        ...p,
+        tier,
+        label: `${p.round}.${String(pos).padStart(2, "0")}`,
+      };
+    }
+
+    // Future years or unknown position → tier estimate
     const power = rosterPower.get(p.original_owner_id);
-    let tier: "early" | "mid" | "late" = "mid"; // default if unknown
+    let tier: "early" | "mid" | "late" = "mid";
     if (power != null) {
       if (power <= 33) tier = "early";
       else if (power > 66) tier = "late";
@@ -114,6 +168,17 @@ export function estimatePickTiers(
       label: `${p.season} ${tierLabel} ${roundName}`,
     };
   });
+}
+
+/** Derive tier from exact draft position for value matching. */
+function tierFromPosition(
+  pos: number,
+  leagueSize: number
+): "early" | "mid" | "late" {
+  const third = leagueSize / 3;
+  if (pos <= third) return "early";
+  if (pos > third * 2) return "late";
+  return "mid";
 }
 
 // ─── Build Item 3: Match Picks to Values ───
