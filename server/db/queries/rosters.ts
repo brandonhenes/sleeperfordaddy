@@ -57,6 +57,39 @@ export async function upsertRosterPlayers(
   await db.insert(roster_players).values(values).onConflictDoNothing();
 }
 
+/**
+ * Replace ALL roster players for a league in one shot.
+ * Deletes every existing row for the league, then batch-inserts all owners' players.
+ * Prevents partial data if one owner's insert fails mid-loop.
+ */
+export async function replaceAllLeagueRosters(
+  leagueId: string,
+  allPlayers: { owner_id: string; player_id: string }[]
+) {
+  // Wipe the entire league's roster_players
+  await db
+    .delete(roster_players)
+    .where(eq(roster_players.league_id, leagueId));
+
+  if (allPlayers.length === 0) return;
+
+  const now = Date.now();
+  const values = allPlayers.map((p) => ({
+    league_id: leagueId,
+    owner_id: p.owner_id,
+    player_id: p.player_id,
+    updated_at: now,
+  }));
+
+  // Batch in chunks of 500 to avoid query size limits
+  for (let i = 0; i < values.length; i += 500) {
+    await db
+      .insert(roster_players)
+      .values(values.slice(i, i + 500))
+      .onConflictDoNothing();
+  }
+}
+
 export async function getRostersForLeague(leagueId: string) {
   return db
     .select()

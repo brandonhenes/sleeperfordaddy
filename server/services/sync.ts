@@ -17,7 +17,7 @@ import {
   upsertUserLeague,
   upsertLeagueUser,
 } from "../db/queries/leagues.js";
-import { upsertRoster, upsertRosterPlayers } from "../db/queries/rosters.js";
+import { upsertRoster, replaceAllLeagueRosters } from "../db/queries/rosters.js";
 import { upsertTrade, upsertTradeAsset } from "../db/queries/trades.js";
 import { upsertH2H } from "../db/queries/h2h.js";
 import { bulkUpsertPlayers } from "../db/queries/players.js";
@@ -274,8 +274,10 @@ async function processLeague(league: SleeperLeague, userId: string) {
     });
   }
 
-  // Fetch and store rosters
+  // Fetch and store rosters — collect ALL data first, then batch write
   const rosterList = await getLeagueRosters(league.league_id);
+  const allPlayers: { owner_id: string; player_id: string }[] = [];
+
   for (const roster of rosterList) {
     if (!roster.owner_id) continue; // Skip orphan rosters
 
@@ -297,15 +299,14 @@ async function processLeague(league: SleeperLeague, userId: string) {
       fpts_against: fptsAgainst,
     });
 
-    // Store roster players
-    if (roster.players && roster.players.length > 0) {
-      await upsertRosterPlayers(
-        league.league_id,
-        roster.owner_id,
-        roster.players
-      );
+    // Collect players for batch insert
+    for (const pid of roster.players ?? []) {
+      allPlayers.push({ owner_id: roster.owner_id, player_id: pid });
     }
   }
+
+  // Single atomic replace: delete ALL league roster_players, then batch insert
+  await replaceAllLeagueRosters(league.league_id, allPlayers);
 
   // Fetch and store matchups (for H2H calculation)
   await processMatchups(league.league_id, userId, rosterList);
