@@ -2,7 +2,6 @@ import { useState, useMemo } from "react";
 import { useParams } from "wouter";
 import AppShell from "../components/AppShell";
 import { StatCard } from "../components/ui";
-import AgeScaleBar from "../components/AgeScaleBar";
 import SourceBadge from "../components/SourceBadge";
 import EdgeScoreBadge from "../components/EdgeScoreBadge";
 import { posColor } from "../lib/position-colors";
@@ -10,6 +9,7 @@ import {
   usePowerRankings,
   type LeaguePowerRanking,
   type RosterRanking,
+  type CoreAsset,
 } from "../hooks/use-power-rankings";
 
 // ─── Helpers ───
@@ -20,6 +20,20 @@ function valueSources(league: LeaguePowerRanking): string {
   if (avg >= 2.5) return "FC + KTC + DP";
   if (avg >= 1.5) return "FC + partial";
   return "FC only";
+}
+
+const ZONE_COLORS: Record<string, string> = {
+  Prime: "#f59e0b", Ascent: "#22c55e", Decline: "#f97316", Cliff: "#ef4444", Unknown: "#94a3b8",
+};
+
+function AgeLabel({ asset }: { asset: CoreAsset }) {
+  const ac = asset.age_curve;
+  if (ac.age == null) return <span style={{ fontSize: 10, color: "#94a3b8" }}>Age ?</span>;
+  return (
+    <span style={{ fontSize: 10, fontWeight: 600, color: ZONE_COLORS[ac.zone] ?? "#94a3b8", whiteSpace: "nowrap" }}>
+      {ac.age} · {ac.zone}
+    </span>
+  );
 }
 
 // ─── Archetype Badge ───
@@ -39,13 +53,7 @@ function ArchetypeBadge({ archetype }: { archetype: string }) {
   return (
     <span
       className={`${cls} font-mono`}
-      style={{
-        padding: "3px 10px",
-        borderRadius: 6,
-        fontSize: 11,
-        fontWeight: 700,
-        whiteSpace: "nowrap",
-      }}
+      style={{ padding: "3px 10px", borderRadius: 6, fontSize: 11, fontWeight: 700, whiteSpace: "nowrap" }}
     >
       {archetype}
     </span>
@@ -70,15 +78,21 @@ function PctBar({ label, value }: { label: string; value: number }) {
 
 // ─── Core Assets + Draft Capital Row ───
 
+const COLLAPSED_COUNT = 12;
+
 function ExpandedRosterView({ roster }: { roster: RosterRanking }) {
+  const [showAll, setShowAll] = useState(false);
   const picks = roster.draft_picks ?? [];
+  const total = roster.core_assets.length;
+  const visible = showAll ? roster.core_assets : roster.core_assets.slice(0, COLLAPSED_COUNT);
+
   return (
     <div style={{ background: "var(--dark-base)", borderRadius: 8, padding: "12px 16px", marginTop: 8 }}>
       <div style={{ fontSize: 10, color: "var(--text-muted)", marginBottom: 8, fontWeight: 600 }}>
-        CORE ASSETS
+        ROSTER ({total} players)
       </div>
       <div style={{ display: "grid", gap: 6 }}>
-        {roster.core_assets.map((p) => (
+        {visible.map((p) => (
           <div key={p.player_id} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12 }}>
             <span style={{ color: posColor(p.position), fontWeight: 700, fontSize: 10, width: 24 }}>
               {p.position}
@@ -89,10 +103,23 @@ function ExpandedRosterView({ roster }: { roster: RosterRanking }) {
               fc_score={p.fc_score} ktc_score={p.ktc_score} dp_score={p.dp_score}
               sources_available={p.sources_available} source_agreement={p.source_agreement}
             />
-            <AgeScaleBar ageCurve={p.age_curve} />
+            <AgeLabel asset={p} />
           </div>
         ))}
       </div>
+      {total > COLLAPSED_COUNT && (
+        <button
+          onClick={() => setShowAll(!showAll)}
+          style={{
+            display: "block", width: "100%", marginTop: 8, padding: "6px 0",
+            background: "none", border: "1px solid var(--border)", borderRadius: 6,
+            color: "var(--text-muted)", fontSize: 11, fontWeight: 600, cursor: "pointer",
+            fontFamily: "inherit",
+          }}
+        >
+          {showAll ? "Show top 12" : `Show all ${total} players`}
+        </button>
+      )}
       {picks.length > 0 && (
         <>
           <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 14, marginBottom: 8, fontWeight: 600 }}>
@@ -141,7 +168,7 @@ function RosterRow({ roster, rank }: { roster: RosterRanking; rank: number }) {
         <ArchetypeBadge archetype={roster.archetype} />
         <div style={{ display: "flex", gap: 8, marginLeft: 8 }}>
           <PctBar label="Power" value={roster.power_pct} />
-          <PctBar label="Window" value={roster.window_core_pct} />
+          <PctBar label="Window" value={roster.window_core_raw} />
           <PctBar label="Draft" value={roster.draft_pct} />
         </div>
         <span style={{ fontSize: 12, color: "var(--text-muted)", marginLeft: 4 }}>
@@ -180,7 +207,7 @@ function LeagueCard({ league }: { league: LeaguePowerRanking }) {
         {userRoster && (
           <div style={{ display: "flex", gap: 8, marginLeft: 8 }}>
             <PctBar label="Power" value={userRoster.power_pct} />
-            <PctBar label="Window" value={userRoster.window_core_pct} />
+            <PctBar label="Window" value={userRoster.window_core_raw} />
             <PctBar label="Draft" value={userRoster.draft_pct} />
           </div>
         )}

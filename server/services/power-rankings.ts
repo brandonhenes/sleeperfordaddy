@@ -202,7 +202,7 @@ export async function getPowerRankings(username: string): Promise<LeaguePowerRan
       const core = wc.slice(0, coreN);
       const wcr = computeWindowRaw(core.map((p) => ({ value: p.es, age_score: p.ac.score })));
       const wtr = computeWindowRaw(wc.map((p) => ({ value: p.es, age_score: p.ac.score })));
-      const coreAssets: CoreAsset[] = wc.slice(0, 12).map((p) => ({
+      const coreAssets: CoreAsset[] = wc.map((p) => ({
         player_id: p.player_id, full_name: p.full_name, position: p.position,
         edge_score: p.es, age: p.age, age_curve: p.ac,
         fc_value: p.cv?.fc_value ?? null, ktc_value: p.cv?.ktc_value ?? null, dp_value: p.cv?.dp_value ?? null,
