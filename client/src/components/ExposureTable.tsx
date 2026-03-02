@@ -1,129 +1,84 @@
 import type { PortfolioPlayer } from "../hooks/use-portfolio";
-import { Tag, TrendArrow, ExposureBar, PlayerLink } from "./ui";
+import { ExposureBar } from "./ui";
+import EdgeScoreBadge from "./EdgeScoreBadge";
 import { posColor } from "../lib/position-colors";
+
+const ZONE_COLORS: Record<string, string> = {
+  Prime: "#f59e0b", Ascent: "#22c55e", Decline: "#f97316", Cliff: "#ef4444",
+};
 
 interface ExposureTableProps {
   players: PortfolioPlayer[];
 }
 
-const COLUMNS = ["PLAYER", "POS", "TEAM", "LEAGUES", "EXPOSURE", "FC VALUE", "30D TREND"];
-const GRID = "2fr 60px 50px 80px 90px 80px 100px";
-
 export default function ExposureTable({ players }: ExposureTableProps) {
+  if (players.length === 0) {
+    return (
+      <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: 40, textAlign: "center", color: "var(--text-muted)" }}>
+        No player exposure data found
+      </div>
+    );
+  }
+
   return (
-    <div
-      style={{
-        background: "var(--card)",
-        border: "1px solid var(--border)",
-        borderRadius: 10,
-        overflow: "hidden",
-      }}
-    >
+    <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
       {/* Header */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: GRID,
-          padding: "12px 20px",
-          borderBottom: "1px solid var(--border)",
-          gap: 12,
-        }}
-      >
+      <div style={{ display: "grid", gridTemplateColumns: GRID, padding: "12px 16px", borderBottom: "1px solid var(--border)", gap: 8, alignItems: "center" }}>
         {COLUMNS.map((h) => (
-          <span
-            key={h}
-            style={{
-              fontSize: 10,
-              color: "var(--text-muted)",
-              fontWeight: 700,
-              letterSpacing: 1,
-            }}
-          >
-            {h}
-          </span>
+          <span key={h} style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 700, letterSpacing: 1 }}>{h}</span>
         ))}
       </div>
 
       {/* Rows */}
       {players.map((p) => (
-        <div
-          key={p.player_name}
-          style={{
-            display: "grid",
-            gridTemplateColumns: GRID,
-            padding: "12px 20px",
-            borderBottom: "1px solid rgba(51,65,85,0.13)",
-            gap: 12,
-            alignItems: "center",
-          }}
-        >
-          {/* PLAYER + Tag */}
+        <div key={p.player_id} style={{ display: "grid", gridTemplateColumns: GRID, padding: "10px 16px", borderBottom: "1px solid rgba(51,65,85,0.13)", gap: 8, alignItems: "center" }}>
+          {/* Player */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6, overflow: "hidden" }}>
+            <span style={{ fontWeight: 600, fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {p.full_name}
+            </span>
+          </div>
+
+          {/* Pos */}
+          <span style={{ color: posColor(p.position), fontWeight: 600, fontSize: 12 }}>{p.position}</span>
+
+          {/* Age */}
           <div>
-            <PlayerLink name={p.player_name} />
-            {p.composite_tag && (
-              <div style={{ marginTop: 2 }}>
-                <Tag tag={p.composite_tag} />
-              </div>
+            {p.age != null ? (
+              <span style={{ fontSize: 12, color: ZONE_COLORS[p.age_zone ?? ""] ?? "var(--text-dim)" }}>
+                {p.age}{p.age_zone ? ` · ${p.age_zone}` : ""}
+              </span>
+            ) : (
+              <span style={{ fontSize: 12, color: "var(--text-dim)" }}>—</span>
             )}
           </div>
 
-          {/* POS */}
-          <span
-            style={{
-              color: posColor(p.position || ""),
-              fontWeight: 600,
-              fontSize: 12,
-            }}
-          >
-            {p.position}
+          {/* Edge Score */}
+          <EdgeScoreBadge score={p.edge_score} />
+
+          {/* Sources */}
+          <div className="font-mono" style={{ display: "flex", gap: 6, fontSize: 11 }}>
+            {p.fc_score != null && <span style={{ color: "var(--amber)" }}>{p.fc_score}</span>}
+            {p.ktc_score != null && <span style={{ color: "#3b82f6" }}>{p.ktc_score}</span>}
+            {p.fp_score != null && <span style={{ color: "#7c3aed" }}>{p.fp_score}</span>}
+            {p.sources_available === 0 && <span style={{ color: "var(--text-dim)" }}>—</span>}
+          </div>
+
+          {/* Leagues */}
+          <span className="font-mono" style={{ fontSize: 12, fontWeight: 600 }}>
+            {p.leagues_owned}/{p.total_leagues}
           </span>
 
-          {/* TEAM */}
-          <span style={{ color: "var(--text-dim)", fontSize: 12 }}>
-            {p.team}
-          </span>
-
-          {/* LEAGUES */}
-          <span style={{ color: "var(--text)", fontWeight: 600 }}>
-            {p.league_count}/{p.total_leagues}
-          </span>
-
-          {/* EXPOSURE bar */}
-          <ExposureBar
-            leagueCount={p.league_count}
-            totalLeagues={p.total_leagues}
-          />
-
-          {/* FC VALUE */}
-          <span
-            className="font-mono"
-            style={{
-              color: "var(--text)",
-              fontWeight: 700,
-              fontSize: 13,
-            }}
-          >
-            {p.dynasty_value != null
-              ? p.dynasty_value.toLocaleString()
-              : "—"}
-          </span>
-
-          {/* 30D TREND */}
-          <TrendArrow value={p.trend_30day} />
+          {/* Exposure */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <ExposureBar leagueCount={p.leagues_owned} totalLeagues={p.total_leagues} showLabel={false} />
+            <span className="font-mono" style={{ fontSize: 11, color: "var(--text-dim)" }}>{p.pct}%</span>
+          </div>
         </div>
       ))}
-
-      {players.length === 0 && (
-        <div
-          style={{
-            padding: 40,
-            textAlign: "center",
-            color: "var(--text-muted)",
-          }}
-        >
-          No player exposure data found
-        </div>
-      )}
     </div>
   );
 }
+
+const COLUMNS = ["PLAYER", "POS", "AGE", "EDGE", "FC / KTC / FP", "LEAGUES", "EXPOSURE"];
+const GRID = "2fr 50px 90px 44px 110px 70px 100px";
