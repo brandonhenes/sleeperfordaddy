@@ -4,6 +4,7 @@ import { syncPlayerIdCrosswalk } from "../services/sync-crosswalk.js";
 import { syncKtcValues } from "../services/sync-ktc.js";
 import { syncDynastyProcessValues } from "../services/sync-dynastyprocess.js";
 import { syncFpEliteValues } from "../services/sync-fp-elite.js";
+import { snapshotEdgeScores } from "../services/snapshot-scores.js";
 
 const router = Router();
 
@@ -75,6 +76,17 @@ router.post("/api/admin/sync-values", async (_req, res) => {
     res.json({ crosswalk, ktc, fp });
   } catch (err) {
     console.error("[admin/sync-values] Error:", err);
+    res.status(500).json({ message: (err as Error).message ?? "Internal server error" });
+  }
+});
+
+/** POST /api/admin/snapshot-scores — Snapshot Edge Scores for history tracking */
+router.post("/api/admin/snapshot-scores", async (_req, res) => {
+  try {
+    const stats = await snapshotEdgeScores();
+    res.json(stats);
+  } catch (err) {
+    console.error("[admin/snapshot-scores] Error:", err);
     res.status(500).json({ message: (err as Error).message ?? "Internal server error" });
   }
 });

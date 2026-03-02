@@ -1,149 +1,240 @@
 import { db } from "../db/connection.js";
 import { sql } from "drizzle-orm";
+import { getPowerRankings, type LeaguePowerRanking } from "./power-rankings.js";
+import { getScoreMovers, type Mover } from "./snapshot-scores.js";
 
 // ─── Types ───
 
-export interface DashboardStats {
-  portfolio_value: number;
-  league_count: number;
-  unique_players: number;
-  open_recs: number;
-}
-
-export interface DashboardRec {
-  id: number;
-  player_name: string;
-  direction: string;
-  position: string | null;
-  team: string | null;
-  fc_at_rec: number | null;
-  current_value: number | null;
-  rationale: string | null;
-}
-
-export interface ExposureAlert {
-  player_name: string;
-  position: string | null;
-  team: string | null;
-  league_count: number;
-  total_leagues: number;
-  composite_tag: string | null;
-  dynasty_value: number | null;
-}
-
-export interface LeagueSummary {
-  league_id: string;
-  name: string;
-  total_rosters: number | null;
-  wins: number;
-  losses: number;
-  ties: number;
-  fpts: number;
+export interface SlotGradeInfo {
+  avg_score: number;
+  grade: "elite" | "strong" | "average" | "weak" | "hole";
 }
 
 export interface DashboardData {
-  stats: DashboardStats;
-  top_recs: DashboardRec[];
-  exposure_alerts: ExposureAlert[];
-  leagues: LeagueSummary[];
+  empire: {
+    total_leagues: number;
+    avg_starter_score: number;
+    archetypes: { name: string; count: number }[];
+    strongest_league: { name: string; avg_score: number };
+    weakest_league: { name: string; avg_score: number };
+  };
+  roster_holes: Array<{
+    league_name: string;
+    league_id: string;
+    slot_label: string;
+    player_name: string;
+    position: string;
+    edge_score: number;
+  }>;
+  source_movers: {
+    has_data: boolean;
+    risers: Array<Mover & { leagues_owned: number }>;
+    fallers: Array<Mover & { leagues_owned: number }>;
+  };
+  league_health: Array<{
+    league_name: string;
+    league_id: string;
+    archetype: string;
+    qb_grade: SlotGradeInfo;
+    rb_grade: SlotGradeInfo;
+    wr_grade: SlotGradeInfo;
+    te_grade: SlotGradeInfo;
+  }>;
+  exposure: Array<{
+    player_id: string;
+    full_name: string;
+    position: string;
+    edge_score: number;
+    leagues_owned: number;
+    total_leagues: number;
+    pct: number;
+  }>;
+  archetype_actions: Array<{
+    archetype: string;
+    strategy: string;
+    leagues: Array<{ name: string; league_id: string; avg_score: number }>;
+  }>;
 }
 
-/**
- * Combined dashboard payload — one call, all sections.
- */
-export async function getDashboard(
-  username: string
-): Promise<DashboardData | null> {
-  // Resolve user_id from username
-  const userRows = await db.execute(sql`
-    SELECT user_id FROM users WHERE LOWER(username) = LOWER(${username}) LIMIT 1
-  `);
-  const userId = (userRows as unknown as { user_id: string }[])[0]?.user_id;
-  if (!userId) return null;
+// ─── Archetype Strategies ───
 
-  // Run all queries in parallel
-  const [statsRows, recRows, alertRows, leagueRows] = await Promise.all([
-    // Stats: portfolio value + unique players from player_exposure, league count, open recs
-    db.execute(sql`
-      SELECT
-        COALESCE(SUM(fc.dynasty_value * pe.league_count), 0)::int AS portfolio_value,
-        COUNT(DISTINCT pe.player_name)::int AS unique_players,
-        MAX(pe.total_leagues)::int AS league_count,
-        (SELECT COUNT(*)::int FROM recommendations
-         WHERE rec_date = (SELECT MAX(rec_date) FROM recommendations)) AS open_recs
-      FROM player_exposure pe
-      LEFT JOIN fantasycalc_daily fc
-        ON LOWER(pe.player_name) = LOWER(fc.player_name)
-        AND fc.snapshot_date = (SELECT MAX(snapshot_date) FROM fantasycalc_daily)
-      WHERE LOWER(pe.username) = LOWER(${username})
-    `),
+const STRATEGIES: Record<string, string> = {
+  "Dynasty Juggernaut": "Maintain dominance. Don't overpay to improve marginal positions. Your depth is your edge.",
+  "All-In Contender": "Win now. You've sold future capital for present strength. Maximize this window.",
+  "Fragile Contender": "Aging core with current strength. Sell declining assets at peak value before the cliff.",
+  "Productive Struggle": "Smart rebuild in progress. Hold young assets and draft capital. Don't panic-buy veterans.",
+  "Rebuilder": "Full rebuild. Accumulate picks and young players. Trade any veteran with value for future assets.",
+  "Dead Zone": "Stuck in the middle. Pick a direction: either sell vets for picks or buy young talent to compete. Staying here is the worst outcome.",
+  "Competitor": "Solid middle of the pack. Look for small upgrades that push you into contention without mortgaging the future.",
+};
 
-    // Top 3 recommendations
-    db.execute(sql`
-      SELECT r.id, r.player_name, r.direction,
-             COALESCE(r.position, fc.position) AS position,
-             COALESCE(r.team, fc.team) AS team,
-             r.fc_at_rec, fc.dynasty_value::int AS current_value, r.rationale
-      FROM recommendations r
-      LEFT JOIN fantasycalc_daily fc
-        ON LOWER(r.player_name) = LOWER(fc.player_name)
-        AND fc.snapshot_date = (SELECT MAX(snapshot_date) FROM fantasycalc_daily)
-      WHERE r.rec_date = (SELECT MAX(rec_date) FROM recommendations)
-      ORDER BY r.confidence DESC NULLS LAST
-      LIMIT 3
-    `),
+function gradeFromAvg(avg: number): SlotGradeInfo["grade"] {
+  if (avg >= 88) return "elite";
+  if (avg >= 78) return "strong";
+  if (avg >= 68) return "average";
+  if (avg >= 55) return "weak";
+  return "hole";
+}
 
-    // Exposure alerts: players in 7+ leagues
-    db.execute(sql`
-      SELECT
-        pe.player_name, pe.position, pe.team,
-        pe.league_count::int AS league_count,
-        pe.total_leagues::int AS total_leagues,
-        pe.composite_tag,
-        fc.dynasty_value::int AS dynasty_value
-      FROM player_exposure pe
-      LEFT JOIN fantasycalc_daily fc
-        ON LOWER(pe.player_name) = LOWER(fc.player_name)
-        AND fc.snapshot_date = (SELECT MAX(snapshot_date) FROM fantasycalc_daily)
-      WHERE LOWER(pe.username) = LOWER(${username})
-        AND pe.league_count >= 7
-      ORDER BY pe.league_count DESC
-      LIMIT 4
-    `),
+function emptyGrade(): SlotGradeInfo {
+  return { avg_score: 0, grade: "hole" };
+}
 
-    // Leagues with roster record — current season only
-    db.execute(sql`
-      SELECT
-        l.league_id, l.name, l.total_rosters,
-        COALESCE(r.wins, 0)::int AS wins,
-        COALESCE(r.losses, 0)::int AS losses,
-        COALESCE(r.ties, 0)::int AS ties,
-        COALESCE(r.fpts, 0)::real AS fpts
-      FROM user_leagues ul
-      JOIN leagues l ON ul.league_id = l.league_id
-      LEFT JOIN rosters r ON l.league_id = r.league_id AND r.owner_id = ${userId}
-      WHERE ul.user_id = ${userId}
-        AND l.season = (SELECT MAX(season) FROM leagues)
-      ORDER BY l.name ASC
-    `),
-  ]);
+// ─── Main ───
 
-  const stats = (statsRows as unknown as DashboardStats[])[0] ?? {
-    portfolio_value: 0,
-    league_count: 0,
-    unique_players: 0,
-    open_recs: 0,
-  };
+export async function getDashboardData(username: string): Promise<DashboardData | null> {
+  const rankings = await getPowerRankings(username);
+  if (rankings.length === 0) return null;
 
-  const leagues = leagueRows as unknown as LeagueSummary[];
+  const totalLeagues = rankings.length;
 
-  // Derive league_count from the deduplicated list so the stat card matches
-  stats.league_count = leagues.length;
+  // Extract user roster from each league
+  const userRosters = rankings.map((l) => ({
+    league: l,
+    roster: l.rosters.find((r) => r.is_user),
+  })).filter((x): x is { league: LeaguePowerRanking; roster: NonNullable<typeof x.roster> } => x.roster != null);
+
+  // ─── Empire Overview ───
+  const avgScores = userRosters.map((x) => x.roster.avg_starter_score);
+  const avgStarterScore = avgScores.length > 0
+    ? Math.round((avgScores.reduce((a, v) => a + v, 0) / avgScores.length) * 10) / 10
+    : 0;
+
+  const archCounts = new Map<string, number>();
+  for (const x of userRosters) {
+    const a = x.roster.archetype;
+    archCounts.set(a, (archCounts.get(a) ?? 0) + 1);
+  }
+  const archetypes = [...archCounts.entries()]
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count);
+
+  let strongest = { name: "—", avg_score: 0 };
+  let weakest = { name: "—", avg_score: 999 };
+  for (const x of userRosters) {
+    if (x.roster.avg_starter_score > strongest.avg_score) {
+      strongest = { name: x.league.league_name, avg_score: x.roster.avg_starter_score };
+    }
+    if (x.roster.avg_starter_score < weakest.avg_score) {
+      weakest = { name: x.league.league_name, avg_score: x.roster.avg_starter_score };
+    }
+  }
+  if (userRosters.length === 0) weakest = { name: "—", avg_score: 0 };
+
+  // ─── Roster Holes ───
+  const holes: DashboardData["roster_holes"] = [];
+  for (const x of userRosters) {
+    const starters = x.roster.lineup?.starters ?? [];
+    for (const s of starters) {
+      holes.push({
+        league_name: x.league.league_name,
+        league_id: x.league.league_id,
+        slot_label: s.slot_label,
+        player_name: s.full_name,
+        position: s.position,
+        edge_score: s.edge_score,
+      });
+    }
+  }
+  holes.sort((a, b) => a.edge_score - b.edge_score);
+  const rosterHoles = holes.slice(0, 10);
+
+  // ─── Source Movers ───
+  // Collect all player IDs user owns across leagues
+  const ownedPlayerIds = new Set<string>();
+  const playerLeagueCount = new Map<string, number>();
+  const playerInfo = new Map<string, { full_name: string; position: string; edge_score: number }>();
+  for (const x of userRosters) {
+    for (const a of x.roster.core_assets) {
+      ownedPlayerIds.add(a.player_id);
+      playerLeagueCount.set(a.player_id, (playerLeagueCount.get(a.player_id) ?? 0) + 1);
+      if (!playerInfo.has(a.player_id) || a.edge_score > (playerInfo.get(a.player_id)!.edge_score)) {
+        playerInfo.set(a.player_id, { full_name: a.full_name, position: a.position, edge_score: a.edge_score });
+      }
+    }
+  }
+
+  const moversRaw = await getScoreMovers([...ownedPlayerIds]);
+  let sourceMovers: DashboardData["source_movers"];
+  if (!moversRaw) {
+    sourceMovers = { has_data: false, risers: [], fallers: [] };
+  } else {
+    sourceMovers = {
+      has_data: true,
+      risers: moversRaw.risers.map((m) => ({ ...m, leagues_owned: playerLeagueCount.get(m.player_id) ?? 0 })),
+      fallers: moversRaw.fallers.map((m) => ({ ...m, leagues_owned: playerLeagueCount.get(m.player_id) ?? 0 })),
+    };
+  }
+
+  // ─── League Health Heatmap ───
+  const leagueHealth: DashboardData["league_health"] = [];
+  for (const x of userRosters) {
+    const grades = x.roster.lineup?.slot_grades ?? [];
+    const gradeMap = new Map(grades.map((g) => [g.slot_label, g]));
+    const qb = gradeMap.get("QB");
+    const rb = gradeMap.get("RB");
+    const wr = gradeMap.get("WR");
+    const te = gradeMap.get("TE");
+    leagueHealth.push({
+      league_name: x.league.league_name,
+      league_id: x.league.league_id,
+      archetype: x.roster.archetype,
+      qb_grade: qb ? { avg_score: qb.avg_score, grade: qb.grade } : emptyGrade(),
+      rb_grade: rb ? { avg_score: rb.avg_score, grade: rb.grade } : emptyGrade(),
+      wr_grade: wr ? { avg_score: wr.avg_score, grade: wr.grade } : emptyGrade(),
+      te_grade: te ? { avg_score: te.avg_score, grade: te.grade } : emptyGrade(),
+    });
+  }
+  // Sort by average of all 4 grades descending
+  leagueHealth.sort((a, b) => {
+    const avgA = (a.qb_grade.avg_score + a.rb_grade.avg_score + a.wr_grade.avg_score + a.te_grade.avg_score) / 4;
+    const avgB = (b.qb_grade.avg_score + b.rb_grade.avg_score + b.wr_grade.avg_score + b.te_grade.avg_score) / 4;
+    return avgB - avgA;
+  });
+
+  // ─── Exposure Chart ───
+  const exposure: DashboardData["exposure"] = [];
+  for (const [pid, count] of playerLeagueCount) {
+    const info = playerInfo.get(pid);
+    if (!info) continue;
+    exposure.push({
+      player_id: pid,
+      full_name: info.full_name,
+      position: info.position,
+      edge_score: info.edge_score,
+      leagues_owned: count,
+      total_leagues: totalLeagues,
+      pct: Math.round((count / totalLeagues) * 100),
+    });
+  }
+  exposure.sort((a, b) => b.leagues_owned - a.leagues_owned || b.edge_score - a.edge_score);
+  const topExposure = exposure.slice(0, 20);
+
+  // ─── Archetype Actions ───
+  const archGroups = new Map<string, Array<{ name: string; league_id: string; avg_score: number }>>();
+  for (const x of userRosters) {
+    const a = x.roster.archetype;
+    const list = archGroups.get(a) ?? [];
+    list.push({ name: x.league.league_name, league_id: x.league.league_id, avg_score: x.roster.avg_starter_score });
+    archGroups.set(a, list);
+  }
+  const archetypeActions: DashboardData["archetype_actions"] = [];
+  for (const [archetype, leagues] of archGroups) {
+    archetypeActions.push({
+      archetype,
+      strategy: STRATEGIES[archetype] ?? "Evaluate your position and adjust strategy accordingly.",
+      leagues: leagues.sort((a, b) => b.avg_score - a.avg_score),
+    });
+  }
+  archetypeActions.sort((a, b) => b.leagues.length - a.leagues.length);
 
   return {
-    stats,
-    top_recs: recRows as unknown as DashboardRec[],
-    exposure_alerts: alertRows as unknown as ExposureAlert[],
-    leagues,
+    empire: { total_leagues: totalLeagues, avg_starter_score: avgStarterScore, archetypes, strongest_league: strongest, weakest_league: weakest },
+    roster_holes: rosterHoles,
+    source_movers: sourceMovers,
+    league_health: leagueHealth,
+    exposure: topExposure,
+    archetype_actions: archetypeActions,
   };
 }
+
