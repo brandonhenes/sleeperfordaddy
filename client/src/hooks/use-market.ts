@@ -12,6 +12,8 @@ export interface Recommendation {
   team: string | null;
   fc_at_rec: number | null;
   current_value: number | null;
+  ktc_value: number | null;
+  fp_value: number | null;
   rationale: string | null;
   confidence: number | null;
 }
@@ -55,6 +57,8 @@ export interface Mover {
   team: string | null;
   dynasty_value: number;
   delta: number;
+  ktc_value: number | null;
+  fp_value: number | null;
 }
 
 export interface MoversData {

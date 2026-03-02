@@ -57,32 +57,30 @@ function RecCard({ rec }: { rec: Recommendation }) {
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-        {rec.fc_at_rec != null && (
-          <span
-            className="font-mono"
-            style={{ fontSize: 14, fontWeight: 600, color: "var(--amber)" }}
-          >
-            {rec.fc_at_rec.toLocaleString()}
-          </span>
-        )}
+        <div className="font-mono" style={{ display: "flex", gap: 12, fontSize: 12 }}>
+          {rec.current_value != null && (
+            <span style={{ color: "var(--amber)" }}>
+              <span style={{ fontSize: 10, color: "var(--text-dim)" }}>FC </span>
+              {rec.current_value.toLocaleString()}
+            </span>
+          )}
+          {rec.ktc_value != null && (
+            <span style={{ color: "#3b82f6" }}>
+              <span style={{ fontSize: 10, color: "var(--text-dim)" }}>KTC </span>
+              {rec.ktc_value.toLocaleString()}
+            </span>
+          )}
+          {rec.fp_value != null && (
+            <span style={{ color: "#7c3aed" }}>
+              <span style={{ fontSize: 10, color: "var(--text-dim)" }}>FP </span>
+              {rec.fp_value.toLocaleString()}
+            </span>
+          )}
+        </div>
         {rec.confidence != null && (
           <div style={{ flex: 1, maxWidth: 120 }}>
-            <div
-              style={{
-                height: 4,
-                background: "var(--border)",
-                borderRadius: 2,
-                overflow: "hidden",
-              }}
-            >
-              <div
-                style={{
-                  width: `${rec.confidence}%`,
-                  height: "100%",
-                  background: dirColor(rec.direction),
-                  borderRadius: 2,
-                }}
-              />
+            <div style={{ height: 4, background: "var(--border)", borderRadius: 2, overflow: "hidden" }}>
+              <div style={{ width: `${rec.confidence}%`, height: "100%", background: dirColor(rec.direction), borderRadius: 2 }} />
             </div>
           </div>
         )}

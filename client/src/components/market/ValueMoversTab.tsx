@@ -33,17 +33,17 @@ function MoverRow({ mover, type }: { mover: Mover; type: "riser" | "faller" }) {
           </span>
         )}
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <span
-          className="font-mono"
-          style={{ fontSize: 13, color: "var(--text-dim)" }}
-        >
+      <div className="font-mono" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <span style={{ fontSize: 12, color: "var(--amber)" }}>
           {mover.dynasty_value.toLocaleString()}
         </span>
-        <span
-          className="font-mono"
-          style={{ fontSize: 13, fontWeight: 600, color, minWidth: 70, textAlign: "right" }}
-        >
+        {mover.ktc_value != null && (
+          <span style={{ fontSize: 11, color: "#3b82f6" }}>{mover.ktc_value.toLocaleString()}</span>
+        )}
+        {mover.fp_value != null && (
+          <span style={{ fontSize: 11, color: "#7c3aed" }}>{mover.fp_value.toLocaleString()}</span>
+        )}
+        <span style={{ fontSize: 13, fontWeight: 600, color, minWidth: 70, textAlign: "right" }}>
           {arrow} {Math.abs(mover.delta).toLocaleString()}
         </span>
       </div>

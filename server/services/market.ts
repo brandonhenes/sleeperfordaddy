@@ -12,6 +12,8 @@ export interface Recommendation {
   team: string | null;
   fc_at_rec: number | null;
   current_value: number | null;
+  ktc_value: number | null;
+  fp_value: number | null;
   rationale: string | null;
   confidence: number | null;
 }
@@ -55,6 +57,8 @@ export interface Mover {
   team: string | null;
   dynasty_value: number;
   delta: number;
+  ktc_value: number | null;
+  fp_value: number | null;
 }
 
 export interface MoversData {
@@ -81,11 +85,15 @@ export async function getRecommendations(): Promise<Recommendation[]> {
            COALESCE(r.position, fc.position) AS position,
            COALESCE(r.team, fc.team) AS team,
            r.fc_at_rec, fc.dynasty_value::int AS current_value,
+           ktc.value_sf::int AS ktc_value,
+           dp.value_2qb::int AS fp_value,
            r.rationale, r.confidence
     FROM recommendations r
     LEFT JOIN fantasycalc_daily fc
       ON LOWER(r.player_name) = LOWER(fc.player_name)
       AND fc.snapshot_date = (SELECT MAX(snapshot_date) FROM fantasycalc_daily)
+    LEFT JOIN ktc_values ktc ON LOWER(ktc.player_name) = LOWER(r.player_name)
+    LEFT JOIN dynastyprocess_values dp ON LOWER(dp.player_name) = LOWER(r.player_name)
     ORDER BY r.rec_date DESC, r.confidence DESC NULLS LAST
   `);
   return rows as unknown as Recommendation[];
@@ -143,9 +151,13 @@ export async function getMovers(days: number = 7): Promise<MoversData> {
     )
     SELECT t.player_name, t.position, t.team,
            t.dynasty_value::int AS dynasty_value,
-           (t.dynasty_value - p.dynasty_value)::int AS delta
+           (t.dynasty_value - p.dynasty_value)::int AS delta,
+           ktc.value_sf::int AS ktc_value,
+           dp.value_2qb::int AS fp_value
     FROM today t
     JOIN past p ON t.player_name = p.player_name
+    LEFT JOIN ktc_values ktc ON LOWER(ktc.player_name) = LOWER(t.player_name)
+    LEFT JOIN dynastyprocess_values dp ON LOWER(dp.player_name) = LOWER(t.player_name)
     WHERE ABS(t.dynasty_value - p.dynasty_value) > 50
     ORDER BY (t.dynasty_value - p.dynasty_value) DESC
   `);
