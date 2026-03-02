@@ -30,6 +30,20 @@ export interface CoreAsset {
   source_agreement: "high" | "medium" | "low";
 }
 
+export interface ScoredPick {
+  season: string;
+  round: number;
+  roster_id: number;
+  original_owner_id: number;
+  tier: "early" | "mid" | "late";
+  label: string;
+  ktc_value: number | null;
+  dp_value: number | null;
+  edge_score: number;
+  ktc_score: number | null;
+  dp_score: number | null;
+}
+
 export interface RosterRanking {
   roster_id: number;
   owner_id: string | null;
@@ -40,6 +54,7 @@ export interface RosterRanking {
   power_pct: number;
   draft_value: number;
   draft_pct: number;
+  draft_picks: ScoredPick[];
   window_core_raw: number;
   window_core_pct: number;
   window_total_raw: number;

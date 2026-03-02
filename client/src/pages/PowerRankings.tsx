@@ -68,9 +68,10 @@ function PctBar({ label, value }: { label: string; value: number }) {
   );
 }
 
-// ─── Core Assets Row ───
+// ─── Core Assets + Draft Capital Row ───
 
-function CoreAssetsRow({ roster }: { roster: RosterRanking }) {
+function ExpandedRosterView({ roster }: { roster: RosterRanking }) {
+  const picks = roster.draft_picks ?? [];
   return (
     <div style={{ background: "var(--dark-base)", borderRadius: 8, padding: "12px 16px", marginTop: 8 }}>
       <div style={{ fontSize: 10, color: "var(--text-muted)", marginBottom: 8, fontWeight: 600 }}>
@@ -92,6 +93,30 @@ function CoreAssetsRow({ roster }: { roster: RosterRanking }) {
           </div>
         ))}
       </div>
+      {picks.length > 0 && (
+        <>
+          <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 14, marginBottom: 8, fontWeight: 600 }}>
+            DRAFT CAPITAL
+          </div>
+          <div style={{ display: "grid", gap: 6 }}>
+            {picks.map((pk, i) => {
+              const src = [pk.ktc_score, pk.dp_score].filter((s): s is number => s != null).length;
+              const spread = pk.ktc_score != null && pk.dp_score != null ? Math.abs(pk.ktc_score - pk.dp_score) : 0;
+              const agr = spread < 5 ? "high" : spread <= 12 ? "medium" : "low" as const;
+              return (
+                <div key={`${pk.season}_${pk.round}_${pk.original_owner_id}_${i}`}
+                  style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12 }}>
+                  <span style={{ color: "#06b6d4", fontWeight: 700, fontSize: 10, width: 24 }}>PICK</span>
+                  <span style={{ flex: 1, fontWeight: 500 }}>{pk.label}</span>
+                  <EdgeScoreBadge score={pk.edge_score} size="sm" />
+                  <SourceBadge fc_score={null} ktc_score={pk.ktc_score} dp_score={pk.dp_score}
+                    sources_available={src} source_agreement={agr} maxSources={2} />
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -123,7 +148,7 @@ function RosterRow({ roster, rank }: { roster: RosterRanking; rank: number }) {
           {open ? "\u25B2" : "\u25BC"}
         </span>
       </button>
-      {open && <CoreAssetsRow roster={roster} />}
+      {open && <ExpandedRosterView roster={roster} />}
     </div>
   );
 }

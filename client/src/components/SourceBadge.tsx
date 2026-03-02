@@ -6,9 +6,10 @@ interface SourceBadgeProps {
   dp_score: number | null;
   sources_available: number;
   source_agreement: "high" | "medium" | "low";
+  maxSources?: number;
 }
 
-export default function SourceBadge({ fc_score, ktc_score, dp_score, sources_available, source_agreement }: SourceBadgeProps) {
+export default function SourceBadge({ fc_score, ktc_score, dp_score, sources_available, source_agreement, maxSources = 3 }: SourceBadgeProps) {
   const [showDetail, setShowDetail] = useState(false);
   const n = sources_available;
   const color = n >= 3 ? "var(--green)" : n === 2 ? "var(--amber)" : "var(--text-muted)";
@@ -24,7 +25,7 @@ export default function SourceBadge({ fc_score, ktc_score, dp_score, sources_ava
           display: "flex", alignItems: "center", gap: 2,
         }}
       >
-        {n}/3{warn && <span style={{ color: "var(--red)", marginLeft: 2 }}>!</span>}
+        {n}/{maxSources}{warn && <span style={{ color: "var(--red)", marginLeft: 2 }}>!</span>}
       </button>
       {showDetail && (
         <div style={{
