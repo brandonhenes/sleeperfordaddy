@@ -111,9 +111,9 @@ export async function getDashboard(
       LIMIT 4
     `),
 
-    // Leagues with roster record — most recent season per league name only
+    // Leagues with roster record — current season only
     db.execute(sql`
-      SELECT DISTINCT ON (l.name)
+      SELECT
         l.league_id, l.name, l.total_rosters,
         COALESCE(r.wins, 0)::int AS wins,
         COALESCE(r.losses, 0)::int AS losses,
@@ -123,7 +123,8 @@ export async function getDashboard(
       JOIN leagues l ON ul.league_id = l.league_id
       LEFT JOIN rosters r ON l.league_id = r.league_id AND r.owner_id = ${userId}
       WHERE ul.user_id = ${userId}
-      ORDER BY l.name ASC, l.season DESC
+        AND l.season = (SELECT MAX(season) FROM leagues)
+      ORDER BY l.name ASC
     `),
   ]);
 

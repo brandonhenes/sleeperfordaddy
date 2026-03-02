@@ -84,13 +84,14 @@ export async function getPlayerDetail(
         ORDER BY snapshot_date ASC
       `),
 
-      // Ownership: leagues where user owns this player
+      // Ownership: leagues where user owns this player (current season)
       userId
         ? db.execute(sql`
             SELECT l.name AS league_name, l.league_id
             FROM roster_players rp
             JOIN leagues l ON rp.league_id = l.league_id
             WHERE rp.owner_id = ${userId}
+              AND l.season = (SELECT MAX(season) FROM leagues)
               AND rp.player_id IN (
                 SELECT pm.player_id FROM players_master pm
                 WHERE LOWER(pm.full_name) = LOWER(${playerName})

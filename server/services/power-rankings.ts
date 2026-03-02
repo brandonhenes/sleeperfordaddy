@@ -96,9 +96,11 @@ export async function getPowerRankings(username: string): Promise<LeaguePowerRan
   if (!userId) return [];
 
   const leagueRows = await db.execute(sql`
-    SELECT DISTINCT ON (l.name) l.league_id, l.name AS league_name, l.total_rosters
+    SELECT l.league_id, l.name AS league_name, l.total_rosters
     FROM user_leagues ul JOIN leagues l ON ul.league_id = l.league_id
-    WHERE ul.user_id = ${userId} ORDER BY l.name ASC, l.season DESC
+    WHERE ul.user_id = ${userId}
+      AND l.season = (SELECT MAX(season) FROM leagues)
+    ORDER BY l.name ASC
   `);
   type League = { league_id: string; league_name: string; total_rosters: number };
   const leagues = leagueRows as unknown as League[];
