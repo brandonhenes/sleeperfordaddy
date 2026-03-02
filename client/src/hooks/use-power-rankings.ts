@@ -30,6 +30,25 @@ export interface CoreAsset {
   source_agreement: "high" | "medium" | "low";
 }
 
+export interface SlottedPlayer extends CoreAsset {
+  slot: string;
+  slot_label: string;
+  is_starter: boolean;
+}
+
+export interface SlotGrade {
+  slot_label: string;
+  avg_score: number;
+  grade: "elite" | "strong" | "average" | "weak" | "hole";
+  count: number;
+}
+
+export interface OptimizedLineup {
+  starters: SlottedPlayer[];
+  bench: SlottedPlayer[];
+  slot_grades: SlotGrade[];
+}
+
 export interface ScoredPick {
   season: string;
   round: number;
@@ -65,6 +84,7 @@ export interface RosterRanking {
   reasons: string[];
   core_assets: CoreAsset[];
   avg_sources_available: number;
+  lineup: OptimizedLineup;
 }
 
 export interface LeaguePowerRanking {

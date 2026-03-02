@@ -10,6 +10,8 @@ import {
   type LeaguePowerRanking,
   type RosterRanking,
   type CoreAsset,
+  type SlottedPlayer,
+  type SlotGrade,
 } from "../hooks/use-power-rankings";
 
 // ─── Helpers ───
@@ -76,26 +78,75 @@ function PctBar({ label, value }: { label: string; value: number }) {
   );
 }
 
-// ─── Core Assets + Draft Capital Row ───
+// ─── Slot Grade Colors ───
 
-const COLLAPSED_COUNT = 12;
+const GRADE_COLORS: Record<string, string> = {
+  elite: "#f59e0b", strong: "#22c55e", average: "#eab308", weak: "#f97316", hole: "#ef4444",
+};
+
+function SlotGradeBar({ grades }: { grades: SlotGrade[] }) {
+  if (grades.length === 0) return null;
+  return (
+    <div style={{ display: "flex", gap: 14, marginBottom: 10, flexWrap: "wrap" }}>
+      {grades.map((g) => (
+        <span key={g.slot_label} style={{ fontSize: 11, fontWeight: 700 }}>
+          <span style={{ color: "var(--text-muted)" }}>{g.slot_label}: </span>
+          <span style={{ color: GRADE_COLORS[g.grade] ?? "var(--text-dim)", textTransform: "capitalize" }}>{g.grade}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function slotColor(score: number): string {
+  if (score >= 85) return "#22c55e";
+  if (score >= 70) return "#eab308";
+  return "#ef4444";
+}
+
+function PlayerRow({ p, slotLabel }: { p: SlottedPlayer | CoreAsset; slotLabel?: string }) {
+  const label = slotLabel ?? ("slot_label" in p ? (p as SlottedPlayer).slot : p.position);
+  const labelColor = slotLabel ? posColor(p.position) : slotColor(p.edge_score);
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12 }}>
+      <span style={{ color: labelColor, fontWeight: 700, fontSize: 10, width: 36, textAlign: "right" }}>
+        {label}
+      </span>
+      <span style={{ flex: 1, fontWeight: 500 }}>{p.full_name}</span>
+      <EdgeScoreBadge score={p.edge_score} size="sm" />
+      <SourceBadge
+        fc_score={p.fc_score} ktc_score={p.ktc_score} dp_score={p.dp_score}
+        sources_available={p.sources_available} source_agreement={p.source_agreement}
+      />
+      <AgeLabel asset={p} />
+    </div>
+  );
+}
+
+// ─── Expanded Roster View ───
 
 function ExpandedRosterView({ roster }: { roster: RosterRanking }) {
-  const [showAll, setShowAll] = useState(false);
+  const [showBench, setShowBench] = useState(false);
   const picks = roster.draft_picks ?? [];
-  const total = roster.core_assets.length;
-  const visible = showAll ? roster.core_assets : roster.core_assets.slice(0, COLLAPSED_COUNT);
+  const lineup = roster.lineup;
+  const starters = lineup?.starters ?? [];
+  const bench = lineup?.bench ?? [];
+  const grades = lineup?.slot_grades ?? [];
 
   return (
     <div style={{ background: "var(--dark-base)", borderRadius: 8, padding: "12px 16px", marginTop: 8 }}>
+      {/* Slot Grades */}
+      <SlotGradeBar grades={grades} />
+
+      {/* Starters */}
       <div style={{ fontSize: 10, color: "var(--text-muted)", marginBottom: 8, fontWeight: 600 }}>
-        ROSTER ({total} players)
+        STARTERS ({starters.length})
       </div>
       <div style={{ display: "grid", gap: 6 }}>
-        {visible.map((p) => (
+        {starters.map((p) => (
           <div key={p.player_id} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12 }}>
-            <span style={{ color: posColor(p.position), fontWeight: 700, fontSize: 10, width: 24 }}>
-              {p.position}
+            <span style={{ color: slotColor(p.edge_score), fontWeight: 700, fontSize: 10, width: 36, textAlign: "right" }}>
+              {p.slot}
             </span>
             <span style={{ flex: 1, fontWeight: 500 }}>{p.full_name}</span>
             <EdgeScoreBadge score={p.edge_score} size="sm" />
@@ -107,19 +158,32 @@ function ExpandedRosterView({ roster }: { roster: RosterRanking }) {
           </div>
         ))}
       </div>
-      {total > COLLAPSED_COUNT && (
-        <button
-          onClick={() => setShowAll(!showAll)}
-          style={{
-            display: "block", width: "100%", marginTop: 8, padding: "6px 0",
-            background: "none", border: "1px solid var(--border)", borderRadius: 6,
-            color: "var(--text-muted)", fontSize: 11, fontWeight: 600, cursor: "pointer",
-            fontFamily: "inherit",
-          }}
-        >
-          {showAll ? "Show top 12" : `Show all ${total} players`}
-        </button>
+
+      {/* Bench */}
+      {bench.length > 0 && (
+        <>
+          <button
+            onClick={() => setShowBench(!showBench)}
+            style={{
+              display: "block", width: "100%", marginTop: 12, padding: "6px 0",
+              background: "none", border: "1px solid var(--border)", borderRadius: 6,
+              color: "var(--text-muted)", fontSize: 11, fontWeight: 600, cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            {showBench ? "Hide bench" : `Bench (${bench.length} players)`}
+          </button>
+          {showBench && (
+            <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
+              {bench.map((p) => (
+                <PlayerRow key={p.player_id} p={p} slotLabel={p.position} />
+              ))}
+            </div>
+          )}
+        </>
       )}
+
+      {/* Draft Capital */}
       {picks.length > 0 && (
         <>
           <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 14, marginBottom: 8, fontWeight: 600 }}>
@@ -133,7 +197,7 @@ function ExpandedRosterView({ roster }: { roster: RosterRanking }) {
               return (
                 <div key={`${pk.season}_${pk.round}_${pk.original_owner_id}_${i}`}
                   style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12 }}>
-                  <span style={{ color: "#06b6d4", fontWeight: 700, fontSize: 10, width: 24 }}>PICK</span>
+                  <span style={{ color: "#06b6d4", fontWeight: 700, fontSize: 10, width: 36, textAlign: "right" }}>PICK</span>
                   <span style={{ flex: 1, fontWeight: 500 }}>{pk.label}</span>
                   <EdgeScoreBadge score={pk.edge_score} size="sm" />
                   <SourceBadge fc_score={null} ktc_score={pk.ktc_score} dp_score={pk.dp_score}

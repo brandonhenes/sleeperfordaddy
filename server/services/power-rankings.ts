@@ -9,6 +9,7 @@ import {
   getLeagueDraftPicks, getRookieDraftOrder, estimatePickTiers, scoreDraftPicks,
   type ScoredPick, type DraftPick,
 } from "./draft-picks.js";
+import { optimizeLineup, type OptimizedLineup } from "./lineup-optimizer.js";
 
 // ─── Types ───
 
@@ -50,6 +51,7 @@ export interface RosterRanking {
   reasons: string[];
   core_assets: CoreAsset[];
   avg_sources_available: number;
+  lineup: OptimizedLineup;
 }
 
 export interface LeaguePowerRanking {
@@ -131,8 +133,10 @@ export async function getPowerRankings(username: string): Promise<LeaguePowerRan
   const nested: Record<string, Record<string, RR[]>> = {};
   for (const r of rows) { nested[r.league_id] ??= {}; nested[r.league_id][r.owner_id] ??= []; nested[r.league_id][r.owner_id].push(r); }
 
+  const DEFAULT_POS = ["QB", "RB", "RB", "WR", "WR", "WR", "TE", "FLEX", "BN", "BN", "BN", "BN", "BN", "BN", "BN"];
+
   // Fetch league settings, draft picks, and draft order
-  const settingsMap = new Map<string, { sf: boolean; slots: number }>();
+  const settingsMap = new Map<string, { sf: boolean; slots: number; rosterPositions: string[] }>();
   const dpMap = new Map<string, DraftPick[]>();
   const draftOrderMap = new Map<string, Map<string, number>>(); // league_id → user_id → position
   await Promise.all(leagues.map(async (l) => {
@@ -141,7 +145,7 @@ export async function getPowerRankings(username: string): Promise<LeaguePowerRan
         getLeague(l.league_id),
         getRookieDraftOrder(l.league_id),
       ]);
-      if (detail?.roster_positions) settingsMap.set(l.league_id, { sf: detectSF(detail.roster_positions), slots: countStarterSlots(detail.roster_positions) });
+      if (detail?.roster_positions) settingsMap.set(l.league_id, { sf: detectSF(detail.roster_positions), slots: countStarterSlots(detail.roster_positions), rosterPositions: detail.roster_positions });
       if (draftOrder) draftOrderMap.set(l.league_id, draftOrder);
       const totalRosters = detail?.total_rosters ?? l.total_rosters;
       const draftRounds = Number(detail?.settings?.draft_rounds) || 4;
@@ -155,7 +159,7 @@ export async function getPowerRankings(username: string): Promise<LeaguePowerRan
   for (const league of leagues) {
     const lid = league.league_id;
     const teams = nested[lid] ?? {};
-    const { sf, slots } = settingsMap.get(lid) ?? { sf: false, slots: 9 };
+    const { sf, slots, rosterPositions } = settingsMap.get(lid) ?? { sf: false, slots: 9, rosterPositions: DEFAULT_POS };
     const mode = sf ? "sf" : "1qb";
     const owners = Object.entries(teams);
 
@@ -236,9 +240,10 @@ export async function getPowerRankings(username: string): Promise<LeaguePowerRan
       const rid = ridMap.get(`${lid}:${oid}`) ?? 0;
       const rPicks = (picksByRid.get(rid) ?? []).sort((a, b) => b.edge_score - a.edge_score);
       const dv = rPicks.reduce((s, p) => s + p.edge_score, 0);
+      const lineup = optimizeLineup(coreAssets, rosterPositions);
       return { oid, sv, avgSS, wcr, wtr, coreCov: core.length > 0 ? (core.filter((p) => p.es > 0).length / coreN) * 100 : 0,
         totCov: wc.length > 0 ? (wc.filter((p) => p.es > 0).length / wc.length) * 100 : 0,
-        coreAssets, srcAvg, dv, rPicks };
+        coreAssets, srcAvg, dv, rPicks, lineup };
     });
 
     const allSV = rosterData.map((r) => r.sv);
@@ -263,6 +268,7 @@ export async function getPowerRankings(username: string): Promise<LeaguePowerRan
         window_total_raw: Math.round(r.wtr * 10) / 10, window_total_pct: Math.round(wtp * 10) / 10,
         window_core_coverage_pct: Math.round(r.coreCov), window_total_coverage_pct: Math.round(r.totCov),
         archetype, reasons, core_assets: r.coreAssets, avg_sources_available: r.srcAvg,
+        lineup: r.lineup,
       };
     });
 
