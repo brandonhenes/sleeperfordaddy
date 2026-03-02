@@ -18,7 +18,7 @@ export async function snapshotEdgeScores(): Promise<{ players_saved: number }> {
   // Get composite values (use SF mode for universal scoring)
   const compMap = await getCompositeValues(playerIds, "sf");
 
-  // Build upsert values
+  // Build upsert values — only players with a nonzero score
   const entries = [...compMap.values()].filter((c) => c.edge_score > 0);
   if (entries.length === 0) return { players_saved: 0 };
 
