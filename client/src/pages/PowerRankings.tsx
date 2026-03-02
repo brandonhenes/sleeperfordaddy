@@ -17,7 +17,7 @@ import {
 function valueSources(league: LeaguePowerRanking): string {
   const user = league.rosters.find((r) => r.is_user);
   const avg = user?.avg_sources_available ?? 0;
-  if (avg >= 2.5) return "FC + KTC + DP";
+  if (avg >= 2.5) return "FC + KTC + FP";
   if (avg >= 1.5) return "FC + partial";
   return "FC only";
 }

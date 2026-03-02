@@ -35,7 +35,7 @@ export default function SourceBadge({ fc_score, ktc_score, dp_score, sources_ava
         }}>
           {fc_score != null && <div>FC: {fc_score}</div>}
           {ktc_score != null && <div>KTC: {ktc_score}</div>}
-          {dp_score != null && <div>DP: {dp_score}</div>}
+          {dp_score != null && <div>FP: {dp_score}</div>}
           {n === 0 && <div>No data</div>}
         </div>
       )}

@@ -3,6 +3,7 @@ import { recomputeTags } from "../services/admin.js";
 import { syncPlayerIdCrosswalk } from "../services/sync-crosswalk.js";
 import { syncKtcValues } from "../services/sync-ktc.js";
 import { syncDynastyProcessValues } from "../services/sync-dynastyprocess.js";
+import { syncFpEliteValues } from "../services/sync-fp-elite.js";
 
 const router = Router();
 
@@ -43,7 +44,18 @@ router.post("/api/admin/sync-ktc", async (_req, res) => {
   }
 });
 
-/** POST /api/admin/sync-dynastyprocess */
+/** POST /api/admin/sync-fp-elite — FP-Elite rankings (replaces DP) */
+router.post("/api/admin/sync-fp-elite", async (_req, res) => {
+  try {
+    const stats = await syncFpEliteValues();
+    res.json(stats);
+  } catch (err) {
+    console.error("[admin/sync-fp-elite] Error:", err);
+    res.status(500).json({ message: (err as Error).message ?? "Internal server error" });
+  }
+});
+
+/** POST /api/admin/sync-dynastyprocess — Legacy DP sync (fallback) */
 router.post("/api/admin/sync-dynastyprocess", async (_req, res) => {
   try {
     const stats = await syncDynastyProcessValues();
@@ -59,8 +71,8 @@ router.post("/api/admin/sync-values", async (_req, res) => {
   try {
     const crosswalk = await syncPlayerIdCrosswalk();
     const ktc = await syncKtcValues();
-    const dp = await syncDynastyProcessValues();
-    res.json({ crosswalk, ktc, dp });
+    const fp = await syncFpEliteValues();
+    res.json({ crosswalk, ktc, fp });
   } catch (err) {
     console.error("[admin/sync-values] Error:", err);
     res.status(500).json({ message: (err as Error).message ?? "Internal server error" });
