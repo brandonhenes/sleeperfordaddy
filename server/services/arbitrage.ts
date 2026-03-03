@@ -34,100 +34,115 @@ export async function getFreeAgentGaps(username: string): Promise<ArbitrageGap[]
   const leagueIdFrags = dynastyLeagueIds.map((id) => sql`${id}`);
   const leagueInClause = sql.join(leagueIdFrags, sql`, `);
 
-  const rows = await db.execute(sql`
-    current_leagues AS (
-      SELECT l.league_id
-      FROM leagues l
-      WHERE l.league_id IN (${leagueInClause})
-    ),
-    league_sync AS (
-      SELECT rp.league_id, COUNT(DISTINCT rp.owner_id) AS synced_owners
-      FROM roster_players rp
-      JOIN current_leagues cl ON rp.league_id = cl.league_id
-      GROUP BY rp.league_id
-    ),
-    my_leagues AS (
-      SELECT DISTINCT rp.league_id
-      FROM roster_players rp
-      JOIN current_leagues cl ON rp.league_id = cl.league_id
-      JOIN leagues l ON rp.league_id = l.league_id
-      JOIN league_sync ls ON rp.league_id = ls.league_id
-      WHERE rp.owner_id = ${userId}
-        AND ls.synced_owners >= l.total_rosters
-    ),
-    my_players AS (
-      SELECT DISTINCT rp.player_id
-      FROM roster_players rp
-      JOIN current_leagues cl ON rp.league_id = cl.league_id
-      WHERE rp.owner_id = ${userId}
-    ),
-    rostered_anywhere AS (
-      SELECT DISTINCT rp.league_id, rp.player_id
-      FROM roster_players rp
-      JOIN my_leagues ml ON rp.league_id = ml.league_id
-    ),
-    gaps AS (
-      SELECT mp.player_id, ml.league_id AS gap_league_id
-      FROM my_players mp
-      CROSS JOIN my_leagues ml
-      WHERE NOT EXISTS (
-        SELECT 1 FROM rostered_anywhere ra
-        WHERE ra.league_id = ml.league_id AND ra.player_id = mp.player_id
-      )
-    ),
-    owned_in AS (
-      SELECT rp.player_id, rp.league_id, l.name AS league_name
-      FROM roster_players rp
-      JOIN my_leagues ml ON rp.league_id = ml.league_id
-      JOIN leagues l ON rp.league_id = l.league_id
-      WHERE rp.owner_id = ${userId}
-    ),
-    free_agg AS (
-      SELECT g.player_id,
-        json_agg(json_build_object('league_id', g.gap_league_id, 'league_name', l.name)) AS free_leagues
-      FROM gaps g
-      JOIN leagues l ON g.gap_league_id = l.league_id
-      GROUP BY g.player_id
-    ),
-    owned_agg AS (
-      SELECT oi.player_id,
-        json_agg(json_build_object('league_id', oi.league_id, 'league_name', oi.league_name)) AS owned_leagues,
-        COUNT(*)::int AS owned_count
-      FROM owned_in oi
-      GROUP BY oi.player_id
-    )
+  const leagueRows = await db.execute(sql`
     SELECT
-      pm.player_id,
+      l.league_id,
+      l.name AS league_name,
+      l.total_rosters,
+      COUNT(DISTINCT rp.owner_id)::int AS synced_owners
+    FROM leagues l
+    LEFT JOIN roster_players rp ON rp.league_id = l.league_id
+    WHERE l.league_id IN (${leagueInClause})
+    GROUP BY l.league_id, l.name, l.total_rosters
+  `);
+
+  type LeagueRow = { league_id: string; league_name: string; total_rosters: number | null; synced_owners: number };
+  const allLeagues = leagueRows as unknown as LeagueRow[];
+  const myLeagues = allLeagues.filter(
+    (l) => l.total_rosters == null || l.synced_owners >= l.total_rosters
+  );
+  if (myLeagues.length === 0) return [];
+
+  const myLeagueFrags = myLeagues.map((l) => sql`${l.league_id}`);
+  const myLeagueInClause = sql.join(myLeagueFrags, sql`, `);
+
+  const rosterRows = await db.execute(sql`
+    SELECT
+      rp.player_id,
+      rp.league_id,
+      rp.owner_id,
+      l.name AS league_name,
       pm.full_name,
       pm.position,
-      pm.team,
-      COALESCE(fa.free_leagues, '[]'::json) AS free_leagues,
-      COALESCE(oa.owned_leagues, '[]'::json) AS owned_leagues,
-      COALESCE(oa.owned_count, 0) AS owned_count
-    FROM free_agg fa
-    JOIN players_master pm ON fa.player_id = pm.player_id
-    LEFT JOIN owned_agg oa ON fa.player_id = oa.player_id
-    WHERE COALESCE(oa.owned_count, 0) >= 2
+      pm.team
+    FROM roster_players rp
+    JOIN leagues l ON rp.league_id = l.league_id
+    JOIN players_master pm ON rp.player_id = pm.player_id
+    WHERE rp.league_id IN (${myLeagueInClause})
       AND pm.position IN ('QB', 'RB', 'WR', 'TE')
   `);
 
-  type Row = {
+  type RosterRow = {
+    player_id: string;
+    league_id: string;
+    owner_id: string;
+    league_name: string;
+    full_name: string;
+    position: string;
+    team: string | null;
+  };
+  const allRows = rosterRows as unknown as RosterRow[];
+  if (allRows.length === 0) return [];
+
+  const leagueNameMap = new Map(myLeagues.map((l) => [l.league_id, l.league_name]));
+  const playerInfo = new Map<string, { full_name: string; position: string; team: string | null }>();
+  const rosteredAnywhere = new Set<string>();
+  const ownedLeaguesByPlayer = new Map<string, { league_id: string; league_name: string }[]>();
+
+  for (const r of allRows) {
+    playerInfo.set(r.player_id, {
+      full_name: r.full_name,
+      position: r.position,
+      team: r.team,
+    });
+    rosteredAnywhere.add(`${r.league_id}:${r.player_id}`);
+    if (r.owner_id === userId) {
+      const list = ownedLeaguesByPlayer.get(r.player_id) ?? [];
+      list.push({ league_id: r.league_id, league_name: r.league_name });
+      ownedLeaguesByPlayer.set(r.player_id, list);
+    }
+  }
+
+  const candidateRows: Array<{
     player_id: string;
     full_name: string;
     position: string;
     team: string | null;
-    free_leagues: { league_id: string; league_name: string }[];
     owned_leagues: { league_id: string; league_name: string }[];
-    owned_count: number;
-  };
-  const rawRows = rows as unknown as Row[];
-  if (rawRows.length === 0) return [];
+    free_leagues: { league_id: string; league_name: string }[];
+  }> = [];
+
+  for (const [playerId, ownedLeagues] of ownedLeaguesByPlayer) {
+    if (ownedLeagues.length < 2) continue;
+    const freeLeagues: { league_id: string; league_name: string }[] = [];
+    for (const l of myLeagues) {
+      if (!rosteredAnywhere.has(`${l.league_id}:${playerId}`)) {
+        freeLeagues.push({
+          league_id: l.league_id,
+          league_name: leagueNameMap.get(l.league_id) ?? l.league_id,
+        });
+      }
+    }
+    if (freeLeagues.length === 0) continue;
+    const info = playerInfo.get(playerId);
+    if (!info) continue;
+    candidateRows.push({
+      player_id: playerId,
+      full_name: info.full_name,
+      position: info.position,
+      team: info.team,
+      owned_leagues: ownedLeagues,
+      free_leagues: freeLeagues,
+    });
+  }
+
+  if (candidateRows.length === 0) return [];
 
   // Edge Scores via composite values (SF default for cross-league)
-  const playerIds = rawRows.map((r) => r.player_id);
+  const playerIds = candidateRows.map((r) => r.player_id);
   const compMap = await getCompositeValues(playerIds, "sf");
 
-  return rawRows
+  return candidateRows
     .map((r) => {
       const comp = compMap.get(r.player_id);
       const free = r.free_leagues ?? [];
