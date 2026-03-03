@@ -29,6 +29,7 @@ export interface Prospect {
   position: string | null;
   school: string | null;
   tier: string | null;
+  fp_rank: number | null;
   fantasypros_rank: number | null;
   consensus_comp: string | null;
   all_comps: ProspectComp[] | null;

@@ -29,6 +29,7 @@ export interface Prospect {
   position: string | null;
   school: string | null;
   tier: string | null;
+  fp_rank: number | null;
   fantasypros_rank: number | null;
   consensus_comp: string | null;
   all_comps: ProspectComp[] | null;
@@ -106,6 +107,7 @@ export async function getProspects(): Promise<Prospect[]> {
       p26.position,
       p26.school,
       p26.tier,
+      p26.fantasypros_rank AS fp_rank,
       p26.fantasypros_rank,
       p26.age,
       p26.notes,
