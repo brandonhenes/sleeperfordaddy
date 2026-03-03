@@ -22,15 +22,26 @@ interface SourceParams {
   logFloor: number;
 }
 
-function computeSourceParams(values: number[]): SourceParams | null {
+function computeSourceParams(
+  values: number[],
+  override?: { floor: number; max: number }
+): SourceParams | null {
   const valid = values.filter((v) => v > 0);
   if (valid.length < 2) return null;
 
-  const sorted = [...valid].sort((a, b) => a - b);
-  const max = sorted[sorted.length - 1];
-  // 5th percentile from bottom = "barely rosterable" line
-  const floorIdx = Math.floor(sorted.length * 0.05);
-  const floor = sorted[floorIdx];
+  let max: number;
+  let floor: number;
+
+  if (override && override.max > override.floor && override.floor > 0) {
+    max = override.max;
+    floor = override.floor;
+  } else {
+    const sorted = [...valid].sort((a, b) => a - b);
+    max = sorted[sorted.length - 1];
+    // 5th percentile from bottom = "barely rosterable" line
+    const floorIdx = Math.floor(sorted.length * 0.05);
+    floor = sorted[floorIdx];
+  }
 
   if (floor <= 0 || max <= floor) return null;
   const logMax = Math.log(max);
@@ -50,17 +61,25 @@ function scoreValue(value: number, params: SourceParams): number {
 // ─── Main ───
 
 export function computeEdgeScores(
-  players: PlayerInput[]
+  players: PlayerInput[],
+  scaleOverride?: {
+    fc?: { floor: number; max: number };
+    ktc?: { floor: number; max: number };
+    dp?: { floor: number; max: number };
+  }
 ): Map<string, EdgeScore> {
   // Compute per-source scale parameters from all players
   const fcParams = computeSourceParams(
-    players.map((p) => p.fc_value).filter((v): v is number => v != null)
+    players.map((p) => p.fc_value).filter((v): v is number => v != null),
+    scaleOverride?.fc
   );
   const ktcParams = computeSourceParams(
-    players.map((p) => p.ktc_value).filter((v): v is number => v != null)
+    players.map((p) => p.ktc_value).filter((v): v is number => v != null),
+    scaleOverride?.ktc
   );
   const dpParams = computeSourceParams(
-    players.map((p) => p.dp_value).filter((v): v is number => v != null)
+    players.map((p) => p.dp_value).filter((v): v is number => v != null),
+    scaleOverride?.dp
   );
 
   const result = new Map<string, EdgeScore>();

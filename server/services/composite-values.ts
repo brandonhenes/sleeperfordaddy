@@ -17,6 +17,17 @@ export interface CompositeValue {
   source_agreement: "high" | "medium" | "low";
 }
 
+interface Scale {
+  floor: number;
+  max: number;
+}
+
+export interface GlobalScaleParams {
+  fc: Scale;
+  ktc: Scale;
+  dp: Scale;
+}
+
 // ─── Helpers ───
 
 function computeAgreement(scores: number[]): "high" | "medium" | "low" {
@@ -25,6 +36,53 @@ function computeAgreement(scores: number[]): "high" | "medium" | "low" {
   if (spread < 5) return "high";
   if (spread <= 12) return "medium";
   return "low";
+}
+
+function safeScale(floor: number | null, max: number | null): Scale {
+  const f = floor ?? 1;
+  const m = max ?? f + 1;
+  if (f <= 0 || m <= f) return { floor: 1, max: 2 };
+  return { floor: f, max: m };
+}
+
+/**
+ * Fetch global scale parameters from all QB/RB/WR/TE players.
+ * This prevents score inflation when caller passes small subsets.
+ */
+export async function getGlobalScaleParams(
+  mode: "sf" | "1qb"
+): Promise<GlobalScaleParams> {
+  const rows = await db.execute(sql`
+    SELECT
+      percentile_cont(0.05) WITHIN GROUP (ORDER BY fc.dynasty_value)::real AS fc_floor,
+      max(fc.dynasty_value)::real AS fc_max,
+      percentile_cont(0.05) WITHIN GROUP (ORDER BY ${mode === "sf" ? sql`ktc.value_sf` : sql`ktc.value_1qb`})::real AS ktc_floor,
+      max(${mode === "sf" ? sql`ktc.value_sf` : sql`ktc.value_1qb`})::real AS ktc_max,
+      percentile_cont(0.05) WITHIN GROUP (ORDER BY ${mode === "sf" ? sql`dp.value_2qb` : sql`dp.value_1qb`})::real AS dp_floor,
+      max(${mode === "sf" ? sql`dp.value_2qb` : sql`dp.value_1qb`})::real AS dp_max
+    FROM players_master pm
+    LEFT JOIN fantasycalc_daily fc
+      ON LOWER(pm.full_name) = LOWER(fc.player_name)
+      AND fc.snapshot_date = (SELECT MAX(snapshot_date) FROM fantasycalc_daily)
+    LEFT JOIN ktc_values ktc ON ktc.sleeper_id = pm.player_id
+    LEFT JOIN dynastyprocess_values dp ON dp.sleeper_id = pm.player_id
+    WHERE pm.position IN ('QB', 'RB', 'WR', 'TE')
+  `);
+
+  const r = (rows as unknown as {
+    fc_floor: number | null;
+    fc_max: number | null;
+    ktc_floor: number | null;
+    ktc_max: number | null;
+    dp_floor: number | null;
+    dp_max: number | null;
+  }[])[0];
+
+  return {
+    fc: safeScale(r?.fc_floor ?? null, r?.fc_max ?? null),
+    ktc: safeScale(r?.ktc_floor ?? null, r?.ktc_max ?? null),
+    dp: safeScale(r?.dp_floor ?? null, r?.dp_max ?? null),
+  };
 }
 
 // ─── Main ───
@@ -74,7 +132,8 @@ export async function getCompositeValues(
     dp_value: mode === "sf" ? (r.dp_2qb ?? null) : (r.dp_1qb ?? null),
   }));
 
-  const edgeMap = computeEdgeScores(inputs);
+  const globalScale = await getGlobalScaleParams(mode);
+  const edgeMap = computeEdgeScores(inputs, globalScale);
 
   for (const inp of inputs) {
     const edge = edgeMap.get(inp.sleeper_id);
