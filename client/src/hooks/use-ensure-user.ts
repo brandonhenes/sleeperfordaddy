@@ -44,13 +44,13 @@ export function useEnsureUser(username: string | undefined): EnsureUserResult {
   useEffect(() => {
     if (phase !== "checking" || !username) return;
 
-    if (overview.data) {
-      // User data exists — we're good
+    if (overview.data && (overview.data.totals?.leagues ?? 0) > 0) {
+      // User data exists with synced leagues — we're good
       setPhase("ready");
       return;
     }
 
-    if (overview.error && !syncTriggered.current) {
+    if ((overview.error || (overview.data && (overview.data.totals?.leagues ?? 0) === 0)) && !syncTriggered.current) {
       // User data doesn't exist — kick off sync
       syncTriggered.current = true;
       setPhase("syncing");
