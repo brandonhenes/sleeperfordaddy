@@ -52,22 +52,39 @@ function safeScale(floor: number | null, max: number | null): Scale {
 export async function getGlobalScaleParams(
   mode: "sf" | "1qb"
 ): Promise<GlobalScaleParams> {
-  const rows = await db.execute(sql`
-    SELECT
-      percentile_cont(0.05) WITHIN GROUP (ORDER BY fc.dynasty_value)::real AS fc_floor,
-      max(fc.dynasty_value)::real AS fc_max,
-      percentile_cont(0.05) WITHIN GROUP (ORDER BY ${mode === "sf" ? sql`ktc.value_sf` : sql`ktc.value_1qb`})::real AS ktc_floor,
-      max(${mode === "sf" ? sql`ktc.value_sf` : sql`ktc.value_1qb`})::real AS ktc_max,
-      percentile_cont(0.05) WITHIN GROUP (ORDER BY ${mode === "sf" ? sql`dp.value_2qb` : sql`dp.value_1qb`})::real AS dp_floor,
-      max(${mode === "sf" ? sql`dp.value_2qb` : sql`dp.value_1qb`})::real AS dp_max
-    FROM players_master pm
-    LEFT JOIN fantasycalc_daily fc
-      ON LOWER(pm.full_name) = LOWER(fc.player_name)
-      AND fc.snapshot_date = (SELECT MAX(snapshot_date) FROM fantasycalc_daily)
-    LEFT JOIN ktc_values ktc ON ktc.sleeper_id = pm.player_id
-    LEFT JOIN dynastyprocess_values dp ON dp.sleeper_id = pm.player_id
-    WHERE pm.position IN ('QB', 'RB', 'WR', 'TE')
-  `);
+  const rows = mode === "sf"
+    ? await db.execute(sql`
+        SELECT
+          percentile_cont(0.05) WITHIN GROUP (ORDER BY fc.dynasty_value)::real AS fc_floor,
+          max(fc.dynasty_value)::real AS fc_max,
+          percentile_cont(0.05) WITHIN GROUP (ORDER BY ktc.value_sf)::real AS ktc_floor,
+          max(ktc.value_sf)::real AS ktc_max,
+          percentile_cont(0.05) WITHIN GROUP (ORDER BY dp.value_2qb)::real AS dp_floor,
+          max(dp.value_2qb)::real AS dp_max
+        FROM players_master pm
+        LEFT JOIN fantasycalc_daily fc
+          ON LOWER(pm.full_name) = LOWER(fc.player_name)
+          AND fc.snapshot_date = (SELECT MAX(snapshot_date) FROM fantasycalc_daily)
+        LEFT JOIN ktc_values ktc ON ktc.sleeper_id = pm.player_id
+        LEFT JOIN dynastyprocess_values dp ON dp.sleeper_id = pm.player_id
+        WHERE pm.position IN ('QB', 'RB', 'WR', 'TE')
+      `)
+    : await db.execute(sql`
+        SELECT
+          percentile_cont(0.05) WITHIN GROUP (ORDER BY fc.dynasty_value)::real AS fc_floor,
+          max(fc.dynasty_value)::real AS fc_max,
+          percentile_cont(0.05) WITHIN GROUP (ORDER BY ktc.value_1qb)::real AS ktc_floor,
+          max(ktc.value_1qb)::real AS ktc_max,
+          percentile_cont(0.05) WITHIN GROUP (ORDER BY dp.value_1qb)::real AS dp_floor,
+          max(dp.value_1qb)::real AS dp_max
+        FROM players_master pm
+        LEFT JOIN fantasycalc_daily fc
+          ON LOWER(pm.full_name) = LOWER(fc.player_name)
+          AND fc.snapshot_date = (SELECT MAX(snapshot_date) FROM fantasycalc_daily)
+        LEFT JOIN ktc_values ktc ON ktc.sleeper_id = pm.player_id
+        LEFT JOIN dynastyprocess_values dp ON dp.sleeper_id = pm.player_id
+        WHERE pm.position IN ('QB', 'RB', 'WR', 'TE')
+      `);
 
   const r = (rows as unknown as {
     fc_floor: number | null;
@@ -123,17 +140,23 @@ export async function getCompositeValues(
     dp_2qb: number | null;
   };
   const rawRows = rows as unknown as Row[];
+  const globalScale = await getGlobalScaleParams(mode);
+  // If DP max is tiny, crosswalk coverage is bad and DP is on an incompatible scale.
+  // Disable DP contribution to avoid inflated edge scores from low-value artifacts.
+  const dpUsable = globalScale.dp.max > 100;
 
   // Build inputs for edge scoring
   const inputs = rawRows.map((r) => ({
     sleeper_id: r.sleeper_id,
     fc_value: r.fc_value ?? null,
     ktc_value: mode === "sf" ? (r.ktc_sf ?? null) : (r.ktc_1qb ?? null),
-    dp_value: mode === "sf" ? (r.dp_2qb ?? null) : (r.dp_1qb ?? null),
+    dp_value: dpUsable ? (mode === "sf" ? (r.dp_2qb ?? null) : (r.dp_1qb ?? null)) : null,
   }));
 
-  const globalScale = await getGlobalScaleParams(mode);
-  const edgeMap = computeEdgeScores(inputs, globalScale);
+  const edgeMap = computeEdgeScores(
+    inputs,
+    dpUsable ? globalScale : { fc: globalScale.fc, ktc: globalScale.ktc }
+  );
 
   for (const inp of inputs) {
     const edge = edgeMap.get(inp.sleeper_id);
