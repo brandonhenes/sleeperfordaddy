@@ -9,8 +9,6 @@ import {
   type BuyOpportunity,
 } from "../hooks/use-action";
 
-// ─── Sell Candidates Section ───
-
 function SellRow({ player: p }: { player: SellCandidate }) {
   const exposure =
     p.total_leagues > 0
@@ -47,7 +45,7 @@ function SellRow({ player: p }: { player: SellCandidate }) {
         className="font-mono"
         style={{ fontSize: 13, color: "var(--amber)", minWidth: 60, textAlign: "right" }}
       >
-        {p.dynasty_value?.toLocaleString() ?? "—"}
+        {p.edge_score ?? "-"}
       </span>
       <span style={{ minWidth: 80, textAlign: "right" }}>
         <TrendArrow value={p.trend_30day} />
@@ -62,7 +60,7 @@ function SellCandidatesSection({ username }: { username: string }) {
   if (isLoading) return <SkeletonCard />;
   if (error) return <ErrorCard message={(error as Error).message} />;
   if (!data || data.length === 0) {
-    return <EmptyCard label="No sell candidates — your portfolio looks clean" />;
+    return <EmptyCard label="No sell candidates - your portfolio looks clean" />;
   }
 
   return (
@@ -80,8 +78,6 @@ function SellCandidatesSection({ username }: { username: string }) {
     </div>
   );
 }
-
-// ─── Buy Opportunities Section ───
 
 function BuyCard({ opp: o }: { opp: BuyOpportunity }) {
   const color = dirColor(o.direction);
@@ -128,12 +124,12 @@ function BuyCard({ opp: o }: { opp: BuyOpportunity }) {
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-        {o.fc_at_rec != null && (
+        {o.edge_score != null && (
           <span
             className="font-mono"
             style={{ fontSize: 14, fontWeight: 600, color: "var(--amber)" }}
           >
-            {o.fc_at_rec.toLocaleString()}
+            {o.edge_score}
           </span>
         )}
         <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
@@ -175,8 +171,6 @@ function BuyOpportunitiesSection({ username }: { username: string }) {
   );
 }
 
-// ─── Page ───
-
 export default function Action() {
   const { username } = useParams<{ username: string }>();
 
@@ -187,30 +181,28 @@ export default function Action() {
           Action Engine
         </h1>
         <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 4 }}>
-          Sell high, buy low — matched to your portfolio
+          Sell high, buy low - matched to your portfolio
         </p>
       </div>
 
       <SectionHeader
         num="01"
-        icon="📉"
+        icon="Sell"
         title="SELL CANDIDATES"
-        subtitle="Trending down or over-exposed — consider moving these"
+        subtitle="Trending down or over-exposed - consider moving these"
       />
       <SellCandidatesSection username={username ?? ""} />
 
       <SectionHeader
         num="02"
-        icon="🛒"
+        icon="Buy"
         title="BUY OPPORTUNITIES"
-        subtitle="Newsletter BUY recs you don't own or are underweight on"
+        subtitle="Newsletter BUY recs you do not own or are underweight on"
       />
       <BuyOpportunitiesSection username={username ?? ""} />
     </AppShell>
   );
 }
-
-// ─── Shared loading/error/empty states ───
 
 function SkeletonCard() {
   return (

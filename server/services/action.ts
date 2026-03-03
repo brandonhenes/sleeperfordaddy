@@ -1,6 +1,7 @@
 import { db } from "../db/connection.js";
 import { sql } from "drizzle-orm";
 import { getDynastyLeagueIdsForUserLatestSeason } from "./dynasty-leagues.js";
+import { getCompositeValues } from "./composite-values.js";
 
 // ─── Types ───
 
@@ -11,7 +12,7 @@ export interface SellCandidate {
   league_count: number;
   total_leagues: number;
   composite_tag: string | null;
-  dynasty_value: number | null;
+  edge_score: number | null;
   trend_30day: number | null;
 }
 
@@ -20,8 +21,7 @@ export interface BuyOpportunity {
   direction: string;
   position: string | null;
   team: string | null;
-  fc_at_rec: number | null;
-  current_value: number | null;
+  edge_score: number | null;
   rationale: string | null;
   confidence: number | null;
   owned_leagues: number;
@@ -29,11 +29,11 @@ export interface BuyOpportunity {
 }
 
 interface ExposureRow {
+  player_id: string;
   player_name: string;
   position: string | null;
   team: string | null;
   league_count: number;
-  dynasty_value: number | null;
   trend_30day: number | null;
 }
 
@@ -51,11 +51,11 @@ async function getUserExposure(username: string): Promise<{ totalLeagues: number
 
   const rows = await db.execute(sql`
     SELECT
+      pm.player_id,
       pm.full_name AS player_name,
       pm.position,
       pm.team,
       COUNT(DISTINCT rp.league_id)::int AS league_count,
-      fc.dynasty_value::int AS dynasty_value,
       fc.trend_30day::int AS trend_30day
     FROM roster_players rp
     JOIN players_master pm ON rp.player_id = pm.player_id
@@ -65,7 +65,7 @@ async function getUserExposure(username: string): Promise<{ totalLeagues: number
     WHERE rp.owner_id = ${userId}
       AND rp.league_id IN (${inClause})
       AND pm.position IN ('QB', 'RB', 'WR', 'TE')
-    GROUP BY pm.full_name, pm.position, pm.team, fc.dynasty_value, fc.trend_30day
+    GROUP BY pm.player_id, pm.full_name, pm.position, pm.team, fc.trend_30day
   `);
 
   return {
@@ -85,6 +85,10 @@ export async function getSellCandidates(
 ): Promise<SellCandidate[]> {
   const { totalLeagues, rows } = await getUserExposure(username);
   if (totalLeagues === 0) return [];
+  const compMap = await getCompositeValues(
+    Array.from(new Set(rows.map((r) => r.player_id))),
+    "sf"
+  );
 
   return rows
     .map((r) => {
@@ -93,6 +97,7 @@ export async function getSellCandidates(
       if ((r.trend_30day ?? 0) < -200 && exposurePct > 0.33) compositeTag = "HIGH_EXPOSURE_RISK";
       else if ((r.trend_30day ?? 0) < -200) compositeTag = "TRENDING_DOWN";
       else if (exposurePct > 0.33) compositeTag = "HIGH_EXPOSURE_RISK";
+      const edge = compMap.get(r.player_id);
       return {
         player_name: r.player_name,
         position: r.position,
@@ -100,7 +105,7 @@ export async function getSellCandidates(
         league_count: r.league_count,
         total_leagues: totalLeagues,
         composite_tag: compositeTag,
-        dynasty_value: r.dynasty_value,
+        edge_score: edge?.edge_score ?? null,
         trend_30day: r.trend_30day,
       };
     })
@@ -127,24 +132,46 @@ export async function getBuyOpportunities(
       r.direction,
       COALESCE(r.position, fc.position) AS position,
       COALESCE(r.team, fc.team) AS team,
-      r.fc_at_rec,
-      fc.dynasty_value::int AS current_value,
+      pm.player_id,
       r.rationale,
       r.confidence
     FROM recommendations r
     LEFT JOIN fantasycalc_daily fc
       ON LOWER(r.player_name) = LOWER(fc.player_name)
       AND fc.snapshot_date = (SELECT MAX(snapshot_date) FROM fantasycalc_daily)
+    LEFT JOIN players_master pm
+      ON LOWER(pm.full_name) = LOWER(r.player_name)
     WHERE r.direction = 'BUY'
       AND r.rec_date = (SELECT MAX(rec_date) FROM recommendations)
-    ORDER BY r.fc_at_rec DESC NULLS LAST
+    ORDER BY r.confidence DESC NULLS LAST
   `);
 
-  return (rows as unknown as Omit<BuyOpportunity, "owned_leagues" | "total_leagues">[])
+  type BuyRow = {
+    player_name: string;
+    direction: string;
+    position: string | null;
+    team: string | null;
+    player_id: string | null;
+    rationale: string | null;
+    confidence: number | null;
+  };
+  const typed = rows as unknown as BuyRow[];
+  const playerIds = Array.from(
+    new Set(typed.map((r) => r.player_id).filter((id): id is string => !!id))
+  );
+  const compMap = await getCompositeValues(playerIds, "sf");
+
+  return typed
     .map((r) => ({
-      ...r,
+      player_name: r.player_name,
+      direction: r.direction,
+      position: r.position,
+      team: r.team,
+      edge_score: r.player_id ? (compMap.get(r.player_id)?.edge_score ?? null) : null,
+      rationale: r.rationale,
+      confidence: r.confidence,
       owned_leagues: ownedMap.get(r.player_name.toLowerCase()) ?? 0,
       total_leagues: totalLeagues,
     }))
-    .sort((a, b) => a.owned_leagues - b.owned_leagues || (b.fc_at_rec ?? 0) - (a.fc_at_rec ?? 0));
+    .sort((a, b) => a.owned_leagues - b.owned_leagues || (b.edge_score ?? 0) - (a.edge_score ?? 0));
 }

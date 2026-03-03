@@ -33,4 +33,22 @@ router.get("/api/action/buy-opportunities", async (req, res) => {
   }
 });
 
+/** GET /api/action/:username */
+router.get("/api/action/:username", async (req, res) => {
+  try {
+    const username = req.params.username as string;
+    if (!username) {
+      return res.status(400).json({ message: "username is required" });
+    }
+    const [sell_candidates, buy_opportunities] = await Promise.all([
+      getSellCandidates(username),
+      getBuyOpportunities(username),
+    ]);
+    res.json({ sell_candidates, buy_opportunities });
+  } catch (err) {
+    console.error("[action] Error:", err);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
 export default router;

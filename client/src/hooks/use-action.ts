@@ -8,7 +8,7 @@ export interface SellCandidate {
   league_count: number;
   total_leagues: number;
   composite_tag: string | null;
-  dynasty_value: number | null;
+  edge_score: number | null;
   trend_30day: number | null;
 }
 
@@ -17,8 +17,7 @@ export interface BuyOpportunity {
   direction: string;
   position: string | null;
   team: string | null;
-  fc_at_rec: number | null;
-  current_value: number | null;
+  edge_score: number | null;
   rationale: string | null;
   confidence: number | null;
   owned_leagues: number;
