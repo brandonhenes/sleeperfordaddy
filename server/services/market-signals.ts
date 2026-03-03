@@ -232,7 +232,12 @@ export async function getUserOwnedPlayerIds(username: string): Promise<string[]>
     JOIN leagues l ON rp.league_id = l.league_id
     WHERE LOWER(u.username) = LOWER(${username})
       AND rp.owner_id = u.user_id
-      AND l.season = (SELECT MAX(season) FROM leagues)
+      AND l.season = (
+        SELECT MAX(l2.season)
+        FROM user_leagues ul2
+        JOIN leagues l2 ON ul2.league_id = l2.league_id
+        WHERE ul2.user_id = u.user_id
+      )
   `);
   return (rows as unknown as { player_id: string }[]).map((r) => r.player_id);
 }

@@ -76,7 +76,12 @@ export async function getRosterGrades(username: string): Promise<RosterGradesRes
     FROM roster_players rp
     JOIN leagues l ON rp.league_id = l.league_id
     WHERE rp.owner_id = ${userId}
-      AND l.season = (SELECT MAX(season) FROM leagues)
+      AND l.season = (
+        SELECT MAX(l2.season)
+        FROM user_leagues ul2
+        JOIN leagues l2 ON ul2.league_id = l2.league_id
+        WHERE ul2.user_id = ${userId}
+      )
     ORDER BY l.name
   `);
   const leagues = leagueRows as unknown as {

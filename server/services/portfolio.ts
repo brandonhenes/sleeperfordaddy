@@ -53,7 +53,12 @@ export async function getPortfolio(username: string): Promise<PortfolioData | nu
     SELECT l.league_id
     FROM user_leagues ul JOIN leagues l ON ul.league_id = l.league_id
     WHERE ul.user_id = ${userId}
-      AND l.season = (SELECT MAX(season) FROM leagues)
+      AND l.season = (
+        SELECT MAX(l2.season)
+        FROM user_leagues ul2
+        JOIN leagues l2 ON ul2.league_id = l2.league_id
+        WHERE ul2.user_id = ${userId}
+      )
   `);
   const leagueIds = (leagueRows as unknown as { league_id: string }[]).map((r) => r.league_id);
   if (leagueIds.length === 0) return null;
