@@ -1,5 +1,6 @@
 import { db } from "../db/connection.js";
 import { sql } from "drizzle-orm";
+import { getDynastyLeagueIdsForUserLatestSeason } from "./dynasty-leagues.js";
 
 // ─── Types ───
 
@@ -27,6 +28,52 @@ export interface BuyOpportunity {
   total_leagues: number;
 }
 
+interface ExposureRow {
+  player_name: string;
+  position: string | null;
+  team: string | null;
+  league_count: number;
+  dynasty_value: number | null;
+  trend_30day: number | null;
+}
+
+async function getUserExposure(username: string): Promise<{ totalLeagues: number; rows: ExposureRow[] }> {
+  const userRows = await db.execute(sql`
+    SELECT user_id FROM users WHERE LOWER(username) = LOWER(${username}) LIMIT 1
+  `);
+  const userId = (userRows as unknown as { user_id: string }[])[0]?.user_id;
+  if (!userId) return { totalLeagues: 0, rows: [] };
+
+  const leagueIds = await getDynastyLeagueIdsForUserLatestSeason(userId);
+  if (leagueIds.length === 0) return { totalLeagues: 0, rows: [] };
+  const leagueFrags = leagueIds.map((id) => sql`${id}`);
+  const inClause = sql.join(leagueFrags, sql`, `);
+
+  const rows = await db.execute(sql`
+    SELECT
+      pm.full_name AS player_name,
+      pm.position,
+      pm.team,
+      COUNT(DISTINCT rp.league_id)::int AS league_count,
+      fc.dynasty_value::int AS dynasty_value,
+      fc.trend_30day::int AS trend_30day
+    FROM roster_players rp
+    JOIN players_master pm ON rp.player_id = pm.player_id
+    LEFT JOIN fantasycalc_daily fc
+      ON LOWER(pm.full_name) = LOWER(fc.player_name)
+      AND fc.snapshot_date = (SELECT MAX(snapshot_date) FROM fantasycalc_daily)
+    WHERE rp.owner_id = ${userId}
+      AND rp.league_id IN (${inClause})
+      AND pm.position IN ('QB', 'RB', 'WR', 'TE')
+    GROUP BY pm.full_name, pm.position, pm.team, fc.dynasty_value, fc.trend_30day
+  `);
+
+  return {
+    totalLeagues: leagueIds.length,
+    rows: rows as unknown as ExposureRow[],
+  };
+}
+
 // ─── Queries ───
 
 /**
@@ -36,28 +83,29 @@ export interface BuyOpportunity {
 export async function getSellCandidates(
   username: string
 ): Promise<SellCandidate[]> {
-  const rows = await db.execute(sql`
-    SELECT
-      pe.player_name,
-      pe.position,
-      pe.team,
-      pe.league_count::int AS league_count,
-      pe.total_leagues::int AS total_leagues,
-      pe.composite_tag,
-      fc.dynasty_value::int AS dynasty_value,
-      fc.trend_30day::int AS trend_30day
-    FROM player_exposure pe
-    LEFT JOIN fantasycalc_daily fc
-      ON LOWER(pe.player_name) = LOWER(fc.player_name)
-      AND fc.snapshot_date = (SELECT MAX(snapshot_date) FROM fantasycalc_daily)
-    WHERE LOWER(pe.username) = LOWER(${username})
-      AND (
-        pe.composite_tag IN ('TRENDING_DOWN', 'HIGH_EXPOSURE_RISK')
-        OR fc.trend_30day < -200
-      )
-    ORDER BY fc.trend_30day ASC NULLS LAST
-  `);
-  return rows as unknown as SellCandidate[];
+  const { totalLeagues, rows } = await getUserExposure(username);
+  if (totalLeagues === 0) return [];
+
+  return rows
+    .map((r) => {
+      const exposurePct = totalLeagues > 0 ? r.league_count / totalLeagues : 0;
+      let compositeTag: string | null = null;
+      if ((r.trend_30day ?? 0) < -200 && exposurePct > 0.33) compositeTag = "HIGH_EXPOSURE_RISK";
+      else if ((r.trend_30day ?? 0) < -200) compositeTag = "TRENDING_DOWN";
+      else if (exposurePct > 0.33) compositeTag = "HIGH_EXPOSURE_RISK";
+      return {
+        player_name: r.player_name,
+        position: r.position,
+        team: r.team,
+        league_count: r.league_count,
+        total_leagues: totalLeagues,
+        composite_tag: compositeTag,
+        dynasty_value: r.dynasty_value,
+        trend_30day: r.trend_30day,
+      };
+    })
+    .filter((r) => r.composite_tag != null || (r.trend_30day ?? 0) < -200)
+    .sort((a, b) => (a.trend_30day ?? 0) - (b.trend_30day ?? 0));
 }
 
 /**
@@ -68,6 +116,11 @@ export async function getSellCandidates(
 export async function getBuyOpportunities(
   username: string
 ): Promise<BuyOpportunity[]> {
+  const { totalLeagues, rows: exposureRows } = await getUserExposure(username);
+  const ownedMap = new Map(
+    exposureRows.map((r) => [r.player_name.toLowerCase(), r.league_count])
+  );
+
   const rows = await db.execute(sql`
     SELECT
       r.player_name,
@@ -77,22 +130,21 @@ export async function getBuyOpportunities(
       r.fc_at_rec,
       fc.dynasty_value::int AS current_value,
       r.rationale,
-      r.confidence,
-      COALESCE(pe.league_count, 0)::int AS owned_leagues,
-      COALESCE(pe.total_leagues,
-        (SELECT MAX(total_leagues) FROM player_exposure
-         WHERE LOWER(username) = LOWER(${username}))
-      )::int AS total_leagues
+      r.confidence
     FROM recommendations r
     LEFT JOIN fantasycalc_daily fc
       ON LOWER(r.player_name) = LOWER(fc.player_name)
       AND fc.snapshot_date = (SELECT MAX(snapshot_date) FROM fantasycalc_daily)
-    LEFT JOIN player_exposure pe
-      ON LOWER(r.player_name) = LOWER(pe.player_name)
-      AND LOWER(pe.username) = LOWER(${username})
     WHERE r.direction = 'BUY'
       AND r.rec_date = (SELECT MAX(rec_date) FROM recommendations)
-    ORDER BY COALESCE(pe.league_count, 0) ASC, r.fc_at_rec DESC NULLS LAST
+    ORDER BY r.fc_at_rec DESC NULLS LAST
   `);
-  return rows as unknown as BuyOpportunity[];
+
+  return (rows as unknown as Omit<BuyOpportunity, "owned_leagues" | "total_leagues">[])
+    .map((r) => ({
+      ...r,
+      owned_leagues: ownedMap.get(r.player_name.toLowerCase()) ?? 0,
+      total_leagues: totalLeagues,
+    }))
+    .sort((a, b) => a.owned_leagues - b.owned_leagues || (b.fc_at_rec ?? 0) - (a.fc_at_rec ?? 0));
 }

@@ -1,5 +1,6 @@
 import { db } from "../db/connection.js";
 import { sql } from "drizzle-orm";
+import { getDynastyLeagueIdsForUserLatestSeason } from "./dynasty-leagues.js";
 
 export interface PlayerSummary {
   player_name: string;
@@ -62,6 +63,11 @@ export async function getPlayerDetail(
     SELECT user_id FROM users WHERE LOWER(username) = LOWER(${username}) LIMIT 1
   `);
   const userId = (userRows as unknown as { user_id: string }[])[0]?.user_id;
+  const dynastyLeagueIds = userId
+    ? await getDynastyLeagueIdsForUserLatestSeason(userId)
+    : [];
+  const leagueIdFrags = dynastyLeagueIds.map((id) => sql`${id}`);
+  const dynastyInClause = sql.join(leagueIdFrags, sql`, `);
 
   const [summaryRows, historyRows, ownershipRows, mentionRows, prospectRows, recRows] =
     await Promise.all([
@@ -85,18 +91,13 @@ export async function getPlayerDetail(
       `),
 
       // Ownership: leagues where user owns this player (current season)
-      userId
+      userId && dynastyLeagueIds.length > 0
         ? db.execute(sql`
             SELECT l.name AS league_name, l.league_id
             FROM roster_players rp
             JOIN leagues l ON rp.league_id = l.league_id
             WHERE rp.owner_id = ${userId}
-              AND l.season = (
-                SELECT MAX(l2.season)
-                FROM user_leagues ul2
-                JOIN leagues l2 ON ul2.league_id = l2.league_id
-                WHERE ul2.user_id = ${userId}
-              )
+              AND rp.league_id IN (${dynastyInClause})
               AND rp.player_id IN (
                 SELECT pm.player_id FROM players_master pm
                 WHERE LOWER(pm.full_name) = LOWER(${playerName})

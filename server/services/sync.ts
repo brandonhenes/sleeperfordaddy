@@ -22,6 +22,7 @@ import { upsertTrade, upsertTradeAsset } from "../db/queries/trades.js";
 import { upsertH2H } from "../db/queries/h2h.js";
 import { bulkUpsertPlayers } from "../db/queries/players.js";
 import { buildLeagueGroups } from "./league-groups.js";
+import { isDynastyLeagueFromSleeperSettings } from "./dynasty-leagues.js";
 import type {
   SleeperLeague,
   SleeperRoster,
@@ -150,7 +151,9 @@ async function runSync(jobId: string, username: string) {
     allLeagues.push(...seasonLeagues);
   }
 
-  const uniqueLeagues = dedupeLeagues(allLeagues);
+  const uniqueLeagues = dedupeLeagues(allLeagues).filter((l) =>
+    isDynastyLeagueFromSleeperSettings(l.settings)
+  );
   console.log(
     `[sync] Found ${uniqueLeagues.length} unique leagues for ${username}`
   );
@@ -257,7 +260,7 @@ async function processLeague(league: SleeperLeague, userId: string) {
     total_rosters: league.total_rosters,
     previous_league_id: league.previous_league_id,
     group_id: null, // Will be set by league grouping service
-    raw_json: null,
+    raw_json: JSON.stringify(league),
   });
 
   // Store user-league mapping

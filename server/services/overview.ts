@@ -2,6 +2,7 @@ import { getUserByUsername } from "../db/queries/users.js";
 import { getLeaguesForUser } from "../db/queries/leagues.js";
 import { getRosterForUser } from "../db/queries/rosters.js";
 import { buildLeagueGroups } from "./league-groups.js";
+import { getDynastyLeagueIdsForUserAllSeasons } from "./dynasty-leagues.js";
 import type { OverviewData, LeagueSeason, LeagueGroup } from "../../shared/types.js";
 
 /**
@@ -12,7 +13,12 @@ export async function getOverview(username: string): Promise<OverviewData | null
   const user = await getUserByUsername(username);
   if (!user) return null;
 
-  const allLeagues = await getLeaguesForUser(user.user_id);
+  const [allUserLeagues, dynastyLeagueIds] = await Promise.all([
+    getLeaguesForUser(user.user_id),
+    getDynastyLeagueIdsForUserAllSeasons(user.user_id),
+  ]);
+  const dynastySet = new Set(dynastyLeagueIds);
+  const allLeagues = allUserLeagues.filter((l) => dynastySet.has(l.league_id));
 
   // Build league seasons with records
   const seasons: Record<string, LeagueSeason[]> = {};

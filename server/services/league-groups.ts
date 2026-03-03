@@ -4,6 +4,7 @@ import {
   updateLeagueGroupId,
 } from "../db/queries/leagues.js";
 import type { LeagueGroup } from "../../shared/types.js";
+import { getDynastyLeagueIdsForUserAllSeasons } from "./dynasty-leagues.js";
 
 interface LeagueRow {
   league_id: string;
@@ -23,7 +24,12 @@ interface LeagueRow {
 export async function buildLeagueGroups(
   userId: string
 ): Promise<LeagueGroup[]> {
-  const allLeagues = await getLeaguesForUser(userId);
+  const [allUserLeagues, dynastyLeagueIds] = await Promise.all([
+    getLeaguesForUser(userId),
+    getDynastyLeagueIdsForUserAllSeasons(userId),
+  ]);
+  const dynastySet = new Set(dynastyLeagueIds);
+  const allLeagues = allUserLeagues.filter((l) => dynastySet.has(l.league_id));
   if (allLeagues.length === 0) return [];
 
   // Load group overrides

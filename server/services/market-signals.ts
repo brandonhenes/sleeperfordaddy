@@ -1,6 +1,7 @@
 import { db } from "../db/connection.js";
 import { sql } from "drizzle-orm";
 import { computeEdgeScores } from "./edge-score.js";
+import { getDynastyLeagueIdsForUserLatestSeason } from "./dynasty-leagues.js";
 
 // ─── Tunable Thresholds ───
 
@@ -224,20 +225,22 @@ export function summarizeSignals(signals: MarketSignal[]): SignalSummary {
 // ─── User-Owned Filter ───
 
 export async function getUserOwnedPlayerIds(username: string): Promise<string[]> {
+  const userRows = await db.execute(sql`
+    SELECT user_id FROM users WHERE LOWER(username) = LOWER(${username}) LIMIT 1
+  `);
+  const userId = (userRows as unknown as { user_id: string }[])[0]?.user_id;
+  if (!userId) return [];
+
+  const dynastyLeagueIds = await getDynastyLeagueIdsForUserLatestSeason(userId);
+  if (dynastyLeagueIds.length === 0) return [];
+  const leagueIdFrags = dynastyLeagueIds.map((id) => sql`${id}`);
+  const inClause = sql.join(leagueIdFrags, sql`, `);
+
   const rows = await db.execute(sql`
     SELECT DISTINCT rp.player_id
     FROM roster_players rp
-    JOIN user_leagues ul ON rp.league_id = ul.league_id
-    JOIN users u ON ul.user_id = u.user_id
-    JOIN leagues l ON rp.league_id = l.league_id
-    WHERE LOWER(u.username) = LOWER(${username})
-      AND rp.owner_id = u.user_id
-      AND l.season = (
-        SELECT MAX(l2.season)
-        FROM user_leagues ul2
-        JOIN leagues l2 ON ul2.league_id = l2.league_id
-        WHERE ul2.user_id = u.user_id
-      )
+    WHERE rp.owner_id = ${userId}
+      AND rp.league_id IN (${inClause})
   `);
   return (rows as unknown as { player_id: string }[]).map((r) => r.player_id);
 }

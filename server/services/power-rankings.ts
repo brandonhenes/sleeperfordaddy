@@ -10,6 +10,7 @@ import {
   type ScoredPick, type DraftPick,
 } from "./draft-picks.js";
 import { optimizeLineup, type OptimizedLineup } from "./lineup-optimizer.js";
+import { getDynastyLeagueIdsForUserLatestSeason } from "./dynasty-leagues.js";
 
 // ─── Types ───
 
@@ -97,16 +98,16 @@ export async function getPowerRankings(username: string): Promise<LeaguePowerRan
   const userId = (userRows as unknown as { user_id: string }[])[0]?.user_id;
   if (!userId) return [];
 
+  const dynastyLeagueIds = await getDynastyLeagueIdsForUserLatestSeason(userId);
+  if (dynastyLeagueIds.length === 0) return [];
+
+  const leagueIdFrags = dynastyLeagueIds.map((id) => sql`${id}`);
+  const leagueInClause = sql.join(leagueIdFrags, sql`, `);
+
   const leagueRows = await db.execute(sql`
     SELECT l.league_id, l.name AS league_name, l.total_rosters
-    FROM user_leagues ul JOIN leagues l ON ul.league_id = l.league_id
-    WHERE ul.user_id = ${userId}
-      AND l.season = (
-        SELECT MAX(l2.season)
-        FROM user_leagues ul2
-        JOIN leagues l2 ON ul2.league_id = l2.league_id
-        WHERE ul2.user_id = ${userId}
-      )
+    FROM leagues l
+    WHERE l.league_id IN (${leagueInClause})
     ORDER BY l.name ASC
   `);
   type League = { league_id: string; league_name: string; total_rosters: number };

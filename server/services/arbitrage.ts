@@ -1,6 +1,7 @@
 import { db } from "../db/connection.js";
 import { sql } from "drizzle-orm";
 import { getCompositeValues } from "./composite-values.js";
+import { getDynastyLeagueIdsForUserLatestSeason } from "./dynasty-leagues.js";
 
 // ─── Types ───
 
@@ -28,19 +29,16 @@ export async function getFreeAgentGaps(username: string): Promise<ArbitrageGap[]
   const userId = (userRows as unknown as { user_id: string }[])[0]?.user_id;
   if (!userId) return [];
 
+  const dynastyLeagueIds = await getDynastyLeagueIdsForUserLatestSeason(userId);
+  if (dynastyLeagueIds.length === 0) return [];
+  const leagueIdFrags = dynastyLeagueIds.map((id) => sql`${id}`);
+  const leagueInClause = sql.join(leagueIdFrags, sql`, `);
+
   const rows = await db.execute(sql`
-    WITH user_latest_season AS (
-      SELECT MAX(l.season) AS season
-      FROM user_leagues ul
-      JOIN leagues l ON ul.league_id = l.league_id
-      WHERE ul.user_id = ${userId}
-    ),
     current_leagues AS (
       SELECT l.league_id
-      FROM user_leagues ul
-      JOIN leagues l ON ul.league_id = l.league_id
-      JOIN user_latest_season uls ON l.season = uls.season
-      WHERE ul.user_id = ${userId}
+      FROM leagues l
+      WHERE l.league_id IN (${leagueInClause})
     ),
     league_sync AS (
       SELECT rp.league_id, COUNT(DISTINCT rp.owner_id) AS synced_owners
