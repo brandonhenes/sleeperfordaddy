@@ -2,6 +2,7 @@ import { useParams } from "wouter";
 import AppShell from "../components/AppShell";
 import { SectionHeader } from "../components/ui";
 import { useDashboard } from "../hooks/use-dashboard";
+import { useEnsureUser } from "../hooks/use-ensure-user";
 import EmpireOverview from "../components/dashboard/EmpireOverview";
 import RosterHoles from "../components/dashboard/RosterHoles";
 import SourceMovers from "../components/dashboard/SourceMovers";
@@ -27,8 +28,97 @@ function today(): string {
 
 export default function Dashboard() {
   const { username } = useParams<{ username: string }>();
-  const { data, isLoading, error } = useDashboard(username);
+  const { phase, syncProgress, errorMsg, retry } = useEnsureUser(username);
+  const { data, isLoading, error } = useDashboard(
+    phase === "ready" ? username : undefined
+  );
 
+  // Show sync progress while ensuring user data exists
+  if (phase === "checking" || phase === "syncing") {
+    return (
+      <AppShell>
+        <div style={{ padding: "28px 0 8px" }}>
+          <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>Dashboard</h1>
+        </div>
+        <div
+          style={{
+            background: "var(--card)",
+            border: "1px solid var(--border)",
+            borderRadius: 12,
+            padding: "48px 24px",
+            textAlign: "center",
+          }}
+        >
+          <div
+            style={{
+              fontSize: 14,
+              color: "var(--amber)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 8,
+            }}
+          >
+            <span className="animate-pulse">●</span>
+            {phase === "checking"
+              ? `Looking up ${username}...`
+              : `Syncing ${username}'s leagues${
+                  syncProgress
+                    ? ` (${syncProgress.done}/${syncProgress.total})`
+                    : "..."
+                }`}
+          </div>
+          <p style={{ color: "var(--text-muted)", fontSize: 12, marginTop: 12 }}>
+            {phase === "syncing"
+              ? "First-time sync may take a minute. Pulling leagues, rosters, and player data from Sleeper."
+              : "Checking if data is available..."}
+          </p>
+        </div>
+      </AppShell>
+    );
+  }
+
+  // Show error with retry
+  if (phase === "error") {
+    return (
+      <AppShell>
+        <div style={{ padding: "28px 0 8px" }}>
+          <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>Dashboard</h1>
+        </div>
+        <div
+          style={{
+            background: "var(--card)",
+            border: "1px solid var(--border)",
+            borderRadius: 12,
+            padding: "48px 24px",
+            textAlign: "center",
+          }}
+        >
+          <p style={{ color: "var(--red)", fontSize: 14, margin: 0 }}>
+            {errorMsg || "Something went wrong."}
+          </p>
+          <button
+            onClick={retry}
+            style={{
+              marginTop: 16,
+              background: "linear-gradient(135deg, var(--amber), var(--amber-dark))",
+              color: "var(--dark-base)",
+              border: "none",
+              borderRadius: 8,
+              padding: "10px 20px",
+              fontWeight: 700,
+              fontSize: 13,
+              cursor: "pointer",
+            }}
+          >
+            Try Again
+          </button>
+        </div>
+      </AppShell>
+    );
+  }
+
+  // Normal dashboard loading (data fetch after sync is confirmed)
   if (isLoading) return <AppShell><LoadingSkeleton username={username} /></AppShell>;
   if (error || !data) {
     return (
@@ -79,39 +169,45 @@ export default function Dashboard() {
   );
 }
 
-// ─── Shared ───
-
-const skel = { background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10 } as const;
-
+/** Skeleton loader */
 function LoadingSkeleton({ username }: { username: string | undefined }) {
   return (
     <>
       <div style={{ padding: "28px 0 8px" }}>
-        <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>{greeting()}, {username}</h1>
-        <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 4 }}>Loading...</p>
+        <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>
+          {greeting()}, {username}
+        </h1>
+        <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 4 }}>{today()}</p>
       </div>
-      <div style={{ display: "flex", gap: 16, marginTop: 16 }}>
-        {[1, 2, 3, 4].map((i) => (
-          <div key={i} className="animate-pulse" style={{ ...skel, flex: 1, minWidth: 140, height: 100 }} />
-        ))}
-      </div>
-      {[1, 2, 3, 4, 5].map((i) => (
-        <div key={i} className="animate-pulse" style={{ ...skel, height: 160, marginTop: 32 }} />
+      {[1, 2, 3].map((i) => (
+        <div
+          key={i}
+          className="animate-pulse"
+          style={{
+            background: "var(--card)",
+            border: "1px solid var(--border)",
+            borderRadius: 12,
+            height: 120,
+            marginTop: 16,
+          }}
+        />
       ))}
     </>
   );
 }
 
+/** Empty state card */
 function EmptyCard({ label }: { label: string }) {
   return (
     <div
       style={{
         background: "var(--card)",
         border: "1px solid var(--border)",
-        borderRadius: 10,
-        padding: 40,
+        borderRadius: 12,
+        padding: "48px 24px",
         textAlign: "center",
         color: "var(--text-muted)",
+        fontSize: 14,
       }}
     >
       {label}

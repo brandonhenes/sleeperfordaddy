@@ -1,59 +1,26 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
-import { useOverview, useStartSync, useSyncStatus } from "../hooks/use-sleeper";
-
-type Phase = "idle" | "checking" | "syncing" | "error";
+import { useEnsureUser } from "../hooks/use-ensure-user";
 
 export default function Landing() {
   const [username, setUsername] = useState("");
-  const [phase, setPhase] = useState<Phase>("idle");
-  const [activeUser, setActiveUser] = useState("");
-  const [errorMsg, setErrorMsg] = useState("");
+  const [activeUser, setActiveUser] = useState<string | undefined>(undefined);
   const [, navigate] = useLocation();
-  const syncTriggered = useRef(false);
 
-  const overview = useOverview(phase === "checking" ? activeUser : undefined);
-  const sync = useStartSync();
-  const syncStatus = useSyncStatus(activeUser, phase === "syncing");
+  const { phase, syncProgress, errorMsg, retry } = useEnsureUser(activeUser);
 
-  // Handle overview result
+  // Navigate to dashboard when ready
   useEffect(() => {
-    if (phase !== "checking") return;
-    if (overview.data) {
+    if (phase === "ready" && activeUser) {
       navigate(`/dashboard/${encodeURIComponent(activeUser)}`);
     }
-    if (overview.error && !syncTriggered.current) {
-      syncTriggered.current = true;
-      setPhase("syncing");
-      sync.mutate(activeUser, {
-        onError: (err) => {
-          setPhase("error");
-          setErrorMsg(err.message);
-        },
-      });
-    }
-  }, [phase, overview.data, overview.error, activeUser, navigate, sync]);
-
-  // Handle sync completion
-  useEffect(() => {
-    if (phase !== "syncing" || !syncStatus.data) return;
-    const s = syncStatus.data.status;
-    if (s === "done" || s === "complete") {
-      navigate(`/dashboard/${encodeURIComponent(activeUser)}`);
-    } else if (s === "error" || s === "failed") {
-      setPhase("error");
-      setErrorMsg(syncStatus.data.error || "Sync failed");
-    }
-  }, [phase, syncStatus.data, activeUser, navigate]);
+  }, [phase, activeUser, navigate]);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const trimmed = username.trim().toLowerCase();
     if (!trimmed) return;
-    syncTriggered.current = false;
     setActiveUser(trimmed);
-    setPhase("checking");
-    setErrorMsg("");
   }
 
   const isLoading = phase === "checking" || phase === "syncing";
@@ -164,16 +131,35 @@ export default function Landing() {
         >
           <span className="animate-pulse">●</span>
           Syncing {activeUser}'s leagues...
-          {syncStatus.data?.leagues_done != null &&
-          syncStatus.data?.leagues_total
-            ? ` (${syncStatus.data.leagues_done}/${syncStatus.data.leagues_total})`
+          {syncProgress
+            ? ` (${syncProgress.done}/${syncProgress.total})`
             : ""}
         </div>
       )}
 
       {phase === "error" && (
-        <div style={{ marginTop: 20, color: "var(--red)", fontSize: 13 }}>
-          {errorMsg || "Something went wrong. Try again."}
+        <div style={{ marginTop: 20, textAlign: "center" }}>
+          <div style={{ color: "var(--red)", fontSize: 13 }}>
+            {errorMsg || "Something went wrong. Try again."}
+          </div>
+          <button
+            onClick={() => {
+              setActiveUser(undefined);
+              retry();
+            }}
+            style={{
+              marginTop: 8,
+              background: "transparent",
+              border: "1px solid var(--border)",
+              borderRadius: 6,
+              padding: "6px 14px",
+              color: "var(--text-muted)",
+              fontSize: 12,
+              cursor: "pointer",
+            }}
+          >
+            Try Again
+          </button>
         </div>
       )}
 
