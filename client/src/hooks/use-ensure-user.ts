@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useOverview, useStartSync, useSyncStatus } from "./use-sleeper";
 
-export type EnsurePhase = "checking" | "syncing" | "ready" | "error";
+export type EnsurePhase = "idle" | "checking" | "syncing" | "ready" | "error";
 
 interface EnsureUserResult {
   /** Current phase of the check/sync flow */
@@ -26,13 +26,24 @@ interface EnsureUserResult {
  * Used by Landing, Dashboard, and any other page that needs user data.
  */
 export function useEnsureUser(username: string | undefined): EnsureUserResult {
-  const [phase, setPhase] = useState<EnsurePhase>("checking");
+  const [phase, setPhase] = useState<EnsurePhase>(username ? "checking" : "idle");
   const [errorMsg, setErrorMsg] = useState("");
   const syncTriggered = useRef(false);
   const queryClient = useQueryClient();
 
   // Step 1: Try loading overview (quick existence check)
   const overview = useOverview(phase === "checking" && !!username ? username : undefined);
+
+  // Transition from idle to checking when username is set
+  useEffect(() => {
+    if (username && phase === "idle") {
+      syncTriggered.current = false;
+      setPhase("checking");
+    }
+    if (!username) {
+      setPhase("idle");
+    }
+  }, [username, phase]);
 
   // Step 2: Sync mutation
   const sync = useStartSync();
@@ -44,13 +55,13 @@ export function useEnsureUser(username: string | undefined): EnsureUserResult {
   useEffect(() => {
     if (phase !== "checking" || !username) return;
 
-    if (overview.data && (overview.data.totals?.leagues ?? 0) > 0) {
-      // User data exists with synced leagues — we're good
+    if (overview.data && overview.data.totals?.leagues > 0) {
+      // User data exists with actual leagues — we're good
       setPhase("ready");
       return;
     }
 
-    if ((overview.error || (overview.data && (overview.data.totals?.leagues ?? 0) === 0)) && !syncTriggered.current) {
+    if ((overview.error || (overview.data && overview.data.totals?.leagues === 0)) && !syncTriggered.current) {
       // User data doesn't exist — kick off sync
       syncTriggered.current = true;
       setPhase("syncing");
