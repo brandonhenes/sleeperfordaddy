@@ -1,7 +1,7 @@
 import { db } from "../db/connection.js";
 import { sql } from "drizzle-orm";
 import { getDynastyLeagueIdsForUserLatestSeason } from "./dynasty-leagues.js";
-import { getCompositeValues } from "./composite-values.js";
+import { getCompositeValues, getGlobalScaleParams } from "./composite-values.js";
 
 // ─── Types ───
 
@@ -34,7 +34,21 @@ interface ExposureRow {
   position: string | null;
   team: string | null;
   league_count: number;
+  fc_value: number | null;
   trend_30day: number | null;
+}
+
+function toEdgeFromValue(
+  value: number | null | undefined,
+  scale: { floor: number; max: number }
+): number | null {
+  if (value == null || value <= 0) return null;
+  if (!(scale.max > scale.floor && scale.floor > 0)) return null;
+  const logVal = Math.log(value);
+  const logFloor = Math.log(scale.floor);
+  const logMax = Math.log(scale.max);
+  const raw = (logVal - logFloor) / (logMax - logFloor);
+  return Math.max(39, Math.min(99, Math.round(39 + raw * 60)));
 }
 
 async function getUserExposure(username: string): Promise<{ totalLeagues: number; rows: ExposureRow[] }> {
@@ -56,6 +70,7 @@ async function getUserExposure(username: string): Promise<{ totalLeagues: number
       pm.position,
       pm.team,
       COUNT(DISTINCT rp.league_id)::int AS league_count,
+      fc.dynasty_value::int AS fc_value,
       fc.trend_30day::int AS trend_30day
     FROM roster_players rp
     JOIN players_master pm ON rp.player_id = pm.player_id
@@ -65,7 +80,7 @@ async function getUserExposure(username: string): Promise<{ totalLeagues: number
     WHERE rp.owner_id = ${userId}
       AND rp.league_id IN (${inClause})
       AND pm.position IN ('QB', 'RB', 'WR', 'TE')
-    GROUP BY pm.player_id, pm.full_name, pm.position, pm.team, fc.trend_30day
+    GROUP BY pm.player_id, pm.full_name, pm.position, pm.team, fc.dynasty_value, fc.trend_30day
   `);
 
   return {
@@ -89,13 +104,24 @@ export async function getSellCandidates(
     Array.from(new Set(rows.map((r) => r.player_id))),
     "sf"
   );
+  const global = await getGlobalScaleParams("sf");
 
   return rows
     .map((r) => {
       const exposurePct = totalLeagues > 0 ? r.league_count / totalLeagues : 0;
+      const currentEdgeFromFc = toEdgeFromValue(r.fc_value, global.fc);
+      const previousFc = r.fc_value != null && r.trend_30day != null
+        ? r.fc_value - r.trend_30day
+        : null;
+      const previousEdgeFromFc = toEdgeFromValue(previousFc, global.fc);
+      const edgeTrend =
+        currentEdgeFromFc != null && previousEdgeFromFc != null
+          ? currentEdgeFromFc - previousEdgeFromFc
+          : null;
+
       let compositeTag: string | null = null;
-      if ((r.trend_30day ?? 0) < -200 && exposurePct > 0.33) compositeTag = "HIGH_EXPOSURE_RISK";
-      else if ((r.trend_30day ?? 0) < -200) compositeTag = "TRENDING_DOWN";
+      if ((edgeTrend ?? 0) <= -3 && exposurePct > 0.33) compositeTag = "HIGH_EXPOSURE_RISK";
+      else if ((edgeTrend ?? 0) <= -3) compositeTag = "TRENDING_DOWN";
       else if (exposurePct > 0.33) compositeTag = "HIGH_EXPOSURE_RISK";
       const edge = compMap.get(r.player_id);
       return {
@@ -106,10 +132,10 @@ export async function getSellCandidates(
         total_leagues: totalLeagues,
         composite_tag: compositeTag,
         edge_score: edge?.edge_score ?? null,
-        trend_30day: r.trend_30day,
+        trend_30day: edgeTrend,
       };
     })
-    .filter((r) => r.composite_tag != null || (r.trend_30day ?? 0) < -200)
+    .filter((r) => r.composite_tag != null || (r.trend_30day ?? 0) <= -3)
     .sort((a, b) => (a.trend_30day ?? 0) - (b.trend_30day ?? 0));
 }
 
