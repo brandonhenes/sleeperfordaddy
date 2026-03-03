@@ -249,6 +249,10 @@ async function runSync(jobId: string, username: string) {
  */
 async function processLeague(league: SleeperLeague, userId: string) {
   const season = parseInt(league.season, 10);
+  const leagueType =
+    typeof league.settings?.type === "number"
+      ? (league.settings.type as number)
+      : null;
 
   // Store league
   await upsertLeague({
@@ -259,6 +263,7 @@ async function processLeague(league: SleeperLeague, userId: string) {
     status: league.status,
     total_rosters: league.total_rosters,
     previous_league_id: league.previous_league_id,
+    league_type: leagueType,
     group_id: null, // Will be set by league grouping service
     raw_json: JSON.stringify(league),
   });

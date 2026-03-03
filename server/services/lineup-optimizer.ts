@@ -40,7 +40,19 @@ export interface OptimizedLineup {
 
 // ─── Slot Eligibility ───
 
-const BENCH_SLOTS = new Set(["BN", "IR", "TAXI"]);
+const EXCLUDED_SLOTS = new Set(["DEF", "K", "BN", "IR", "TAXI"]);
+const STARTER_SLOT_WHITELIST = new Set([
+  "QB",
+  "RB",
+  "WR",
+  "TE",
+  "FLEX",
+  "RB/WR/TE",
+  "SUPER_FLEX",
+  "QB/RB/WR/TE",
+  "REC_FLEX",
+  "WR/TE",
+]);
 
 function isEligible(playerPos: string, slot: string): boolean {
   switch (slot) {
@@ -59,8 +71,7 @@ function isEligible(playerPos: string, slot: string): boolean {
       return playerPos === "WR" || playerPos === "TE";
     default:
       // Unknown slot — treat as FLEX
-      if (BENCH_SLOTS.has(slot)) return false;
-      return playerPos === "RB" || playerPos === "WR" || playerPos === "TE";
+      return false;
   }
 }
 
@@ -74,7 +85,9 @@ function normalizeSlotLabel(slot: string): string {
 }
 
 function nameSlots(rawSlots: string[]): { slot: string; label: string }[] {
-  const starterSlots = rawSlots.filter((s) => !BENCH_SLOTS.has(s));
+  const starterSlots = rawSlots.filter(
+    (s) => !EXCLUDED_SLOTS.has(s) && STARTER_SLOT_WHITELIST.has(s)
+  );
   const counts: Record<string, number> = {};
   const result: { slot: string; label: string }[] = [];
 

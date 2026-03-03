@@ -18,4 +18,19 @@ router.get("/api/arbitrage/free-agents", async (req, res) => {
   }
 });
 
+/** GET /api/arbitrage/:username */
+router.get("/api/arbitrage/:username", async (req, res) => {
+  try {
+    const username = (req.params.username as string) || "";
+    if (!username) {
+      return res.status(400).json({ message: "username is required" });
+    }
+    const data = await getFreeAgentGaps(username);
+    res.json(data);
+  } catch (err) {
+    console.error("[arbitrage] Error:", err);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
 export default router;

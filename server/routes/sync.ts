@@ -12,14 +12,17 @@ router.post("/api/sync", async (req, res) => {
       return res.status(400).json({ message: "username is required" });
     }
 
-    const { needsSync, syncJob } = await checkSyncStatus(username);
+    const force = req.body.force === true;
 
-    if (!needsSync && syncJob) {
-      return res.json({
-        job_id: syncJob.job_id,
-        status: syncJob.status,
-        message: "Sync is fresh or already running",
-      });
+    if (!force) {
+      const { needsSync, syncJob } = await checkSyncStatus(username);
+      if (!needsSync && syncJob) {
+        return res.json({
+          job_id: syncJob.job_id,
+          status: syncJob.status,
+          message: "Sync is fresh or already running",
+        });
+      }
     }
 
     const { jobId, alreadyRunning } = await startSync(username);

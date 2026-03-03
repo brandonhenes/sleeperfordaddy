@@ -31,6 +31,7 @@ export const leagues = pgTable(
     status: text("status").notNull(),
     total_rosters: integer("total_rosters"),
     previous_league_id: text("previous_league_id"),
+    league_type: integer("league_type"),
     group_id: text("group_id"),
     raw_json: text("raw_json"),
     updated_at: bigint("updated_at", { mode: "number" }).notNull(),

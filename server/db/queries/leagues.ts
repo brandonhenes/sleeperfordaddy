@@ -15,6 +15,7 @@ export async function upsertLeague(league: {
   status: string;
   total_rosters: number | null;
   previous_league_id: string | null;
+  league_type: number | null;
   group_id: string | null;
   raw_json: string | null;
 }) {
@@ -30,6 +31,7 @@ export async function upsertLeague(league: {
         status: league.status,
         total_rosters: league.total_rosters,
         previous_league_id: league.previous_league_id,
+        league_type: league.league_type,
         group_id: league.group_id,
         raw_json: league.raw_json,
         updated_at: Date.now(),
