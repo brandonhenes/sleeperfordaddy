@@ -1,5 +1,5 @@
 import { jget } from "../sleeper/client.js";
-import { getLeagueDrafts } from "../sleeper/drafts.js";
+import { getDraftPicks, getLeagueDrafts } from "../sleeper/drafts.js";
 import { getLeagueRosters } from "../sleeper/rosters.js";
 import { db } from "../db/connection.js";
 import { sql } from "drizzle-orm";
@@ -112,13 +112,14 @@ export async function getRookieDraftOrder(
   const drafts = await getLeagueDrafts(leagueId);
   const currentYear = String(new Date().getFullYear());
 
-  // Find current-year rookie draft with usable order signals.
-  const rookieDraft = drafts.find(
-    (d) =>
-      d.season === currentYear &&
-      (!!d.draft_order || !!d.slot_to_roster_id) &&
-      Number(d.settings?.rounds ?? 99) <= 5
-  );
+  // Prefer likely rookie drafts in current season, but allow fallback
+  // derivation even when order fields are missing.
+  const currentYearDrafts = drafts
+    .filter((d) => d.season === currentYear && Number(d.settings?.rounds ?? 99) <= 8)
+    .sort((a, b) => Number(a.settings?.rounds ?? 99) - Number(b.settings?.rounds ?? 99));
+
+  const rookieDraft = currentYearDrafts.find((d) => !!d.slot_to_roster_id || !!d.draft_order)
+    ?? currentYearDrafts[0];
   if (!rookieDraft) return null;
 
   // Preferred: exact slot -> roster mapping from Sleeper.
@@ -149,7 +150,27 @@ export async function getRookieDraftOrder(
       order.set(rosterId, pos);
     }
   }
-  return order.size > 0 ? order : null;
+  if (order.size > 0) return order;
+
+  // Last fallback: derive slot order from actual picks in round 1.
+  const picks = await getDraftPicks(rookieDraft.draft_id);
+  if (!picks?.length) return null;
+
+  const firstRound = picks
+    .filter((p) => Number(p.round) === 1)
+    .sort((a, b) => Number(a.pick_no) - Number(b.pick_no));
+
+  if (firstRound.length === 0) return null;
+
+  const byRoster = new Map<number, number>();
+  for (const p of firstRound) {
+    const rosterId = Number(p.roster_id);
+    const slot = Number(p.draft_slot);
+    if (!Number.isFinite(rosterId) || !Number.isFinite(slot)) continue;
+    if (!byRoster.has(rosterId)) byRoster.set(rosterId, slot);
+  }
+
+  return byRoster.size > 0 ? byRoster : null;
 }
 
 // ─── Build Item 2: Classify Picks ───
