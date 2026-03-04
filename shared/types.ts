@@ -243,3 +243,109 @@ export interface LeagueSeason {
   total_rosters: number;
   avatar: string | null;
 }
+
+// ─── Trade Calculator ───
+
+export interface TradeAssetInput {
+  type: "player" | "pick";
+  player_id?: string;
+  pick_season?: string;
+  pick_round?: number;
+  pick_tier?: "early" | "mid" | "late";
+}
+
+export interface TradeEvaluation {
+  sideA: { assets: EvaluatedAsset[]; total_edge: number };
+  sideB: { assets: EvaluatedAsset[]; total_edge: number };
+  delta: number; // positive = sideA wins
+  fairness: "fair" | "slight_edge" | "lopsided";
+}
+
+export interface EvaluatedAsset {
+  label: string;
+  edge_score: number;
+  fc_score: number | null;
+  ktc_score: number | null;
+  dp_score: number | null;
+  source_agreement: "high" | "medium" | "low";
+}
+
+// ─── Trade Finder ───
+
+export interface TradeSuggestion {
+  team_a: { roster_id: number; display_name: string; gives: EvaluatedAsset[]; reason: string };
+  team_b: { roster_id: number; display_name: string; gives: EvaluatedAsset[]; reason: string };
+  mutual_benefit_score: number;
+  fairness: "fair" | "slight_edge" | "lopsided";
+}
+
+// ─── League History ───
+
+export interface TeamValueSnapshot {
+  league_id: string;
+  roster_id: number;
+  owner_id: string;
+  snapshot_date: string;
+  total_edge: number;
+  starter_edge: number;
+  draft_capital_edge: number;
+  archetype: string;
+}
+
+export interface LeagueHistoryData {
+  group_id: string;
+  group_name: string;
+  seasons: LeagueHistorySeason[];
+}
+
+export interface LeagueHistorySeason {
+  season: number;
+  league_id: string;
+  teams: LeagueHistoryTeam[];
+}
+
+export interface LeagueHistoryTeam {
+  owner_id: string;
+  display_name: string;
+  wins: number;
+  losses: number;
+  fpts: number;
+  finish_place: number | null;
+  snapshots: TeamValueSnapshot[];
+}
+
+// ─── Injury Tracker ───
+
+export interface InjuredPlayerView {
+  player_id: string;
+  full_name: string;
+  position: string;
+  team: string;
+  injury_status: string; // "Out", "Doubtful", "Questionable", "IR", "PUP"
+  injury_body_part: string | null;
+  injury_start_date: string | null;
+  estimated_return_week: number | null;
+  estimated_return_date: string | null;
+  league_count: number;
+  total_leagues: number;
+  exposure_pct: number;
+  current_edge_score: number;
+  pre_injury_edge_score: number | null;
+  value_change_pct: number | null;
+}
+
+export interface BuyingWindow {
+  player: InjuredPlayerView;
+  opportunity_score: number; // 0-100, higher = better buy
+  buy_reasons: string[];
+  risk_factors: string[];
+  leagues_to_target: { league_id: string; league_name: string; owner_display_name: string }[];
+}
+
+export interface InjuryRecoveryBaseline {
+  injury_type: string;
+  position: string;
+  avg_weeks_out: number;
+  min_weeks: number;
+  max_weeks: number;
+}

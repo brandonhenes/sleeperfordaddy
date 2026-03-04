@@ -14,18 +14,24 @@ const NAV_ITEMS = [
   { path: "arbitrage", label: "Arbitrage", icon: "🔀" },
   { path: "power", label: "Power", icon: "📋" },
   { path: "signals", label: "Signals", icon: "📊" },
+  { path: "trade-calculator", label: "Trade Calc", icon: "⚖️" },
+  { path: "trade-finder", label: "Trade Finder", icon: "🔍" },
+  { path: "history", label: "History", icon: "📅" },
+  { path: "injuries", label: "Injuries", icon: "🏥" },
 ];
 
 export default function NavBar({ username, avatarId }: NavBarProps) {
   const [location] = useLocation();
 
+  const noUserPaths = ["market", "trade-calculator"];
+
   function isActive(path: string): boolean {
-    if (path === "market") return location.startsWith("/market");
+    if (noUserPaths.includes(path)) return location.startsWith(`/${path}`);
     return location.includes(`/${path}/`);
   }
 
   function navHref(path: string): string {
-    if (path === "market") return "/market";
+    if (noUserPaths.includes(path)) return `/${path}`;
     return `/${path}/${encodeURIComponent(username)}`;
   }
 

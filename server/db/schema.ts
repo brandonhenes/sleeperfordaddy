@@ -209,6 +209,10 @@ export const players_master = pgTable("players_master", {
   status: text("status"),
   age: integer("age"),
   years_exp: integer("years_exp"),
+  injury_status: text("injury_status"),
+  injury_body_part: text("injury_body_part"),
+  injury_start_date: text("injury_start_date"),
+  injury_notes: text("injury_notes"),
   updated_at: bigint("updated_at", { mode: "number" }).notNull(),
 });
 
@@ -259,3 +263,56 @@ export const group_overrides = pgTable("group_overrides", {
   league_id: text("league_id").primaryKey(),
   forced_group_id: text("forced_group_id").notNull(),
 });
+
+// ─── League History ───
+
+export const team_value_snapshots = pgTable(
+  "team_value_snapshots",
+  {
+    league_id: text("league_id").notNull(),
+    roster_id: integer("roster_id").notNull(),
+    owner_id: text("owner_id").notNull(),
+    snapshot_date: text("snapshot_date").notNull(),
+    total_edge_score: real("total_edge_score").default(0),
+    starter_edge_score: real("starter_edge_score").default(0),
+    draft_capital_edge: real("draft_capital_edge").default(0),
+    archetype: text("archetype"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.league_id, table.roster_id, table.snapshot_date] }),
+    index("idx_team_snapshots_owner").on(table.owner_id),
+    index("idx_team_snapshots_date").on(table.snapshot_date),
+  ]
+);
+
+// ─── Injury Tracker ───
+
+export const injury_recovery_baselines = pgTable(
+  "injury_recovery_baselines",
+  {
+    injury_type: text("injury_type").notNull(),
+    position: text("position").notNull(),
+    avg_weeks_out: integer("avg_weeks_out").notNull(),
+    min_weeks: integer("min_weeks").notNull(),
+    max_weeks: integer("max_weeks").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.injury_type, table.position] }),
+  ]
+);
+
+export const player_value_snapshots = pgTable(
+  "player_value_snapshots",
+  {
+    player_id: text("player_id").notNull(),
+    snapshot_date: text("snapshot_date").notNull(),
+    edge_score: real("edge_score"),
+    fc_value: real("fc_value"),
+    ktc_value: real("ktc_value"),
+    dp_value: real("dp_value"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.player_id, table.snapshot_date] }),
+    index("idx_player_value_snapshots_date").on(table.snapshot_date),
+  ]
+);

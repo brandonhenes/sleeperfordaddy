@@ -9,6 +9,10 @@ import Arbitrage from "./pages/Arbitrage";
 import RosterGrades from "./pages/RosterGrades";
 import PowerRankings from "./pages/PowerRankings";
 import MarketSignals from "./pages/MarketSignals";
+import TradeCalculator from "./pages/TradeCalculator";
+import TradeFinder from "./pages/TradeFinder";
+import LeagueHistory from "./pages/LeagueHistory";
+import InjuryTracker from "./pages/InjuryTracker";
 import NotFound from "./pages/NotFound";
 
 export default function App() {
@@ -24,6 +28,10 @@ export default function App() {
       <Route path="/power/:username" component={PowerRankings} />
       <Route path="/signals/:username" component={MarketSignals} />
       <Route path="/player/:playerName" component={PlayerDetail} />
+      <Route path="/trade-calculator" component={TradeCalculator} />
+      <Route path="/trade-finder/:username" component={TradeFinder} />
+      <Route path="/history/:username" component={LeagueHistory} />
+      <Route path="/injuries/:username" component={InjuryTracker} />
       {/* Keep legacy route working */}
       <Route path="/user/:username" component={Dashboard} />
       <Route component={NotFound} />

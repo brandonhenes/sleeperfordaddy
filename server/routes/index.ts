@@ -11,6 +11,10 @@ import arbitrageRoutes from "./arbitrage.js";
 import rosterGradesRoutes from "./roster-grades.js";
 import powerRankingsRoutes from "./power-rankings.js";
 import marketSignalsRoutes from "./market-signals.js";
+import tradeCalculatorRoutes from "./trade-calculator.js";
+import tradeFinderRoutes from "./trade-finder.js";
+import leagueHistoryRoutes from "./league-history.js";
+import injuryTrackerRoutes from "./injury-tracker.js";
 
 const router = Router();
 
@@ -32,5 +36,9 @@ router.use(arbitrageRoutes);
 router.use(rosterGradesRoutes);
 router.use(powerRankingsRoutes);
 router.use(marketSignalsRoutes);
+router.use(tradeCalculatorRoutes);
+router.use(tradeFinderRoutes);
+router.use(leagueHistoryRoutes);
+router.use(injuryTrackerRoutes);
 
 export default router;
