@@ -96,10 +96,10 @@ function normalizeSlotLabel(slot: string): string {
   return slot;
 }
 
-function nameSlots(rawSlots: string[]): { slot: string; label: string }[] {
+function nameSlots(rawSlots: string[]): { slot: string; label: string; raw: string }[] {
   const starterSlots = rawSlots.filter((s) => isStarterSlot(s));
   const counts: Record<string, number> = {};
-  const result: { slot: string; label: string }[] = [];
+  const result: { slot: string; label: string; raw: string }[] = [];
 
   for (const raw of starterSlots) {
     const label = normalizeSlotLabel(raw);
@@ -111,7 +111,7 @@ function nameSlots(rawSlots: string[]): { slot: string; label: string }[] {
     const label = normalizeSlotLabel(raw);
     idx[label] = (idx[label] ?? 0) + 1;
     const name = counts[label] > 1 ? `${label}${idx[label]}` : label;
-    result.push({ slot: name, label });
+    result.push({ slot: name, label, raw });
   }
 
   return result;
@@ -144,8 +144,8 @@ export function optimizeLineup(
   const starters: SlottedPlayer[] = [];
 
   // Greedy fill: for each slot, find best available eligible player
-  for (const { slot, label } of namedSlots) {
-    const best = sorted.find((p) => !used.has(p.player_id) && isEligible(p.position, slot));
+  for (const { slot, label, raw } of namedSlots) {
+    const best = sorted.find((p) => !used.has(p.player_id) && isEligible(p.position, raw));
     if (best) {
       used.add(best.player_id);
       starters.push({ ...best, slot, slot_label: label, is_starter: true });
