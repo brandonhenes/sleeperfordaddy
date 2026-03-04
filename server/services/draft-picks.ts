@@ -107,6 +107,22 @@ export async function getLeagueDraftPicks(
  * Returns a Map of user_id → pick_position (1-based), or null if unavailable.
  */
 export async function getRookieDraftOrder(
+  leagueId: string,
+  fallbackLeagueIds: string[] = []
+): Promise<Map<number, number> | null> {
+  const candidates = [leagueId, ...fallbackLeagueIds].filter(
+    (id, i, arr) => !!id && arr.indexOf(id) === i
+  );
+
+  for (const candidateLeagueId of candidates) {
+    const order = await getRookieDraftOrderForLeague(candidateLeagueId);
+    if (order && order.size > 0) return order;
+  }
+
+  return null;
+}
+
+async function getRookieDraftOrderForLeague(
   leagueId: string
 ): Promise<Map<number, number> | null> {
   const drafts = await getLeagueDrafts(leagueId);

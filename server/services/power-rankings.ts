@@ -1,7 +1,6 @@
 import { db } from "../db/connection.js";
 import { sql } from "drizzle-orm";
-import { getLeague } from "../sleeper/leagues.js";
-import { getLeagueUsers } from "../sleeper/leagues.js";
+import { getLeague, getLeagueUsers, getUserLeagues } from "../sleeper/leagues.js";
 import { getLeagueRosters } from "../sleeper/rosters.js";
 import { getAgeCurveStatus, type AgeCurveStatus } from "./age-curves.js";
 import { classifyTeam, percentileRank } from "./archetypes.js";
@@ -147,6 +146,24 @@ export async function getPowerRankings(username: string): Promise<LeaguePowerRan
 
   const DEFAULT_POS = ["QB", "RB", "RB", "WR", "WR", "WR", "TE", "FLEX", "BN", "BN", "BN", "BN", "BN", "BN", "BN"];
 
+  const renewalMap = new Map<string, string[]>();
+  try {
+    const year = new Date().getFullYear();
+    const [thisSeason, nextSeason] = await Promise.all([
+      getUserLeagues(userId, year),
+      getUserLeagues(userId, year + 1),
+    ]);
+    for (const lg of [...thisSeason, ...nextSeason]) {
+      const prev = lg.previous_league_id;
+      if (!prev) continue;
+      const arr = renewalMap.get(prev) ?? [];
+      if (!arr.includes(lg.league_id)) arr.push(lg.league_id);
+      renewalMap.set(prev, arr);
+    }
+  } catch {
+    // Non-fatal: if lookup fails, we still try the current league only.
+  }
+
   // Fetch league settings, draft picks, and draft order
   const settingsMap = new Map<string, { sf: boolean; slots: number; rosterPositions: string[] }>();
   const dpMap = new Map<string, DraftPick[]>();
@@ -159,7 +176,7 @@ export async function getPowerRankings(username: string): Promise<LeaguePowerRan
 
       const [detail, draftOrder, usersFallback, rostersFallback] = await Promise.all([
         getLeague(l.league_id),
-        getRookieDraftOrder(l.league_id),
+        getRookieDraftOrder(l.league_id, renewalMap.get(l.league_id) ?? []),
         needsNames ? getLeagueUsers(l.league_id) : Promise.resolve([]),
         needsRosterIds ? getLeagueRosters(l.league_id) : Promise.resolve([]),
       ]);
