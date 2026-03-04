@@ -12,6 +12,7 @@ import {
   type CoreAsset,
   type SlottedPlayer,
   type SlotGrade,
+  type ScoredPick,
 } from "../hooks/use-power-rankings";
 
 // ─── Helpers ───
@@ -102,6 +103,13 @@ function slotColor(score: number): string {
   if (score >= 85) return "#22c55e";
   if (score >= 70) return "#eab308";
   return "#ef4444";
+}
+
+function formatPickLabel(pk: ScoredPick): string {
+  if (pk.pick_slot != null) {
+    return `${pk.round}.${String(pk.pick_slot).padStart(2, "0")}`;
+  }
+  return pk.label;
 }
 
 function PlayerRow({ p, slotLabel }: { p: SlottedPlayer | CoreAsset; slotLabel?: string }) {
@@ -198,7 +206,7 @@ function ExpandedRosterView({ roster }: { roster: RosterRanking }) {
                 <div key={`${pk.season}_${pk.round}_${pk.original_owner_id}_${i}`}
                   style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12 }}>
                   <span style={{ color: "#06b6d4", fontWeight: 700, fontSize: 10, width: 36, textAlign: "right" }}>PICK</span>
-                  <span style={{ flex: 1, fontWeight: 500 }}>{pk.label}</span>
+                  <span style={{ flex: 1, fontWeight: 500 }}>{formatPickLabel(pk)}</span>
                   <EdgeScoreBadge score={pk.edge_score} size="sm" />
                   <SourceBadge fc_score={null} ktc_score={pk.ktc_score} dp_score={pk.dp_score}
                     sources_available={src} source_agreement={agr} maxSources={2} />

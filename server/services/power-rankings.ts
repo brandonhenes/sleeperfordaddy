@@ -150,7 +150,7 @@ export async function getPowerRankings(username: string): Promise<LeaguePowerRan
   // Fetch league settings, draft picks, and draft order
   const settingsMap = new Map<string, { sf: boolean; slots: number; rosterPositions: string[] }>();
   const dpMap = new Map<string, DraftPick[]>();
-  const draftOrderMap = new Map<string, Map<string, number>>(); // league_id → user_id → position
+  const draftOrderMap = new Map<string, Map<number, number>>(); // league_id → roster_id → position
   await Promise.all(leagues.map(async (l) => {
     try {
       const ownerIdsInLeague = Object.keys(nested[l.league_id] ?? {});
@@ -216,17 +216,7 @@ export async function getPowerRankings(username: string): Promise<LeaguePowerRan
     for (const r of initSV) rPower.set(ridMap.get(`${lid}:${r.oid}`) ?? 0, percentileRank(allInit, r.sv));
 
     // Step 3: Draft picks — tiers, values, combined scoring
-    // Build roster_id → draft position from draft_order (user_id → position)
-    let rosterDraftOrder: Map<number, number> | undefined;
-    const userDraftOrder = draftOrderMap.get(lid);
-    if (userDraftOrder) {
-      rosterDraftOrder = new Map();
-      for (const [oid] of owners) {
-        const rid = ridMap.get(`${lid}:${oid}`) ?? 0;
-        const pos = userDraftOrder.get(oid);
-        if (rid && pos != null) rosterDraftOrder.set(rid, pos);
-      }
-    }
+    const rosterDraftOrder = draftOrderMap.get(lid);
 
     const tiered = estimatePickTiers(dpMap.get(lid) ?? [], rPower, rosterDraftOrder);
     const valued = await scoreDraftPicks(tiered, mode);

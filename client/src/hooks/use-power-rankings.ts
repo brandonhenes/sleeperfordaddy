@@ -54,6 +54,7 @@ export interface ScoredPick {
   round: number;
   roster_id: number;
   original_owner_id: number;
+  pick_slot: number | null;
   tier: "early" | "mid" | "late";
   label: string;
   ktc_value: number | null;
