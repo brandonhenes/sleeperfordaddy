@@ -127,14 +127,18 @@ export async function getPowerRankings(username: string): Promise<LeaguePowerRan
 
   const [ridRows, nmRows] = await Promise.all([
     db.execute(sql`SELECT league_id, owner_id, roster_id FROM rosters WHERE league_id IN (${inClause})`),
-    db.execute(sql`SELECT league_id, user_id, display_name FROM league_users WHERE league_id IN (${inClause})`),
+    db.execute(sql`SELECT league_id, user_id, display_name, team_name FROM league_users WHERE league_id IN (${inClause})`),
   ]);
   const ridMap = new Map<string, number>();
   for (const r of ridRows as unknown as { league_id: string; owner_id: string; roster_id: number }[])
     ridMap.set(`${r.league_id}:${r.owner_id}`, r.roster_id);
-  const nmMap = new Map<string, string>();
-  for (const r of nmRows as unknown as { league_id: string; user_id: string; display_name: string | null }[])
-    nmMap.set(`${r.league_id}:${r.user_id}`, r.display_name ?? r.user_id);
+  const nmMap = new Map<string, { display_name: string | null; team_name: string | null }>();
+  for (const r of nmRows as unknown as { league_id: string; user_id: string; display_name: string | null; team_name: string | null }[]) {
+    nmMap.set(`${r.league_id}:${r.user_id}`, {
+      display_name: r.display_name,
+      team_name: r.team_name,
+    });
+  }
 
   const nested: Record<string, Record<string, RR[]>> = {};
   for (const r of rows) { nested[r.league_id] ??= {}; nested[r.league_id][r.owner_id] ??= []; nested[r.league_id][r.owner_id].push(r); }
@@ -219,7 +223,6 @@ export async function getPowerRankings(username: string): Promise<LeaguePowerRan
     // Group picks by owner roster_id, filter out zero-value picks
     const picksByRid = new Map<number, ScoredPick[]>();
     for (const p of valued) {
-      if (p.edge_score <= 0) continue;
       const a = picksByRid.get(p.roster_id) ?? []; a.push(p); picksByRid.set(p.roster_id, a);
     }
 
@@ -263,9 +266,15 @@ export async function getPowerRankings(username: string): Promise<LeaguePowerRan
       const wcp = percentileRank(allWCR, r.wcr);
       const wtp = percentileRank(allWTR, r.wtr);
       const { archetype, reasons } = classifyTeam(pp, dp, wcp);
+      const nameRow = nmMap.get(`${lid}:${r.oid}`);
+      const readableName =
+        nameRow?.team_name?.trim()
+        || nameRow?.display_name?.trim()
+        || (ridMap.get(`${lid}:${r.oid}`) ? `Roster ${ridMap.get(`${lid}:${r.oid}`)}` : null)
+        || r.oid;
       return {
         roster_id: ridMap.get(`${lid}:${r.oid}`) ?? 0,
-        owner_id: r.oid, display_name: nmMap.get(`${lid}:${r.oid}`) ?? r.oid,
+        owner_id: r.oid, display_name: readableName,
         is_user: r.oid === userId,
         starters_value: r.sv, avg_starter_score: r.avgSS,
         power_pct: Math.round(pp * 10) / 10,

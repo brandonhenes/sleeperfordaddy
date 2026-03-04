@@ -274,11 +274,18 @@ async function processLeague(league: SleeperLeague, userId: string) {
   // Fetch and store league users
   const leagueMembers = await getLeagueUsers(league.league_id);
   for (const member of leagueMembers) {
+    const meta = (member.metadata ?? {}) as Record<string, unknown>;
+    const teamNameRaw = meta.team_name;
+    const teamName =
+      typeof teamNameRaw === "string" && teamNameRaw.trim().length > 0
+        ? teamNameRaw.trim()
+        : null;
+
     await upsertLeagueUser({
       league_id: league.league_id,
       user_id: member.user_id,
       display_name: member.display_name,
-      team_name: null,
+      team_name: teamName,
     });
   }
 

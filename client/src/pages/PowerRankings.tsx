@@ -229,6 +229,21 @@ function RosterRow({ roster, rank }: { roster: RosterRanking; rank: number }) {
         <span style={{ flex: 1, textAlign: "left", fontWeight: roster.is_user ? 700 : 500, fontSize: 13 }}>
           {roster.display_name}
         </span>
+        {roster.draft_picks?.length > 0 && (
+          <span
+            className="font-mono"
+            style={{
+              fontSize: 10,
+              color: "var(--text-muted)",
+              border: "1px solid var(--border)",
+              borderRadius: 6,
+              padding: "2px 6px",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {roster.draft_picks.length} picks
+          </span>
+        )}
         <ArchetypeBadge archetype={roster.archetype} />
         <div style={{ display: "flex", gap: 8, marginLeft: 8 }}>
           <PctBar label="Power" value={roster.power_pct} />

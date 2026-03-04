@@ -1,4 +1,4 @@
-import { db } from "../db/connection.js";
+﻿import { db } from "../db/connection.js";
 import { sql } from "drizzle-orm";
 import { computeEdgeScores } from "./edge-score.js";
 
@@ -35,6 +35,11 @@ function computeAgreement(scores: number[]): "high" | "medium" | "low" {
   const spread = Math.max(...scores) - Math.min(...scores);
   if (spread < 5) return "high";
   if (spread <= 12) return "medium";
+  return "low";
+}
+
+function normalizeAgreement(value: string | null | undefined): "high" | "medium" | "low" {
+  if (value === "high" || value === "medium" || value === "low") return value;
   return "low";
 }
 
@@ -102,9 +107,92 @@ export async function getGlobalScaleParams(
   };
 }
 
-// ─── Main ───
+async function getSnapshotAsOfDate(): Promise<string | null> {
+  try {
+    const ready = await db.execute(sql`
+      SELECT as_of_date::text AS as_of_date
+      FROM score_snapshot_meta
+      WHERE status = 'ready'
+      ORDER BY updated_at DESC
+      LIMIT 1
+    `);
+    const asOf = (ready as unknown as { as_of_date: string }[])[0]?.as_of_date;
+    return asOf ?? null;
+  } catch {
+    return null;
+  }
+}
 
-export async function getCompositeValues(
+async function readFromDailySnapshot(
+  playerIds: string[],
+  mode: "sf" | "1qb"
+): Promise<Map<string, CompositeValue> | null> {
+  const asOfDate = await getSnapshotAsOfDate();
+  if (!asOfDate || playerIds.length === 0) return null;
+
+  try {
+    const idFragments = playerIds.map((id) => sql`${id}`);
+    const inClause = sql.join(idFragments, sql`, `);
+
+    const rows = await db.execute(sql`
+      SELECT
+        player_id AS sleeper_id,
+        fc_value,
+        ktc_value,
+        dp_value,
+        edge_score::int AS edge_score,
+        fc_score::int AS fc_score,
+        ktc_score::int AS ktc_score,
+        dp_score::int AS dp_score,
+        sources_used::int AS sources_used,
+        source_agreement
+      FROM player_scores_daily
+      WHERE as_of_date = ${asOfDate}::date
+        AND mode = ${mode}
+        AND player_id IN (${inClause})
+    `);
+
+    type SnapshotRow = {
+      sleeper_id: string;
+      fc_value: number | null;
+      ktc_value: number | null;
+      dp_value: number | null;
+      edge_score: number | null;
+      fc_score: number | null;
+      ktc_score: number | null;
+      dp_score: number | null;
+      sources_used: number | null;
+      source_agreement: string | null;
+    };
+    const snapshotRows = rows as unknown as SnapshotRow[];
+    if (snapshotRows.length === 0) return new Map();
+
+    const out = new Map<string, CompositeValue>();
+    for (const r of snapshotRows) {
+      const srcScores = [r.fc_score, r.ktc_score, r.dp_score].filter(
+        (s): s is number => s != null
+      );
+      out.set(r.sleeper_id, {
+        sleeper_id: r.sleeper_id,
+        fc_value: r.fc_value,
+        ktc_value: r.ktc_value,
+        dp_value: r.dp_value,
+        edge_score: r.edge_score ?? 0,
+        fc_score: r.fc_score,
+        ktc_score: r.ktc_score,
+        dp_score: r.dp_score,
+        sources_available: r.sources_used ?? srcScores.length,
+        source_agreement: normalizeAgreement(r.source_agreement) ?? computeAgreement(srcScores),
+      });
+    }
+
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+async function computeCompositeRuntime(
   playerIds: string[],
   mode: "sf" | "1qb"
 ): Promise<Map<string, CompositeValue>> {
@@ -178,4 +266,28 @@ export async function getCompositeValues(
   }
 
   return result;
+}
+
+// ─── Main ───
+
+export async function getCompositeValues(
+  playerIds: string[],
+  mode: "sf" | "1qb"
+): Promise<Map<string, CompositeValue>> {
+  if (playerIds.length === 0) return new Map();
+
+  const snapshotMap = await readFromDailySnapshot(playerIds, mode);
+  if (snapshotMap && snapshotMap.size === playerIds.length) {
+    return snapshotMap;
+  }
+
+  const final = snapshotMap ?? new Map<string, CompositeValue>();
+  const missing = playerIds.filter((id) => !final.has(id));
+  if (missing.length === 0) return final;
+
+  const runtime = await computeCompositeRuntime(missing, mode);
+  for (const [id, val] of runtime) {
+    final.set(id, val);
+  }
+  return final;
 }

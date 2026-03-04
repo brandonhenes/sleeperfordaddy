@@ -1,4 +1,4 @@
-// ─── Types ───
+﻿// ─── Types ───
 
 export interface EdgeScore {
   score: number;           // 39-99, or 0 if unscored
@@ -8,7 +8,7 @@ export interface EdgeScore {
   sources_used: number;
 }
 
-interface PlayerInput {
+export interface PlayerInput {
   sleeper_id: string;
   fc_value: number | null;
   ktc_value: number | null;
