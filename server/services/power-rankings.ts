@@ -1,6 +1,8 @@
 import { db } from "../db/connection.js";
 import { sql } from "drizzle-orm";
 import { getLeague } from "../sleeper/leagues.js";
+import { getLeagueUsers } from "../sleeper/leagues.js";
+import { getLeagueRosters } from "../sleeper/rosters.js";
 import { getAgeCurveStatus, type AgeCurveStatus } from "./age-curves.js";
 import { classifyTeam, percentileRank } from "./archetypes.js";
 import { getCompositeValues } from "./composite-values.js";
@@ -151,10 +153,37 @@ export async function getPowerRankings(username: string): Promise<LeaguePowerRan
   const draftOrderMap = new Map<string, Map<string, number>>(); // league_id → user_id → position
   await Promise.all(leagues.map(async (l) => {
     try {
-      const [detail, draftOrder] = await Promise.all([
+      const ownerIdsInLeague = Object.keys(nested[l.league_id] ?? {});
+      const needsNames = ownerIdsInLeague.some((oid) => !nmMap.has(`${l.league_id}:${oid}`));
+      const needsRosterIds = ownerIdsInLeague.some((oid) => !ridMap.has(`${l.league_id}:${oid}`));
+
+      const [detail, draftOrder, usersFallback, rostersFallback] = await Promise.all([
         getLeague(l.league_id),
         getRookieDraftOrder(l.league_id),
+        needsNames ? getLeagueUsers(l.league_id) : Promise.resolve([]),
+        needsRosterIds ? getLeagueRosters(l.league_id) : Promise.resolve([]),
       ]);
+
+      if (usersFallback.length > 0) {
+        for (const u of usersFallback) {
+          const teamNameRaw = (u.metadata ?? {})["team_name"];
+          const teamName =
+            typeof teamNameRaw === "string" && teamNameRaw.trim().length > 0
+              ? teamNameRaw.trim()
+              : null;
+          nmMap.set(`${l.league_id}:${u.user_id}`, {
+            display_name: u.display_name ?? null,
+            team_name: teamName,
+          });
+        }
+      }
+      if (rostersFallback.length > 0) {
+        for (const r of rostersFallback) {
+          if (!r.owner_id) continue;
+          ridMap.set(`${l.league_id}:${r.owner_id}`, r.roster_id);
+        }
+      }
+
       if (detail?.roster_positions) settingsMap.set(l.league_id, { sf: detectSF(detail.roster_positions), slots: countStarterSlots(detail.roster_positions), rosterPositions: detail.roster_positions });
       if (draftOrder) draftOrderMap.set(l.league_id, draftOrder);
       const totalRosters = detail?.total_rosters ?? l.total_rosters;
