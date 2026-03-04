@@ -41,53 +41,63 @@ export interface OptimizedLineup {
 // ─── Slot Eligibility ───
 
 const EXCLUDED_SLOTS = new Set(["DEF", "K", "BN", "IR", "TAXI"]);
-const STARTER_SLOT_WHITELIST = new Set([
-  "QB",
-  "RB",
-  "WR",
-  "TE",
-  "FLEX",
-  "RB/WR/TE",
-  "SUPER_FLEX",
-  "QB/RB/WR/TE",
-  "REC_FLEX",
-  "WR/TE",
-]);
+
+function getFlexEligiblePositions(slot: string): Set<string> {
+  const s = slot.toUpperCase();
+  const out = new Set<string>();
+
+  // Common Sleeper aliases
+  if (s === "OP") return new Set(["QB", "RB", "WR", "TE"]);
+  if (s === "SUPER_FLEX" || s === "QB/RB/WR/TE") return new Set(["QB", "RB", "WR", "TE"]);
+  if (s === "REC_FLEX" || s === "WR/TE") return new Set(["WR", "TE"]);
+  if (s === "FLEX" || s === "RB/WR/TE") return new Set(["RB", "WR", "TE"]);
+
+  // Handle variants like WRRB_FLEX, RBWRTE_FLEX, etc.
+  if (s.includes("FLEX")) {
+    if (s.includes("QB")) out.add("QB");
+    if (s.includes("RB")) out.add("RB");
+    if (s.includes("WR")) out.add("WR");
+    if (s.includes("TE")) out.add("TE");
+    // Generic FLEX fallback when tokens are ambiguous
+    if (out.size === 0) return new Set(["RB", "WR", "TE"]);
+  }
+  return out;
+}
+
+function isStarterSlot(slot: string): boolean {
+  if (EXCLUDED_SLOTS.has(slot)) return false;
+  if (slot === "QB" || slot === "RB" || slot === "WR" || slot === "TE") return true;
+  return getFlexEligiblePositions(slot).size > 0;
+}
 
 function isEligible(playerPos: string, slot: string): boolean {
-  switch (slot) {
+  const s = slot.toUpperCase();
+  switch (s) {
     case "QB": return playerPos === "QB";
     case "RB": return playerPos === "RB";
     case "WR": return playerPos === "WR";
     case "TE": return playerPos === "TE";
-    case "FLEX":
-    case "RB/WR/TE":
-      return playerPos === "RB" || playerPos === "WR" || playerPos === "TE";
-    case "SUPER_FLEX":
-    case "QB/RB/WR/TE":
-      return playerPos === "QB" || playerPos === "RB" || playerPos === "WR" || playerPos === "TE";
-    case "REC_FLEX":
-    case "WR/TE":
-      return playerPos === "WR" || playerPos === "TE";
     default:
-      // Unknown slot — treat as FLEX
-      return false;
+      return getFlexEligiblePositions(s).has(playerPos);
   }
 }
 
 // ─── Slot Naming ───
 
 function normalizeSlotLabel(slot: string): string {
-  if (slot === "SUPER_FLEX" || slot === "QB/RB/WR/TE") return "SF";
-  if (slot === "FLEX" || slot === "RB/WR/TE") return "FLEX";
-  if (slot === "REC_FLEX" || slot === "WR/TE") return "REC";
+  const s = slot.toUpperCase();
+  if (s === "SUPER_FLEX" || s === "QB/RB/WR/TE" || s === "OP") return "SF";
+  if (s === "REC_FLEX" || s === "WR/TE") return "REC";
+  const flex = getFlexEligiblePositions(s);
+  if (flex.size > 0) {
+    if (flex.has("RB") && flex.has("WR") && !flex.has("TE") && !flex.has("QB")) return "W/R";
+    return "FLEX";
+  }
   return slot;
 }
 
 function nameSlots(rawSlots: string[]): { slot: string; label: string }[] {
-  const starterSlots = rawSlots.filter(
-    (s) => !EXCLUDED_SLOTS.has(s) && STARTER_SLOT_WHITELIST.has(s)
-  );
+  const starterSlots = rawSlots.filter((s) => isStarterSlot(s));
   const counts: Record<string, number> = {};
   const result: { slot: string; label: string }[] = [];
 
@@ -135,7 +145,7 @@ export function optimizeLineup(
 
   // Greedy fill: for each slot, find best available eligible player
   for (const { slot, label } of namedSlots) {
-    const best = sorted.find((p) => !used.has(p.player_id) && isEligible(p.position, label === "SF" ? "SUPER_FLEX" : label === "REC" ? "REC_FLEX" : label));
+    const best = sorted.find((p) => !used.has(p.player_id) && isEligible(p.position, slot));
     if (best) {
       used.add(best.player_id);
       starters.push({ ...best, slot, slot_label: label, is_starter: true });
