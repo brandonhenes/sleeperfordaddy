@@ -114,9 +114,31 @@ export async function getRookieDraftOrder(
     (id, i, arr) => !!id && arr.indexOf(id) === i
   );
 
+  const targetRosters = await getLeagueRosters(leagueId);
+  const targetOwnerToRoster = new Map<string, number>();
+  for (const r of targetRosters) {
+    if (r.owner_id) targetOwnerToRoster.set(r.owner_id, r.roster_id);
+  }
+
   for (const candidateLeagueId of candidates) {
     const order = await getRookieDraftOrderForLeague(candidateLeagueId);
-    if (order && order.size > 0) return order;
+    if (!order || order.size === 0) continue;
+    if (candidateLeagueId === leagueId) return order;
+
+    // Cross-league fallback: map candidate roster_id order to target league roster_id by owner_id.
+    const candidateRosters = await getLeagueRosters(candidateLeagueId);
+    const candidateRosterToOwner = new Map<number, string>();
+    for (const r of candidateRosters) {
+      if (r.owner_id) candidateRosterToOwner.set(r.roster_id, r.owner_id);
+    }
+    const remapped = new Map<number, number>();
+    for (const [candidateRid, pos] of order.entries()) {
+      const ownerId = candidateRosterToOwner.get(candidateRid);
+      if (!ownerId) continue;
+      const targetRid = targetOwnerToRoster.get(ownerId);
+      if (targetRid != null) remapped.set(targetRid, pos);
+    }
+    if (remapped.size > 0) return remapped;
   }
 
   return null;
