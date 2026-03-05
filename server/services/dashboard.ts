@@ -11,7 +11,7 @@ export interface SlotGradeInfo {
 }
 
 export interface ActionFeedItem {
-  type: "sell_high" | "buy_low" | "roster_move";
+  type: "sell_high" | "buy_low" | "roster_move" | "exposure_alert";
   title: string;
   player_name: string;
   position: string;
@@ -239,61 +239,168 @@ export async function getDashboardData(username: string): Promise<DashboardData 
   }
   archetypeActions.sort((a, b) => b.leagues.length - a.leagues.length);
 
-  // ─── Actions Feed ───
+  // ─── Actions Feed (Smart Money Signals) ───
   const actionsFeed: ActionFeedItem[] = [];
 
-  // Sell High: high-exposure players with declining trend or source disagreement
-  if (sourceMovers.has_data && sourceMovers.fallers.length > 0) {
-    const best = sourceMovers.fallers.find(
-      (m) => m.leagues_owned >= 2 && m.current_score >= 50
-    ) ?? sourceMovers.fallers[0];
-    if (best) {
-      const leagues = exposure
-        .filter((e) => e.player_id === best.player_id)
-        .length > 0
-        ? exposure.filter((e) => e.player_id === best.player_id).map((e) => `${e.leagues_owned} leagues`)
-        : [`${best.leagues_owned} leagues`];
-      actionsFeed.push({
-        type: "sell_high",
-        title: "Sell High",
-        player_name: best.full_name,
-        position: best.position,
-        edge_score: best.current_score,
-        signal: `Edge score dropped ${Math.abs(best.change)} pts. Owned in ${best.leagues_owned} league${best.leagues_owned > 1 ? "s" : ""}.`,
-        leagues,
-      });
+  // Collect all players with per-source scores across user rosters
+  interface PortfolioPlayer {
+    player_id: string;
+    full_name: string;
+    position: string;
+    edge_score: number;
+    fc_score: number | null;
+    ktc_score: number | null;
+    dp_score: number | null;
+    source_agreement: "high" | "medium" | "low";
+    leagues_owned: number;
+    league_names: string[];
+    // Derived: how much KTC diverges from expert consensus (FC + DP avg)
+    ktc_vs_experts: number | null;
+  }
+
+  const portfolioMap = new Map<string, PortfolioPlayer>();
+  for (const x of userRosters) {
+    for (const a of x.roster.core_assets) {
+      const existing = portfolioMap.get(a.player_id);
+      if (existing) {
+        existing.leagues_owned++;
+        existing.league_names.push(x.league.league_name);
+        // Keep the highest edge score across leagues
+        if (a.edge_score > existing.edge_score) {
+          existing.edge_score = a.edge_score;
+          existing.fc_score = a.fc_score;
+          existing.ktc_score = a.ktc_score;
+          existing.dp_score = a.dp_score;
+          existing.source_agreement = a.source_agreement;
+        }
+      } else {
+        portfolioMap.set(a.player_id, {
+          player_id: a.player_id,
+          full_name: a.full_name,
+          position: a.position,
+          edge_score: a.edge_score,
+          fc_score: a.fc_score,
+          ktc_score: a.ktc_score,
+          dp_score: a.dp_score,
+          source_agreement: a.source_agreement,
+          leagues_owned: 1,
+          league_names: [x.league.league_name],
+          ktc_vs_experts: null,
+        });
+      }
     }
   }
 
-  // Buy Low: rising players user owns in few leagues
-  if (sourceMovers.has_data && sourceMovers.risers.length > 0) {
-    const best = sourceMovers.risers.find(
-      (m) => m.leagues_owned <= Math.ceil(totalLeagues * 0.33) && m.current_score >= 60
-    ) ?? sourceMovers.risers[0];
-    if (best) {
-      actionsFeed.push({
-        type: "buy_low",
-        title: "Buy Low",
-        player_name: best.full_name,
-        position: best.position,
-        edge_score: best.current_score,
-        signal: `Edge score rose ${best.change} pts. Only in ${best.leagues_owned}/${totalLeagues} leagues.`,
-        leagues: [`${best.leagues_owned}/${totalLeagues} leagues`],
-      });
+  // Calculate KTC vs expert consensus for each player
+  for (const p of portfolioMap.values()) {
+    const expertScores = [p.fc_score, p.dp_score].filter((s): s is number => s != null);
+    if (p.ktc_score != null && expertScores.length > 0) {
+      const expertAvg = expertScores.reduce((a, b) => a + b, 0) / expertScores.length;
+      p.ktc_vs_experts = p.ktc_score - expertAvg; // positive = crowd overvalues, negative = crowd undervalues
     }
   }
 
-  // Roster Move: worst starter that could be upgraded
-  if (rosterHoles.length > 0) {
-    const worst = rosterHoles[0];
+  const allPlayers = [...portfolioMap.values()];
+
+  // ── Sell High: crowd (KTC) significantly overvalues vs experts (FC/DP) ──
+  // These are players where the hype exceeds the smart money. Sell into it.
+  const sellCandidates = allPlayers
+    .filter((p) =>
+      p.ktc_vs_experts != null &&
+      p.ktc_vs_experts >= 6 &&          // KTC at least 6 pts above expert avg
+      p.edge_score >= 60 &&              // Worth something (not waiver fodder)
+      p.source_agreement !== "high"      // Sources actually disagree
+    )
+    .sort((a, b) => (b.ktc_vs_experts ?? 0) - (a.ktc_vs_experts ?? 0));
+
+  if (sellCandidates.length > 0) {
+    const best = sellCandidates[0];
+    actionsFeed.push({
+      type: "sell_high",
+      title: "Sell High",
+      player_name: best.full_name,
+      position: best.position,
+      edge_score: best.edge_score,
+      signal: `Crowd values at ${best.ktc_score}, experts at ${Math.round(((best.fc_score ?? 0) + (best.dp_score ?? 0)) / [best.fc_score, best.dp_score].filter((s) => s != null).length)}. Sell into the hype.`,
+      leagues: best.league_names.length > 1
+        ? [`${best.leagues_owned} leagues`]
+        : [best.league_names[0]],
+    });
+  }
+
+  // ── Buy Low: experts (FC/DP) see value the crowd (KTC) doesn't ──
+  // These are undervalued players you can acquire cheaply before the market corrects.
+  const buyCandidates = allPlayers
+    .filter((p) =>
+      p.ktc_vs_experts != null &&
+      p.ktc_vs_experts <= -6 &&          // KTC at least 6 pts below expert avg
+      p.edge_score >= 60 &&              // Still rostered-caliber
+      p.source_agreement !== "high"      // Sources actually disagree
+    )
+    .sort((a, b) => (a.ktc_vs_experts ?? 0) - (b.ktc_vs_experts ?? 0));
+
+  if (buyCandidates.length > 0) {
+    const best = buyCandidates[0];
+    actionsFeed.push({
+      type: "buy_low",
+      title: "Buy Low",
+      player_name: best.full_name,
+      position: best.position,
+      edge_score: best.edge_score,
+      signal: `Experts at ${Math.round(((best.fc_score ?? 0) + (best.dp_score ?? 0)) / [best.fc_score, best.dp_score].filter((s) => s != null).length)}, crowd only at ${best.ktc_score}. Market hasn't caught up.`,
+      leagues: best.leagues_owned < totalLeagues
+        ? [`${best.leagues_owned}/${totalLeagues} leagues`]
+        : [`All ${totalLeagues} leagues`],
+    });
+  }
+
+  // ── Roster Move: weakest starter in your weakest teams ──
+  // Juggernauts don't need help. Target rebuilders, dead zone, and struggling teams.
+  const WEAK_ARCHETYPES = new Set(["Rebuilder", "Dead Zone", "Productive Struggle", "Fragile Contender"]);
+  const weakTeamHoles = holes.filter((h) => {
+    // Find this league's archetype
+    const lh = leagueHealth.find((l) => l.league_id === h.league_id);
+    return lh && WEAK_ARCHETYPES.has(lh.archetype);
+  });
+
+  if (weakTeamHoles.length > 0) {
+    const worst = weakTeamHoles[0]; // Already sorted by edge_score ascending
+    const lh = leagueHealth.find((l) => l.league_id === worst.league_id);
     actionsFeed.push({
       type: "roster_move",
       title: "Roster Move",
       player_name: worst.player_name,
       position: worst.position,
       edge_score: worst.edge_score,
-      signal: `Weakest starter (${worst.slot_label}) in ${worst.league_name}. Look for upgrades.`,
+      signal: `Weakest starter (${worst.slot_label}) in ${worst.league_name}. ${lh?.archetype ?? "Needs"} upgrade.`,
       leagues: [worst.league_name],
+    });
+  }
+
+  // ── Exposure Alert: high-concentration player with sources disagreeing ──
+  const exposureThreshold = Math.max(2, Math.ceil(totalLeagues * 0.1)); // 10%+ of leagues
+  const exposureAlerts = allPlayers
+    .filter((p) => {
+      if (p.leagues_owned < exposureThreshold || p.edge_score < 50) return false;
+      const scores = [p.fc_score, p.ktc_score, p.dp_score].filter((s): s is number => s != null);
+      if (scores.length < 2) return false;
+      const spread = Math.max(...scores) - Math.min(...scores);
+      return spread >= 10;
+    })
+    .sort((a, b) => b.leagues_owned - a.leagues_owned);
+
+  if (exposureAlerts.length > 0 && actionsFeed.length < 3) {
+    const alert = exposureAlerts[0];
+    const scores = [alert.fc_score, alert.ktc_score, alert.dp_score].filter((s): s is number => s != null);
+    const spread = scores.length >= 2 ? Math.max(...scores) - Math.min(...scores) : 0;
+    actionsFeed.push({
+      type: "exposure_alert",
+      title: "Exposure Alert",
+      player_name: alert.full_name,
+      position: alert.position,
+      edge_score: alert.edge_score,
+      signal: `Owned in ${alert.leagues_owned}/${totalLeagues} leagues with ${spread}pt source spread. Diversify risk.`,
+      leagues: [`${alert.leagues_owned} leagues`],
     });
   }
 

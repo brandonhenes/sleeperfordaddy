@@ -52,7 +52,7 @@ export interface ArchetypeAction {
 }
 
 export interface ActionFeedItem {
-  type: "sell_high" | "buy_low" | "roster_move";
+  type: "sell_high" | "buy_low" | "roster_move" | "exposure_alert";
   title: string;
   player_name: string;
   position: string;
@@ -87,6 +87,6 @@ export function useDashboard(username: string | undefined) {
     queryFn: () =>
       apiFetch(`/api/dashboard/${encodeURIComponent(username!)}`),
     enabled: !!username,
-    staleTime: 5 * 60 * 1000,
+    staleTime: 10 * 60 * 1000,
   });
 }

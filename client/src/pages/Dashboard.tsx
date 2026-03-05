@@ -147,7 +147,7 @@ export default function Dashboard() {
       {/* Actions Feed */}
       {data.actions_feed && data.actions_feed.length > 0 && (
         <div style={{ marginTop: 16 }}>
-          <ActionsFeed actions={data.actions_feed} />
+          <ActionsFeed items={data.actions_feed} />
         </div>
       )}
 
