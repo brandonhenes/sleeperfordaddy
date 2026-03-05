@@ -34,6 +34,9 @@ export const leagues = pgTable(
     league_type: integer("league_type"),
     group_id: text("group_id"),
     raw_json: text("raw_json"),
+    roster_positions: jsonb("roster_positions"),
+    draft_rounds: integer("draft_rounds").default(4),
+    scoring_settings: jsonb("scoring_settings"),
     updated_at: bigint("updated_at", { mode: "number" }).notNull(),
   },
   (table) => [
@@ -104,6 +107,30 @@ export const league_users = pgTable(
     primaryKey({ columns: [table.league_id, table.user_id] }),
     index("idx_league_users_user").on(table.user_id),
   ]
+);
+
+export const league_traded_picks = pgTable(
+  "league_traded_picks",
+  {
+    league_id: text("league_id").notNull(),
+    season: text("season").notNull(),
+    round: integer("round").notNull(),
+    roster_id: integer("roster_id").notNull(),
+    owner_id: integer("owner_id").notNull(),
+    previous_owner_id: integer("previous_owner_id").notNull(),
+  },
+  (table) => [index("idx_traded_picks_league").on(table.league_id)]
+);
+
+export const league_draft_orders = pgTable(
+  "league_draft_orders",
+  {
+    league_id: text("league_id").notNull(),
+    season: text("season").notNull(),
+    roster_id: integer("roster_id").notNull(),
+    draft_position: integer("draft_position").notNull(),
+  },
+  (table) => [index("idx_draft_orders_league").on(table.league_id, table.season)]
 );
 
 // ─── Sync Tracking ───

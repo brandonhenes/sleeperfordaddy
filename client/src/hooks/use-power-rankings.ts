@@ -102,5 +102,6 @@ export function usePowerRankings(username: string) {
     queryFn: () =>
       apiFetch(`/api/power-rankings/${encodeURIComponent(username)}`),
     enabled: !!username,
+    staleTime: 10 * 60 * 1000,
   });
 }
