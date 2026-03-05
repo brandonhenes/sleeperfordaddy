@@ -115,6 +115,7 @@ function buildDraftPicksFromDB(
           round,
           roster_id: rid,
           original_owner_id: rid,
+          pick_slot: null,
         });
       }
     }
