@@ -12,6 +12,10 @@ export async function bulkUpsertPlayers(
     status: string | null;
     age: number | null;
     years_exp: number | null;
+    injury_status: string | null;
+    injury_body_part: string | null;
+    injury_start_date: string | null;
+    injury_notes: string | null;
   }>
 ) {
   // Insert in batches of 500 to avoid overwhelming the DB
@@ -38,6 +42,10 @@ export async function bulkUpsertPlayers(
           status: players_master.status,
           age: players_master.age,
           years_exp: players_master.years_exp,
+          injury_status: players_master.injury_status,
+          injury_body_part: players_master.injury_body_part,
+          injury_start_date: players_master.injury_start_date,
+          injury_notes: players_master.injury_notes,
           updated_at: Date.now(),
         },
       });

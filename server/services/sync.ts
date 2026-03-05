@@ -22,6 +22,8 @@ import { upsertTrade, upsertTradeAsset } from "../db/queries/trades.js";
 import { upsertH2H } from "../db/queries/h2h.js";
 import { bulkUpsertPlayers } from "../db/queries/players.js";
 import { buildLeagueGroups } from "./league-groups.js";
+import { seedInjuryBaselines } from "../db/seeds/injury-baselines.js";
+import { capturePlayerValueSnapshots } from "./value-snapshots.js";
 import { isDynastyLeagueFromSleeperSettings } from "./dynasty-leagues.js";
 import type {
   SleeperLeague,
@@ -201,27 +203,53 @@ async function runSync(jobId: string, username: string) {
       const playersData = await getAllPlayers();
       const playersList = Object.entries(playersData)
         .filter(([, p]) => p && typeof p === "object")
-        .map(([playerId, p]) => ({
-          player_id: playerId,
-          full_name: p.full_name ?? p.first_name + " " + p.last_name,
-          first_name: p.first_name,
-          last_name: p.last_name,
-          position: p.position,
-          team: p.team,
-          status: p.status ?? null,
-          age: p.age ?? null,
-          years_exp: null,
-        }));
+        .map(([playerId, p]) => {
+          const raw = p as unknown as Record<string, unknown>;
+          return {
+            player_id: playerId,
+            full_name: p.full_name ?? p.first_name + " " + p.last_name,
+            first_name: p.first_name,
+            last_name: p.last_name,
+            position: p.position,
+            team: p.team,
+            status: p.status ?? null,
+            age: p.age ?? null,
+            years_exp: null,
+            injury_status: (typeof raw.injury_status === "string" ? raw.injury_status : null),
+            injury_body_part: (typeof raw.injury_body_part === "string" ? raw.injury_body_part : null),
+            injury_start_date: (typeof raw.injury_start_date === "string" ? raw.injury_start_date : null),
+            injury_notes: (typeof raw.injury_notes === "string" ? raw.injury_notes : null),
+          };
+        });
       await bulkUpsertPlayers(playersList);
       playersLastSynced = Date.now();
       console.log(`[sync] Synced ${playersList.length} players`);
+
+      // Seed injury recovery baselines (idempotent upsert)
+      try {
+        await seedInjuryBaselines();
+      } catch (err) {
+        console.error("[sync] Error seeding injury baselines:", err);
+      }
     } catch (err) {
       console.error("[sync] Error syncing players:", err);
       // Non-fatal, continue
     }
   }
 
-  // Step 6: Compute league groups
+  // Step 6: Capture player value snapshots (for injury buying windows)
+  await updateSyncJob(jobId, {
+    step: "value_snapshots",
+    detail: "Capturing player value snapshots...",
+  });
+
+  try {
+    await capturePlayerValueSnapshots(sleeperUser.user_id);
+  } catch (err) {
+    console.error("[sync] Error capturing value snapshots:", err);
+  }
+
+  // Step 7: Compute league groups
   await updateSyncJob(jobId, {
     step: "grouping",
     detail: "Computing league groups...",
@@ -233,7 +261,7 @@ async function runSync(jobId: string, username: string) {
     console.error("[sync] Error computing league groups:", err);
   }
 
-  // Step 7: Done
+  // Step 8: Done
   await updateSyncJob(jobId, {
     status: "completed",
     step: "done",
