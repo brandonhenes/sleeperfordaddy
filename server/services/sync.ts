@@ -24,6 +24,7 @@ import { bulkUpsertPlayers } from "../db/queries/players.js";
 import { buildLeagueGroups } from "./league-groups.js";
 import { seedInjuryBaselines } from "../db/seeds/injury-baselines.js";
 import { capturePlayerValueSnapshots } from "./value-snapshots.js";
+import { captureTeamValueSnapshots } from "./team-snapshots.js";
 import { isDynastyLeagueFromSleeperSettings } from "./dynasty-leagues.js";
 import type {
   SleeperLeague,
@@ -261,7 +262,19 @@ async function runSync(jobId: string, username: string) {
     console.error("[sync] Error computing league groups:", err);
   }
 
-  // Step 8: Done
+  // Step 8: Capture team value snapshots (for league history)
+  await updateSyncJob(jobId, {
+    step: "team_snapshots",
+    detail: "Capturing team value snapshots...",
+  });
+
+  try {
+    await captureTeamValueSnapshots(sleeperUser.user_id);
+  } catch (err) {
+    console.error("[sync] Error capturing team value snapshots:", err);
+  }
+
+  // Step 9: Done
   await updateSyncJob(jobId, {
     status: "completed",
     step: "done",
