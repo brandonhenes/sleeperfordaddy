@@ -1,15 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "../lib/api";
+import type { TradeSuggestion } from "../../../shared/types";
 
-export interface TradeFinderResult {
-  trades: unknown[];
-}
-
-export function useTradeFinder(username: string) {
-  return useQuery<TradeFinderResult>({
-    queryKey: ["trade-finder", username],
-    queryFn: () => apiFetch(`/api/trade-finder/${encodeURIComponent(username)}`),
-    enabled: !!username,
-    staleTime: 10 * 60 * 1000,
+export function useTradeSuggestions(username: string, leagueId: string) {
+  return useQuery<TradeSuggestion[]>({
+    queryKey: ["trade-finder", username, leagueId],
+    queryFn: () =>
+      apiFetch(
+        `/api/trade/find/${encodeURIComponent(username)}/${encodeURIComponent(leagueId)}`
+      ),
+    enabled: !!username && !!leagueId,
   });
 }

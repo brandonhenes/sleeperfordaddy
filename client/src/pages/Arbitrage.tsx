@@ -25,6 +25,8 @@ function sorted(data: ArbitrageGap[], key: SortKey): ArbitrageGap[] {
   });
 }
 
+// ─── League Badge ───
+
 function LeagueBadge({ league }: { league: { league_id: string; league_name: string } }) {
   return (
     <a
@@ -56,6 +58,8 @@ function LeagueBadge({ league }: { league: { league_id: string; league_name: str
   );
 }
 
+// ─── Player Card ───
+
 function GapCard({ gap }: { gap: ArbitrageGap }) {
   return (
     <div
@@ -69,6 +73,7 @@ function GapCard({ gap }: { gap: ArbitrageGap }) {
         gap: 10,
       }}
     >
+      {/* Row 1: score, name, pos, team */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <EdgeScoreBadge score={gap.edge_score} size="md" />
         <PlayerLink name={gap.full_name} style={{ fontSize: 15 }} />
@@ -80,6 +85,7 @@ function GapCard({ gap }: { gap: ArbitrageGap }) {
         )}
       </div>
 
+      {/* Row 2: ownership summary */}
       <div style={{ display: "flex", alignItems: "center", gap: 16, fontSize: 13 }}>
         <span style={{ color: "var(--green)", fontWeight: 600 }}>
           Owned in {gap.owned_count} league{gap.owned_count !== 1 ? "s" : ""}
@@ -89,6 +95,7 @@ function GapCard({ gap }: { gap: ArbitrageGap }) {
         </span>
       </div>
 
+      {/* Row 3: free league badges */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
         {gap.free_leagues.map((l) => (
           <LeagueBadge key={l.league_id} league={l} />
@@ -97,6 +104,8 @@ function GapCard({ gap }: { gap: ArbitrageGap }) {
     </div>
   );
 }
+
+// ─── Sort Toggle ───
 
 const SORT_OPTIONS: SortKey[] = ["score", "free", "owned"];
 
@@ -129,7 +138,17 @@ function SortBar({ active, onChange }: { active: SortKey; onChange: (k: SortKey)
   );
 }
 
+// ─── Page ───
+
 export default function Arbitrage() {
+  const { username } = useParams<{ username: string }>();
+  const { data, isLoading, error } = useFreeAgentGaps(username ?? "");
+  const [sortKey, setSortKey] = useState<SortKey>("score");
+
+  if (isLoading) return <AppShell><LoadingSkeleton /></AppShell>;
+
+  const gaps = data ? sorted(data, sortKey) : [];
+
   return (
     <AppShell>
       <div style={{ padding: "28px 0 8px" }}>
@@ -140,44 +159,40 @@ export default function Arbitrage() {
           Players you own that are free agents in your other leagues
         </p>
       </div>
-      <ArbitrageContent />
+
+      {error ? (
+        <ErrorCard message={(error as Error).message} />
+      ) : gaps.length === 0 ? (
+        <EmptyCard label="No free agent gaps found — your rosters are fully covered" />
+      ) : (
+        <>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+            <span style={{ fontSize: 13, color: "var(--text-dim)" }}>
+              {gaps.length} player{gaps.length !== 1 ? "s" : ""} with free agent gaps
+            </span>
+            <SortBar active={sortKey} onChange={setSortKey} />
+          </div>
+          <div style={{ display: "grid", gap: 12 }}>
+            {gaps.map((g) => (
+              <GapCard key={g.player_id} gap={g} />
+            ))}
+          </div>
+        </>
+      )}
     </AppShell>
   );
 }
 
-export function ArbitrageContent() {
-  const params = useParams<{ username: string }>();
-  const storedUser = typeof window !== "undefined" ? localStorage.getItem("edge_username") ?? "" : "";
-  const username = params.username ?? storedUser;
-  const { data, isLoading, error } = useFreeAgentGaps(username);
-  const [sortKey, setSortKey] = useState<SortKey>("score");
-
-  if (isLoading) return <LoadingSkeleton />;
-  if (error) return <ErrorCard message={(error as Error).message} />;
-
-  const gaps = data ? sorted(data, sortKey) : [];
-  if (gaps.length === 0) return <EmptyCard label="No free agent gaps found" />;
-
-  return (
-    <>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-        <span style={{ fontSize: 13, color: "var(--text-dim)" }}>
-          {gaps.length} player{gaps.length !== 1 ? "s" : ""} with free agent gaps
-        </span>
-        <SortBar active={sortKey} onChange={setSortKey} />
-      </div>
-      <div style={{ display: "grid", gap: 12 }}>
-        {gaps.map((g) => <GapCard key={g.player_id} gap={g} />)}
-      </div>
-    </>
-  );
-}
+// ─── Shared ───
 
 const skel = { background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10 } as const;
 
 function LoadingSkeleton() {
   return (
     <>
+      <div style={{ padding: "28px 0 8px" }}>
+        <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>Cross-League Arbitrage</h1>
+      </div>
       {[1, 2, 3, 4].map((i) => (
         <div key={i} className="animate-pulse" style={{ ...skel, height: 120, marginTop: 12 }} />
       ))}

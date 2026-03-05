@@ -18,9 +18,6 @@ export async function upsertLeague(league: {
   league_type: number | null;
   group_id: string | null;
   raw_json: string | null;
-  roster_positions: unknown | null;
-  draft_rounds: number | null;
-  scoring_settings: Record<string, number> | null;
 }) {
   await db
     .insert(leagues)
@@ -37,9 +34,6 @@ export async function upsertLeague(league: {
         league_type: league.league_type,
         group_id: league.group_id,
         raw_json: league.raw_json,
-        roster_positions: league.roster_positions,
-        draft_rounds: league.draft_rounds,
-        scoring_settings: league.scoring_settings,
         updated_at: Date.now(),
       },
     });
