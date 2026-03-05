@@ -5,6 +5,37 @@ import { getDynastyLeagueIdsForUserLatestSeason } from "./dynasty-leagues.js";
 import type { InjuredPlayerView, BuyingWindow } from "../../shared/types.js";
 
 // ─── Helpers ───
+const DEFAULT_AVG_WEEKS = 4;
+const INJURY_AVG_WEEKS: Record<string, number> = {
+  acl: 42,
+  achilles: 44,
+  mcl: 6,
+  hamstring: 3,
+  ankle: 6,
+  shoulder: 3,
+  concussion: 2,
+  hand: 6,
+  foot: 6,
+  leg: 12,
+  knee: 4,
+  back: 3,
+  hip: 4,
+  ribs: 3,
+  groin: 3,
+  calf: 3,
+  quad: 3,
+  elbow: 4,
+  wrist: 4,
+  neck: 3,
+  abdomen: 4,
+  toe: 4,
+  thumb: 4,
+};
+
+function avgWeeksFromBodyPart(bodyPart: string | null): number {
+  if (!bodyPart) return DEFAULT_AVG_WEEKS;
+  return INJURY_AVG_WEEKS[bodyPart.toLowerCase()] ?? DEFAULT_AVG_WEEKS;
+}
 
 function estimateReturnDate(startDate: string | null, avgWeeks: number): string | null {
   if (!startDate) return null;
@@ -34,6 +65,28 @@ function severityOrder(status: string): number {
   return 3;
 }
 
+async function getInjuryColumnSupport(): Promise<{
+  hasStatus: boolean;
+  hasBodyPart: boolean;
+  hasStartDate: boolean;
+}> {
+  const rows = await db.execute(sql`
+    SELECT column_name
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'players_master'
+      AND column_name IN ('injury_status', 'injury_body_part', 'injury_start_date')
+  `);
+  const set = new Set(
+    (rows as unknown as { column_name: string }[]).map((r) => r.column_name)
+  );
+  return {
+    hasStatus: set.has("injury_status"),
+    hasBodyPart: set.has("injury_body_part"),
+    hasStartDate: set.has("injury_start_date"),
+  };
+}
+
 // ─── Main ───
 
 export async function getInjuredPlayers(
@@ -47,9 +100,15 @@ export async function getInjuredPlayers(
 
   const dynastyLeagueIds = await getDynastyLeagueIdsForUserLatestSeason(userId);
   if (dynastyLeagueIds.length === 0) return [];
+  const injuryCols = await getInjuryColumnSupport();
+  if (!injuryCols.hasStatus) return [];
 
   const leagueIdFrags = dynastyLeagueIds.map((id) => sql`${id}`);
   const leagueInClause = sql.join(leagueIdFrags, sql`, `);
+  const bodyCol = injuryCols.hasBodyPart ? sql`pm.injury_body_part` : sql`NULL::text`;
+  const startCol = injuryCols.hasStartDate ? sql`pm.injury_start_date` : sql`NULL::text`;
+  const bodyGroup = injuryCols.hasBodyPart ? sql`, pm.injury_body_part` : sql``;
+  const startGroup = injuryCols.hasStartDate ? sql`, pm.injury_start_date` : sql``;
 
   // Find injured players the user owns across their dynasty leagues
   const rows = await db.execute(sql`
@@ -59,17 +118,11 @@ export async function getInjuredPlayers(
       pm.position,
       pm.team,
       pm.injury_status,
-      pm.injury_body_part,
-      pm.injury_start_date,
-      COUNT(DISTINCT rp.league_id)::int AS league_count,
-      irb.avg_weeks_out,
-      irb.min_weeks,
-      irb.max_weeks
+      ${bodyCol} AS injury_body_part,
+      ${startCol} AS injury_start_date,
+      COUNT(DISTINCT rp.league_id)::int AS league_count
     FROM roster_players rp
     JOIN players_master pm ON rp.player_id = pm.player_id
-    LEFT JOIN injury_recovery_baselines irb
-      ON LOWER(irb.injury_type) = LOWER(pm.injury_body_part)
-      AND irb.position = 'ALL'
     WHERE rp.owner_id = ${userId}
       AND rp.league_id IN (${leagueInClause})
       AND pm.injury_status IS NOT NULL
@@ -77,8 +130,7 @@ export async function getInjuredPlayers(
       AND pm.team IS NOT NULL
       AND pm.position IN ('QB', 'RB', 'WR', 'TE')
     GROUP BY pm.player_id, pm.full_name, pm.position, pm.team,
-             pm.injury_status, pm.injury_body_part, pm.injury_start_date,
-             irb.avg_weeks_out, irb.min_weeks, irb.max_weeks
+             pm.injury_status${bodyGroup}${startGroup}
   `);
 
   type Row = {
@@ -90,9 +142,6 @@ export async function getInjuredPlayers(
     injury_body_part: string | null;
     injury_start_date: string | null;
     league_count: number;
-    avg_weeks_out: number | null;
-    min_weeks: number | null;
-    max_weeks: number | null;
   };
   const rawRows = rows as unknown as Row[];
   if (rawRows.length === 0) return [];
@@ -117,7 +166,7 @@ export async function getInjuredPlayers(
     const comp = compMap.get(r.player_id);
     const currentEdge = comp?.edge_score ?? 0;
     const preInjury = preInjuryMap.get(r.player_id) ?? null;
-    const avgWeeks = r.avg_weeks_out ?? 4;
+    const avgWeeks = avgWeeksFromBodyPart(r.injury_body_part);
     const valueChangePct = preInjury && preInjury > 0
       ? Math.round(((currentEdge - preInjury) / preInjury) * 1000) / 10
       : null;
@@ -158,9 +207,15 @@ export async function getBuyingWindows(
 
   const dynastyLeagueIds = await getDynastyLeagueIdsForUserLatestSeason(userId);
   if (dynastyLeagueIds.length === 0) return [];
+  const injuryCols = await getInjuryColumnSupport();
+  if (!injuryCols.hasStatus) return [];
 
   const leagueIdFrags = dynastyLeagueIds.map((id) => sql`${id}`);
   const leagueInClause = sql.join(leagueIdFrags, sql`, `);
+  const bodyCol = injuryCols.hasBodyPart ? sql`pm.injury_body_part` : sql`NULL::text`;
+  const startCol = injuryCols.hasStartDate ? sql`pm.injury_start_date` : sql`NULL::text`;
+  const bodyGroup = injuryCols.hasBodyPart ? sql`, pm.injury_body_part` : sql``;
+  const startGroup = injuryCols.hasStartDate ? sql`, pm.injury_start_date` : sql``;
 
   // Find injured players on OTHER teams in the user's leagues that the user does NOT own
   const rows = await db.execute(sql`
@@ -170,16 +225,10 @@ export async function getBuyingWindows(
       pm.position,
       pm.team,
       pm.injury_status,
-      pm.injury_body_part,
-      pm.injury_start_date,
-      irb.avg_weeks_out,
-      irb.min_weeks,
-      irb.max_weeks
+      ${bodyCol} AS injury_body_part,
+      ${startCol} AS injury_start_date
     FROM players_master pm
     JOIN roster_players rp ON rp.player_id = pm.player_id
-    LEFT JOIN injury_recovery_baselines irb
-      ON LOWER(irb.injury_type) = LOWER(pm.injury_body_part)
-      AND irb.position = 'ALL'
     WHERE rp.league_id IN (${leagueInClause})
       AND rp.owner_id != ${userId}
       AND pm.injury_status IS NOT NULL
@@ -193,8 +242,7 @@ export async function getBuyingWindows(
           AND rp2.league_id IN (${leagueInClause})
       )
     GROUP BY pm.player_id, pm.full_name, pm.position, pm.team,
-             pm.injury_status, pm.injury_body_part, pm.injury_start_date,
-             irb.avg_weeks_out, irb.min_weeks, irb.max_weeks
+             pm.injury_status${bodyGroup}${startGroup}
   `);
 
   type Row = {
@@ -205,9 +253,6 @@ export async function getBuyingWindows(
     injury_status: string;
     injury_body_part: string | null;
     injury_start_date: string | null;
-    avg_weeks_out: number | null;
-    min_weeks: number | null;
-    max_weeks: number | null;
   };
   const rawRows = rows as unknown as Row[];
   if (rawRows.length === 0) return [];
@@ -254,7 +299,7 @@ export async function getBuyingWindows(
     const comp = compMap.get(r.player_id);
     const currentEdge = comp?.edge_score ?? 0;
     const preInjury = preInjuryMap.get(r.player_id) ?? null;
-    const avgWeeks = r.avg_weeks_out ?? 4;
+    const avgWeeks = avgWeeksFromBodyPart(r.injury_body_part);
 
     const valueChangePct = preInjury && preInjury > 0
       ? Math.round(((currentEdge - preInjury) / preInjury) * 1000) / 10
@@ -288,7 +333,7 @@ export async function getBuyingWindows(
         riskFactors.push("Season-ending injury type");
       }
     }
-    if (r.max_weeks && r.max_weeks > 12) riskFactors.push(`Recovery could take up to ${r.max_weeks} weeks`);
+    if (avgWeeks > 12) riskFactors.push(`Recovery could take around ${avgWeeks} weeks`);
 
     const player: InjuredPlayerView = {
       player_id: r.player_id,
