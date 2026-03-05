@@ -1,14 +1,25 @@
 import { db } from "../db/connection.js";
 import { sql } from "drizzle-orm";
 import { getDynastyLeagueIdsForUserLatestSeason } from "./dynasty-leagues.js";
+import { getCompositeValues } from "./composite-values.js";
+import { computeEdgeScores } from "./edge-score.js";
+import { getAgeCurveStatus, type AgeCurveStatus } from "./age-curves.js";
 
 export interface PlayerSummary {
   player_name: string;
   position: string | null;
   team: string | null;
+  age: number | null;
   dynasty_value: number | null;
   trend_30day: number | null;
   overall_rank: number | null;
+  edge_score: number;
+  fc_score: number | null;
+  ktc_score: number | null;
+  dp_score: number | null;
+  sources_available: number;
+  source_agreement: "high" | "medium" | "low";
+  age_curve: AgeCurveStatus;
 }
 
 export interface ValuePoint {
@@ -19,6 +30,12 @@ export interface ValuePoint {
 export interface OwnershipEntry {
   league_name: string;
   league_id: string;
+}
+
+export interface ExposureInfo {
+  owned_leagues: number;
+  total_leagues: number;
+  exposure_pct: number;
 }
 
 export interface Mention {
@@ -49,9 +66,17 @@ export interface PlayerDetail {
   summary: PlayerSummary;
   valueHistory: ValuePoint[];
   ownership: OwnershipEntry[];
+  exposure: ExposureInfo;
   mentions: Mention[];
   prospect: ProspectInfo | null;
   recommendation: RecInfo | null;
+}
+
+function scoreAgreement(scores: (number | null)[]): "high" | "medium" | "low" {
+  const v = scores.filter((s): s is number => s != null);
+  if (v.length <= 1) return "high";
+  const spread = Math.max(...v) - Math.min(...v);
+  return spread < 5 ? "high" : spread <= 12 ? "medium" : "low";
 }
 
 export async function getPlayerDetail(
@@ -67,7 +92,19 @@ export async function getPlayerDetail(
     ? await getDynastyLeagueIdsForUserLatestSeason(userId)
     : [];
   const leagueIdFrags = dynastyLeagueIds.map((id) => sql`${id}`);
-  const dynastyInClause = sql.join(leagueIdFrags, sql`, `);
+  const dynastyInClause = dynastyLeagueIds.length > 0
+    ? sql.join(leagueIdFrags, sql`, `)
+    : sql`''`;
+
+  // Resolve player_id from players_master
+  const pmRows = await db.execute(sql`
+    SELECT player_id, full_name, position, age
+    FROM players_master
+    WHERE LOWER(full_name) = LOWER(${playerName})
+      AND position IN ('QB', 'RB', 'WR', 'TE')
+    LIMIT 1
+  `);
+  const pm = (pmRows as unknown as { player_id: string; full_name: string; position: string; age: number | null }[])[0];
 
   const [summaryRows, historyRows, ownershipRows, mentionRows, prospectRows, recRows] =
     await Promise.all([
@@ -90,18 +127,15 @@ export async function getPlayerDetail(
         ORDER BY snapshot_date ASC
       `),
 
-      // Ownership: leagues where user owns this player (current season)
-      userId && dynastyLeagueIds.length > 0
+      // Ownership: leagues where user owns this player
+      userId && dynastyLeagueIds.length > 0 && pm
         ? db.execute(sql`
             SELECT l.name AS league_name, l.league_id
             FROM roster_players rp
             JOIN leagues l ON rp.league_id = l.league_id
             WHERE rp.owner_id = ${userId}
               AND rp.league_id IN (${dynastyInClause})
-              AND rp.player_id IN (
-                SELECT pm.player_id FROM players_master pm
-                WHERE LOWER(pm.full_name) = LOWER(${playerName})
-              )
+              AND rp.player_id = ${pm.player_id}
             ORDER BY l.name
           `)
         : Promise.resolve([]),
@@ -134,8 +168,57 @@ export async function getPlayerDetail(
       `),
     ]);
 
-  const summary = (summaryRows as unknown as PlayerSummary[])[0];
-  if (!summary) return null;
+  type FCRow = { player_name: string; position: string | null; team: string | null; dynasty_value: number | null; trend_30day: number | null; overall_rank: number | null };
+  const fcSummary = (summaryRows as unknown as FCRow[])[0];
+  if (!fcSummary && !pm) return null;
+
+  // Compute edge scores if we have a player_id
+  let edgeScore = 0;
+  let fcScore: number | null = null;
+  let ktcScore: number | null = null;
+  let dpScore: number | null = null;
+  let sourcesAvailable = 0;
+
+  if (pm) {
+    const mode: "sf" | "1qb" = "sf"; // default to SF for player detail
+    const compMap = await getCompositeValues([pm.player_id], mode);
+    const comp = compMap.get(pm.player_id);
+    if (comp) {
+      const inputs = [{ sleeper_id: pm.player_id, fc_value: comp.fc_value, ktc_value: comp.ktc_value, dp_value: comp.dp_value }];
+      const edgeMap = computeEdgeScores(inputs);
+      const e = edgeMap.get(pm.player_id);
+      if (e) {
+        edgeScore = e.score;
+        fcScore = e.fc_score;
+        ktcScore = e.ktc_score;
+        dpScore = e.dp_score;
+        sourcesAvailable = e.sources_used;
+      }
+    }
+  }
+
+  const position = pm?.position ?? fcSummary?.position ?? null;
+  const age = pm?.age ?? null;
+  const ageCurve = getAgeCurveStatus(position ?? "", age);
+
+  const ownedLeagues = ownershipRows as unknown as OwnershipEntry[];
+
+  const summary: PlayerSummary = {
+    player_name: pm?.full_name ?? fcSummary?.player_name ?? playerName,
+    position,
+    team: fcSummary?.team ?? null,
+    age,
+    dynasty_value: fcSummary?.dynasty_value ?? null,
+    trend_30day: fcSummary?.trend_30day ?? null,
+    overall_rank: fcSummary?.overall_rank ?? null,
+    edge_score: edgeScore,
+    fc_score: fcScore,
+    ktc_score: ktcScore,
+    dp_score: dpScore,
+    sources_available: sourcesAvailable,
+    source_agreement: scoreAgreement([fcScore, ktcScore, dpScore]),
+    age_curve: ageCurve,
+  };
 
   const prospect = (prospectRows as unknown as ProspectInfo[])[0] ?? null;
   const recommendation = (recRows as unknown as RecInfo[])[0] ?? null;
@@ -143,7 +226,12 @@ export async function getPlayerDetail(
   return {
     summary,
     valueHistory: historyRows as unknown as ValuePoint[],
-    ownership: ownershipRows as unknown as OwnershipEntry[],
+    ownership: ownedLeagues,
+    exposure: {
+      owned_leagues: ownedLeagues.length,
+      total_leagues: dynastyLeagueIds.length,
+      exposure_pct: dynastyLeagueIds.length > 0 ? Math.round((ownedLeagues.length / dynastyLeagueIds.length) * 100) : 0,
+    },
     mentions: mentionRows as unknown as Mention[],
     prospect,
     recommendation,

@@ -18,12 +18,13 @@ const NAV_ITEMS = [
   { path: "trade-finder", label: "Trade Finder", icon: "🔍" },
   { path: "history", label: "History", icon: "📅" },
   { path: "injuries", label: "Injuries", icon: "🏥" },
+  { path: "how-it-works", label: "How It Works", icon: "?" },
 ];
 
 export default function NavBar({ username, avatarId }: NavBarProps) {
   const [location] = useLocation();
 
-  const noUserPaths = ["market", "trade-calculator"];
+  const noUserPaths = ["market", "trade-calculator", "how-it-works"];
 
   function isActive(path: string): boolean {
     if (noUserPaths.includes(path)) return location.startsWith(`/${path}`);

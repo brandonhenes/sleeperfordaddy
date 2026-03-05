@@ -6,7 +6,33 @@ import { syncDynastyProcessValues } from "../services/sync-dynastyprocess.js";
 import { syncFpEliteValues } from "../services/sync-fp-elite.js";
 import { snapshotEdgeScores } from "../services/snapshot-scores.js";
 
+import { db } from "../db/connection.js";
+import { sql } from "drizzle-orm";
+
 const router = Router();
+
+/** GET /api/meta/freshness — per-source last-sync timestamps */
+router.get("/api/meta/freshness", async (_req, res) => {
+  try {
+    const [[fc], [ktc], [dp]] = await Promise.all([
+      db.execute(sql`SELECT MAX(snapshot_date)::text AS last_synced, COUNT(*)::int AS player_count FROM fantasycalc_daily WHERE is_pick = false`),
+      db.execute(sql`SELECT MAX(scraped_at)::text AS last_synced, COUNT(*)::int AS player_count FROM ktc_values WHERE is_pick = false`),
+      db.execute(sql`SELECT MAX(synced_at)::text AS last_synced, COUNT(*)::int AS player_count FROM dynastyprocess_values WHERE is_pick = false`),
+    ]) as unknown as [
+      [{ last_synced: string | null; player_count: number }],
+      [{ last_synced: string | null; player_count: number }],
+      [{ last_synced: string | null; player_count: number }],
+    ];
+    res.json({
+      fantasycalc: { last_synced: fc.last_synced, player_count: fc.player_count },
+      ktc: { last_synced: ktc.last_synced, player_count: ktc.player_count },
+      dynastyprocess: { last_synced: dp.last_synced, player_count: dp.player_count },
+    });
+  } catch (err) {
+    console.error("[meta/freshness] Error:", err);
+    res.status(500).json({ message: (err as Error).message ?? "Internal server error" });
+  }
+});
 
 /** POST /api/admin/recompute-tags?username=... */
 router.post("/api/admin/recompute-tags", async (req, res) => {

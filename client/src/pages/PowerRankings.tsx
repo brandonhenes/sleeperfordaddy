@@ -5,6 +5,8 @@ import { StatCard } from "../components/ui";
 import SourceBadge from "../components/SourceBadge";
 import EdgeScoreBadge from "../components/EdgeScoreBadge";
 import { posColor } from "../lib/position-colors";
+import FreshnessBar from "../components/FreshnessBar";
+import ShareButton from "../components/ShareButton";
 import {
   usePowerRankings,
   type LeaguePowerRanking,
@@ -133,6 +135,16 @@ function PlayerRow({ p, slotLabel }: { p: SlottedPlayer | CoreAsset; slotLabel?:
 
 // ─── Expanded Roster View ───
 
+function rosterTextSummary(roster: RosterRanking): string {
+  const lines = [`[The Edge] ${roster.display_name} - ${roster.archetype}`];
+  lines.push(`Avg Starter Edge: ${Math.round(roster.avg_starter_score)} | Power: ${Math.round(roster.power_pct)}%`);
+  const starters = roster.lineup?.starters ?? [];
+  if (starters.length > 0) {
+    lines.push("Starters: " + starters.map((s) => `${s.slot} ${s.full_name} (${Math.round(s.edge_score)})`).join(", "));
+  }
+  return lines.join("\n");
+}
+
 function ExpandedRosterView({ roster }: { roster: RosterRanking }) {
   const [showBench, setShowBench] = useState(false);
   const picks = roster.draft_picks ?? [];
@@ -216,6 +228,10 @@ function ExpandedRosterView({ roster }: { roster: RosterRanking }) {
           </div>
         </>
       )}
+
+      <div style={{ marginTop: 12, textAlign: "right" }}>
+        <ShareButton textSummary={rosterTextSummary(roster)} />
+      </div>
     </div>
   );
 }
@@ -347,12 +363,15 @@ export default function PowerRankings() {
         <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 4 }}>
           Edge Score dynasty ratings across all leagues (39-99 scale)
         </p>
+        <FreshnessBar />
       </div>
 
       {error ? (
         <ErrorCard message={(error as Error).message} />
       ) : leagues.length === 0 ? (
-        <ErrorCard message="No league data found" />
+        <div style={{ ...skel, padding: 40, textAlign: "center", color: "var(--text-muted)" }}>
+          No dynasty leagues found for this user. Make sure your Sleeper username is correct.
+        </div>
       ) : (
         <>
           <SummaryCards leagues={leagues} />

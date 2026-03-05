@@ -1,4 +1,4 @@
-import { useParams } from "wouter";
+import { useParams, Link } from "wouter";
 import {
   LineChart,
   Line,
@@ -9,20 +9,59 @@ import {
   CartesianGrid,
 } from "recharts";
 import AppShell from "../components/AppShell";
+import EdgeScoreBadge from "../components/EdgeScoreBadge";
+import ShareButton from "../components/ShareButton";
 import { TrendArrow, SectionHeader } from "../components/ui";
 import { posColor, dirColor } from "../lib/position-colors";
 import {
   usePlayer,
   type PlayerDetail as PD,
+  type PlayerSummary,
   type Mention,
   type ProspectInfo,
   type RecInfo,
   type OwnershipEntry,
+  type ExposureInfo,
 } from "../hooks/use-player";
+
+// ─── Zone Colors ───
+
+const ZONE_COLORS: Record<string, string> = {
+  Prime: "#f59e0b", Ascent: "#22c55e", Decline: "#f97316", Cliff: "#ef4444", Unknown: "#94a3b8",
+};
+
+// ─── Agreement ───
+
+function agreementColor(agr: "high" | "medium" | "low"): string {
+  if (agr === "high") return "#22c55e";
+  if (agr === "medium") return "#f59e0b";
+  return "#ef4444";
+}
+
+// ─── Source Bar ───
+
+function SourceBar({ label, score, max }: { label: string; score: number | null; max: number }) {
+  const pct = score != null ? Math.max(2, (score / max) * 100) : 0;
+  const color = score != null
+    ? score >= 85 ? "#22c55e" : score >= 70 ? "#3b82f6" : score >= 55 ? "#f59e0b" : "#ef4444"
+    : "var(--border)";
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13 }}>
+      <span style={{ width: 32, fontWeight: 700, color: "var(--text-muted)", textAlign: "right" }}>{label}</span>
+      <div style={{ flex: 1, background: "var(--dark-base)", borderRadius: 4, height: 12, overflow: "hidden" }}>
+        <div style={{ width: `${pct}%`, height: "100%", background: color, borderRadius: 4, transition: "width 0.3s" }} />
+      </div>
+      <span className="font-mono" style={{ width: 32, fontWeight: 700, textAlign: "right", color: score != null ? "var(--text)" : "var(--text-muted)" }}>
+        {score != null ? Math.round(score) : "N/A"}
+      </span>
+    </div>
+  );
+}
 
 // ─── Header ───
 
-function PlayerHeader({ summary }: { summary: PD["summary"] }) {
+function PlayerHeader({ summary }: { summary: PlayerSummary }) {
+  const ac = summary.age_curve;
   return (
     <div style={{ padding: "28px 0 8px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
@@ -35,20 +74,83 @@ function PlayerHeader({ summary }: { summary: PD["summary"] }) {
         {summary.team && (
           <span style={{ fontSize: 13, color: "var(--text-muted)" }}>{summary.team}</span>
         )}
-      </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 16, marginTop: 10 }}>
-        {summary.dynasty_value != null && (
-          <span className="font-mono" style={{ fontSize: 28, fontWeight: 800, color: "var(--amber)" }}>
-            {summary.dynasty_value.toLocaleString()}
-          </span>
-        )}
-        <TrendArrow value={summary.trend_30day} />
-        {summary.overall_rank != null && (
-          <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
-            Rank #{summary.overall_rank}
+        {summary.age != null && (
+          <span style={{ fontSize: 12, fontWeight: 600, color: ZONE_COLORS[ac.zone] ?? "#94a3b8" }}>
+            Age {summary.age} &middot; {ac.zone}
           </span>
         )}
       </div>
+
+      {/* Edge Score + Source Breakdown */}
+      <div style={{ display: "flex", gap: 20, marginTop: 16, flexWrap: "wrap", alignItems: "flex-start" }}>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+          <EdgeScoreBadge score={Math.round(summary.edge_score)} size="md" />
+          <span style={{ fontSize: 10, fontWeight: 700, color: agreementColor(summary.source_agreement) }}>
+            {summary.source_agreement === "high" ? "Sources Agree" : summary.source_agreement === "medium" ? "Mixed" : "Sources Disagree"}
+          </span>
+          <span style={{ fontSize: 9, color: "var(--text-muted)" }}>
+            {summary.sources_available}/3 sources
+          </span>
+        </div>
+
+        <div style={{ flex: 1, minWidth: 200, maxWidth: 400, display: "grid", gap: 6 }}>
+          <SourceBar label="FC" score={summary.fc_score} max={99} />
+          <SourceBar label="KTC" score={summary.ktc_score} max={99} />
+          <SourceBar label="FP" score={summary.dp_score} max={99} />
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
+          {summary.dynasty_value != null && (
+            <span className="font-mono" style={{ fontSize: 22, fontWeight: 800, color: "var(--amber)" }}>
+              {summary.dynasty_value.toLocaleString()}
+            </span>
+          )}
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <TrendArrow value={summary.trend_30day} />
+            {summary.overall_rank != null && (
+              <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                FC Rank #{summary.overall_rank}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Exposure ───
+
+function ExposureSection({ exposure, ownership }: { exposure: ExposureInfo; ownership: OwnershipEntry[] }) {
+  return (
+    <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: "16px 20px" }}>
+      <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 10 }}>
+        You own this player in{" "}
+        <span style={{ color: "var(--amber)", fontWeight: 800 }}>{exposure.owned_leagues}</span>
+        /{exposure.total_leagues} leagues ({exposure.exposure_pct}%)
+      </div>
+      {ownership.length > 0 ? (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          {ownership.map((l) => (
+            <span
+              key={l.league_id}
+              style={{
+                padding: "4px 12px",
+                borderRadius: 6,
+                fontSize: 12,
+                fontWeight: 600,
+                background: "rgba(96,165,250,0.12)",
+                color: "var(--blue)",
+                border: "1px solid rgba(96,165,250,0.2)",
+              }}
+            >
+              {l.league_name}
+            </span>
+          ))}
+        </div>
+      ) : (
+        <div style={{ fontSize: 13, color: "var(--text-muted)" }}>Not on any of your rosters</div>
+      )}
     </div>
   );
 }
@@ -81,26 +183,6 @@ function ValueChart({ data }: { data: PD["valueHistory"] }) {
   );
 }
 
-// ─── Ownership ───
-
-function OwnershipSection({ leagues }: { leagues: OwnershipEntry[] }) {
-  if (leagues.length === 0) {
-    return <EmptyCard label="You don't own this player in any league" />;
-  }
-  return (
-    <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
-      {leagues.map((l) => (
-        <div
-          key={l.league_id}
-          style={{ padding: "10px 16px", borderBottom: "1px solid var(--border)", fontSize: 14 }}
-        >
-          {l.league_name}
-        </div>
-      ))}
-    </div>
-  );
-}
-
 // ─── Mentions ───
 
 function MentionCard({ m }: { m: Mention }) {
@@ -124,7 +206,7 @@ function MentionCard({ m }: { m: Mention }) {
       )}
       {m.key_quote && (
         <p style={{ fontSize: 13, color: "var(--text-dim)", margin: "4px 0 0", fontStyle: "italic", lineHeight: 1.5 }}>
-          "{m.key_quote}"
+          &ldquo;{m.key_quote}&rdquo;
         </p>
       )}
     </div>
@@ -226,6 +308,40 @@ function RecSection({ rec }: { rec: RecInfo }) {
   );
 }
 
+// ─── Quick Actions ───
+
+function QuickActions({ playerName }: { playerName: string }) {
+  const username = typeof window !== "undefined" ? localStorage.getItem("edge_username") ?? "" : "";
+  return (
+    <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+      {username && (
+        <Link href={`/trade-finder/${encodeURIComponent(username)}`}>
+          <button
+            style={{
+              background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8,
+              padding: "10px 16px", color: "var(--text)", fontSize: 13, fontWeight: 600,
+              cursor: "pointer", fontFamily: "inherit",
+            }}
+          >
+            Find trades involving {playerName}
+          </button>
+        </Link>
+      )}
+      <Link href="/trade-calculator">
+        <button
+          style={{
+            background: "var(--amber)", border: "none", borderRadius: 8,
+            padding: "10px 16px", color: "var(--dark-base)", fontSize: 13, fontWeight: 700,
+            cursor: "pointer", fontFamily: "inherit",
+          }}
+        >
+          Open Trade Calculator
+        </button>
+      </Link>
+    </div>
+  );
+}
+
 // ─── Page ───
 
 export default function PlayerDetail() {
@@ -246,28 +362,40 @@ export default function PlayerDetail() {
     );
   }
 
+  const shareText = `[The Edge] ${data.summary.player_name} (${data.summary.position})\nEdge Score: ${Math.round(data.summary.edge_score)} | FC: ${data.summary.fc_score ?? "N/A"} | KTC: ${data.summary.ktc_score ?? "N/A"} | FP: ${data.summary.dp_score ?? "N/A"}\nAge: ${data.summary.age ?? "?"} (${data.summary.age_curve.zone})`;
+
   return (
     <AppShell>
       <PlayerHeader summary={data.summary} />
-      <SectionHeader num="01" icon="📈" title="VALUE HISTORY" subtitle="Last 90 days" />
+
+      <div style={{ marginBottom: 16 }}>
+        <ShareButton textSummary={shareText} />
+      </div>
+
+      <SectionHeader icon="📊" title="EXPOSURE" subtitle="Your ownership across leagues" />
+      <ExposureSection exposure={data.exposure} ownership={data.ownership} />
+
+      <SectionHeader icon="📈" title="VALUE HISTORY" subtitle="FantasyCalc dynasty value (90 days)" />
       <ValueChart data={data.valueHistory} />
-      <SectionHeader num="02" icon="🏠" title="MY OWNERSHIP" subtitle="Leagues where you roster this player" />
-      <OwnershipSection leagues={data.ownership} />
+
+      <SectionHeader icon="🎯" title="QUICK ACTIONS" subtitle="" />
+      <QuickActions playerName={data.summary.player_name} />
+
       {data.mentions.length > 0 && (
         <>
-          <SectionHeader num="03" icon="📰" title="NEWSLETTER INTEL" subtitle="Recent mentions from Dynasty Daily" />
+          <SectionHeader icon="📰" title="NEWSLETTER INTEL" subtitle="Recent mentions" />
           <MentionsSection mentions={data.mentions} />
         </>
       )}
       {data.prospect && (
         <>
-          <SectionHeader num="04" icon="🎓" title="PROSPECT PROFILE" subtitle="Draft scouting report" />
+          <SectionHeader icon="🎓" title="PROSPECT PROFILE" subtitle="Draft scouting report" />
           <ProspectSection prospect={data.prospect} />
         </>
       )}
       {data.recommendation && (
         <>
-          <SectionHeader num="05" icon="🎯" title="CURRENT REC" subtitle="Latest newsletter recommendation" />
+          <SectionHeader icon="🎯" title="CURRENT REC" subtitle="Latest recommendation" />
           <RecSection rec={data.recommendation} />
         </>
       )}

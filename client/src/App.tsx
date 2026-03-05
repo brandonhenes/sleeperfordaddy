@@ -13,6 +13,7 @@ import TradeCalculator from "./pages/TradeCalculator";
 import TradeFinder from "./pages/TradeFinder";
 import LeagueHistory from "./pages/LeagueHistory";
 import InjuryTracker from "./pages/InjuryTracker";
+import HowItWorks from "./pages/HowItWorks";
 import NotFound from "./pages/NotFound";
 
 export default function App() {
@@ -32,6 +33,7 @@ export default function App() {
       <Route path="/trade-finder/:username" component={TradeFinder} />
       <Route path="/history/:username" component={LeagueHistory} />
       <Route path="/injuries/:username" component={InjuryTracker} />
+      <Route path="/how-it-works" component={HowItWorks} />
       {/* Keep legacy route working */}
       <Route path="/user/:username" component={Dashboard} />
       <Route component={NotFound} />

@@ -3,6 +3,7 @@ import AppShell from "../components/AppShell";
 import { SectionHeader } from "../components/ui";
 import { useDashboard } from "../hooks/use-dashboard";
 import { useEnsureUser } from "../hooks/use-ensure-user";
+import FreshnessBar from "../components/FreshnessBar";
 import EmpireOverview from "../components/dashboard/EmpireOverview";
 import RosterHoles from "../components/dashboard/RosterHoles";
 import SourceMovers from "../components/dashboard/SourceMovers";
@@ -139,6 +140,7 @@ export default function Dashboard() {
           {greeting()}, {username}
         </h1>
         <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 4 }}>{today()}</p>
+        <FreshnessBar />
       </div>
 
       {/* Section 1: Empire Overview */}

@@ -1,17 +1,38 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "../lib/api";
 
+export interface AgeCurveStatus {
+  age: number | null;
+  position: string;
+  score: number;
+  zone: string;
+  color: string;
+  label: string;
+  dot_pct: number;
+  prime_start: number | null;
+  prime_end: number | null;
+}
+
 export interface PlayerSummary {
   player_name: string;
   position: string | null;
   team: string | null;
+  age: number | null;
   dynasty_value: number | null;
   trend_30day: number | null;
   overall_rank: number | null;
+  edge_score: number;
+  fc_score: number | null;
+  ktc_score: number | null;
+  dp_score: number | null;
+  sources_available: number;
+  source_agreement: "high" | "medium" | "low";
+  age_curve: AgeCurveStatus;
 }
 
 export interface ValuePoint { date: string; value: number }
 export interface OwnershipEntry { league_name: string; league_id: string }
+export interface ExposureInfo { owned_leagues: number; total_leagues: number; exposure_pct: number }
 export interface Mention {
   mention_date: string;
   source: string | null;
@@ -38,6 +59,7 @@ export interface PlayerDetail {
   summary: PlayerSummary;
   valueHistory: ValuePoint[];
   ownership: OwnershipEntry[];
+  exposure: ExposureInfo;
   mentions: Mention[];
   prospect: ProspectInfo | null;
   recommendation: RecInfo | null;
