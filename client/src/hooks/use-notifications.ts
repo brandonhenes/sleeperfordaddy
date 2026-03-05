@@ -1,18 +1,15 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "../lib/api";
 
-export interface Notification {
+export interface NotificationItem {
   id: string;
-  type: "arbitrage" | "disagreement" | "injury" | "buying_window";
-  title: string;
   message: string;
-  player_name: string;
-  position: string;
-  severity: "high" | "medium" | "low";
+  created_at: number;
+  read: boolean;
 }
 
 export function useNotifications(username: string) {
-  return useQuery<Notification[]>({
+  return useQuery<NotificationItem[]>({
     queryKey: ["notifications", username],
     queryFn: () => apiFetch(`/api/notifications/${encodeURIComponent(username)}`),
     enabled: false,

@@ -224,10 +224,6 @@ async function runSync(jobId: string, username: string) {
           status: p.status ?? null,
           age: p.age ?? null,
           years_exp: null,
-          injury_status: null,
-          injury_body_part: null,
-          injury_start_date: null,
-          injury_notes: null,
         }));
       await bulkUpsertPlayers(playersList);
       playersLastSynced = Date.now();
