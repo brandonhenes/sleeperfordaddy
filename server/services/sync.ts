@@ -56,12 +56,19 @@ export async function checkSyncStatus(username: string) {
     return { needsSync: true, syncJob: null };
   }
 
+  const ageMinutes = (Date.now() - latest.updated_at) / 60_000;
   const isRunning = latest.status === "running";
   if (isRunning) {
-    return { needsSync: false, syncJob: latest };
+    if (ageMinutes <= SYNC_STALE_MINUTES) {
+      return { needsSync: false, syncJob: latest };
+    }
+    await updateSyncJob(latest.job_id, {
+      status: "failed",
+      error: "Sync timed out and was marked stale",
+    });
+    return { needsSync: true, syncJob: null };
   }
 
-  const ageMinutes = (Date.now() - latest.updated_at) / 60_000;
   const isStale = ageMinutes > SYNC_STALE_MINUTES;
 
   return {
