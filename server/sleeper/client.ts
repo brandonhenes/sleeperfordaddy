@@ -3,12 +3,27 @@ import { SLEEPER_BASE_URL } from "../../shared/constants.js";
 const TIMEOUT_MS = 15_000;
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 1000;
+const cache = new Map<string, { data: unknown; expires: number }>();
+const DEFAULT_TTL_MS = 5 * 60 * 1000;
+
+export function clearSleeperCache() {
+  cache.clear();
+}
 
 /**
  * Fetch JSON from the Sleeper API with timeout and retry.
  * This is the single point of contact for all Sleeper API calls.
  */
-export async function jget<T>(path: string): Promise<T | null> {
+export async function jget<T>(
+  path: string,
+  ttlMs: number = DEFAULT_TTL_MS
+): Promise<T | null> {
+  const now = Date.now();
+  const hit = cache.get(path);
+  if (hit && hit.expires > now) {
+    return hit.data as T;
+  }
+
   const url = `${SLEEPER_BASE_URL}${path}`;
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
@@ -36,6 +51,7 @@ export async function jget<T>(path: string): Promise<T | null> {
       }
 
       const data = await response.json();
+      cache.set(path, { data, expires: Date.now() + ttlMs });
       return data as T;
     } catch (err: unknown) {
       const isAbort =

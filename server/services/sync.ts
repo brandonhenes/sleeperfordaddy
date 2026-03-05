@@ -6,6 +6,7 @@ import { getLeagueRosters } from "../sleeper/rosters.js";
 import { getLeagueMatchups } from "../sleeper/matchups.js";
 import { getLeagueTransactions } from "../sleeper/transactions.js";
 import { getNflState, getAllPlayers } from "../sleeper/players.js";
+import { clearSleeperCache } from "../sleeper/client.js";
 import {
   createSyncJob,
   updateSyncJob,
@@ -26,6 +27,7 @@ import { seedInjuryBaselines } from "../db/seeds/injury-baselines.js";
 import { capturePlayerValueSnapshots } from "./value-snapshots.js";
 import { captureTeamValueSnapshots } from "./team-snapshots.js";
 import { isDynastyLeagueFromSleeperSettings } from "./dynasty-leagues.js";
+import { clearPowerRankingsCache } from "./power-rankings.js";
 import type {
   SleeperLeague,
   SleeperRoster,
@@ -280,6 +282,9 @@ async function runSync(jobId: string, username: string) {
   } catch (err) {
     console.error("[sync] Error capturing team value snapshots:", err);
   }
+
+  clearSleeperCache();
+  clearPowerRankingsCache(username);
 
   // Step 9: Done
   await updateSyncJob(jobId, {

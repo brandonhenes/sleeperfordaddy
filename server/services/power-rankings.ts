@@ -13,6 +13,17 @@ import {
 import { optimizeLineup, type OptimizedLineup } from "./lineup-optimizer.js";
 import { getDynastyLeagueIdsForUserLatestSeason } from "./dynasty-leagues.js";
 
+const prCache = new Map<string, { data: LeaguePowerRanking[]; expires: number }>();
+const PR_TTL_MS = 5 * 60 * 1000;
+
+export function clearPowerRankingsCache(username?: string) {
+  if (username) {
+    prCache.delete(username.toLowerCase());
+  } else {
+    prCache.clear();
+  }
+}
+
 // ─── Types ───
 
 export interface CoreAsset {
@@ -93,6 +104,13 @@ function scoreAgreement(scores: (number | null)[]): "high" | "medium" | "low" {
 // ─── Main ───
 
 export async function getPowerRankings(username: string): Promise<LeaguePowerRanking[]> {
+  const cacheKey = username.toLowerCase();
+  const now = Date.now();
+  const hit = prCache.get(cacheKey);
+  if (hit && hit.expires > now) {
+    return hit.data;
+  }
+
   const userRows = await db.execute(sql`
     SELECT user_id FROM users WHERE LOWER(username) = LOWER(${username}) LIMIT 1
   `);
@@ -328,5 +346,6 @@ export async function getPowerRankings(username: string): Promise<LeaguePowerRan
   }
 
   results.sort((a, b) => a.league_name.localeCompare(b.league_name));
+  prCache.set(cacheKey, { data: results, expires: Date.now() + PR_TTL_MS });
   return results;
 }
