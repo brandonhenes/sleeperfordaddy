@@ -15,6 +15,8 @@ import tradeCalculatorRoutes from "./trade-calculator.js";
 import tradeFinderRoutes from "./trade-finder.js";
 import leagueHistoryRoutes from "./league-history.js";
 import injuryTrackerRoutes from "./injury-tracker.js";
+import waiverWireRoutes from "./waiver-wire.js";
+import notificationsRoutes from "./notifications.js";
 
 const router = Router();
 
@@ -40,5 +42,7 @@ router.use(tradeCalculatorRoutes);
 router.use(tradeFinderRoutes);
 router.use(leagueHistoryRoutes);
 router.use(injuryTrackerRoutes);
+router.use(waiverWireRoutes);
+router.use(notificationsRoutes);
 
 export default router;

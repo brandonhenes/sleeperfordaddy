@@ -60,13 +60,20 @@ function scoreValue(value: number, params: SourceParams): number {
 
 // ─── Main ───
 
+export interface SourceWeights {
+  fc: number;
+  ktc: number;
+  dp: number;
+}
+
 export function computeEdgeScores(
   players: PlayerInput[],
   scaleOverride?: {
     fc?: { floor: number; max: number };
     ktc?: { floor: number; max: number };
     dp?: { floor: number; max: number };
-  }
+  },
+  weights?: SourceWeights
 ): Map<string, EdgeScore> {
   // Compute per-source scale parameters from all players
   const fcParams = computeSourceParams(
@@ -98,16 +105,18 @@ export function computeEdgeScores(
         ? scoreValue(p.dp_value, dpParams)
         : null;
 
-    const scores = [fcScore, ktcScore, dpScore].filter(
-      (s): s is number => s != null
-    );
-    const sourcesUsed = scores.length;
+    const scored: { value: number; weight: number }[] = [];
+    if (fcScore != null) scored.push({ value: fcScore, weight: weights?.fc ?? 1 });
+    if (ktcScore != null) scored.push({ value: ktcScore, weight: weights?.ktc ?? 1 });
+    if (dpScore != null) scored.push({ value: dpScore, weight: weights?.dp ?? 1 });
+    const sourcesUsed = scored.length;
 
     let score = 0;
     if (sourcesUsed > 0) {
-      score = Math.round(
-        scores.reduce((s, v) => s + v, 0) / sourcesUsed
-      );
+      const totalWeight = scored.reduce((s, e) => s + e.weight, 0);
+      score = totalWeight > 0
+        ? Math.round(scored.reduce((s, e) => s + e.value * e.weight, 0) / totalWeight)
+        : Math.round(scored.reduce((s, e) => s + e.value, 0) / sourcesUsed);
       score = Math.max(39, Math.min(99, score));
     }
 

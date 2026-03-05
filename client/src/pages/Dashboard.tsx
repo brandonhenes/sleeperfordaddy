@@ -9,6 +9,7 @@ import RosterHoles from "../components/dashboard/RosterHoles";
 import SourceMovers from "../components/dashboard/SourceMovers";
 import LeagueHealthHeatmap from "../components/dashboard/LeagueHealthHeatmap";
 import ExposureChart from "../components/dashboard/ExposureChart";
+import ActionsFeed from "../components/dashboard/ActionsFeed";
 import ArchetypeActions from "../components/dashboard/ArchetypeActions";
 
 function greeting(): string {
@@ -142,6 +143,13 @@ export default function Dashboard() {
         <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 4 }}>{today()}</p>
         <FreshnessBar />
       </div>
+
+      {/* Actions Feed */}
+      {data.actions_feed && data.actions_feed.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <ActionsFeed actions={data.actions_feed} />
+        </div>
+      )}
 
       {/* Section 1: Empire Overview */}
       <div style={{ marginTop: 16 }}>

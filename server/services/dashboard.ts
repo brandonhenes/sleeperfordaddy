@@ -10,7 +10,18 @@ export interface SlotGradeInfo {
   grade: "elite" | "strong" | "average" | "weak" | "hole";
 }
 
+export interface ActionFeedItem {
+  type: "sell_high" | "buy_low" | "roster_move";
+  title: string;
+  player_name: string;
+  position: string;
+  edge_score: number;
+  signal: string;
+  leagues: string[];
+}
+
 export interface DashboardData {
+  actions_feed: ActionFeedItem[];
   empire: {
     total_leagues: number;
     avg_starter_score: number;
@@ -228,7 +239,66 @@ export async function getDashboardData(username: string): Promise<DashboardData 
   }
   archetypeActions.sort((a, b) => b.leagues.length - a.leagues.length);
 
+  // ─── Actions Feed ───
+  const actionsFeed: ActionFeedItem[] = [];
+
+  // Sell High: high-exposure players with declining trend or source disagreement
+  if (sourceMovers.has_data && sourceMovers.fallers.length > 0) {
+    const best = sourceMovers.fallers.find(
+      (m) => m.leagues_owned >= 2 && m.current_score >= 50
+    ) ?? sourceMovers.fallers[0];
+    if (best) {
+      const leagues = exposure
+        .filter((e) => e.player_id === best.player_id)
+        .length > 0
+        ? exposure.filter((e) => e.player_id === best.player_id).map((e) => `${e.leagues_owned} leagues`)
+        : [`${best.leagues_owned} leagues`];
+      actionsFeed.push({
+        type: "sell_high",
+        title: "Sell High",
+        player_name: best.full_name,
+        position: best.position,
+        edge_score: best.current_score,
+        signal: `Edge score dropped ${Math.abs(best.change)} pts. Owned in ${best.leagues_owned} league${best.leagues_owned > 1 ? "s" : ""}.`,
+        leagues,
+      });
+    }
+  }
+
+  // Buy Low: rising players user owns in few leagues
+  if (sourceMovers.has_data && sourceMovers.risers.length > 0) {
+    const best = sourceMovers.risers.find(
+      (m) => m.leagues_owned <= Math.ceil(totalLeagues * 0.33) && m.current_score >= 60
+    ) ?? sourceMovers.risers[0];
+    if (best) {
+      actionsFeed.push({
+        type: "buy_low",
+        title: "Buy Low",
+        player_name: best.full_name,
+        position: best.position,
+        edge_score: best.current_score,
+        signal: `Edge score rose ${best.change} pts. Only in ${best.leagues_owned}/${totalLeagues} leagues.`,
+        leagues: [`${best.leagues_owned}/${totalLeagues} leagues`],
+      });
+    }
+  }
+
+  // Roster Move: worst starter that could be upgraded
+  if (rosterHoles.length > 0) {
+    const worst = rosterHoles[0];
+    actionsFeed.push({
+      type: "roster_move",
+      title: "Roster Move",
+      player_name: worst.player_name,
+      position: worst.position,
+      edge_score: worst.edge_score,
+      signal: `Weakest starter (${worst.slot_label}) in ${worst.league_name}. Look for upgrades.`,
+      leagues: [worst.league_name],
+    });
+  }
+
   return {
+    actions_feed: actionsFeed,
     empire: { total_leagues: totalLeagues, avg_starter_score: avgStarterScore, archetypes, strongest_league: strongest, weakest_league: weakest },
     roster_holes: rosterHoles,
     source_movers: sourceMovers,

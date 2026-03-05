@@ -127,6 +127,17 @@ function computeGrade(avg: number): SlotGrade["grade"] {
   return "hole";
 }
 
+// ─── Slot Fill Order ───
+
+/** Fewer eligible positions = more constrained = fill first. */
+function slotFlexibility(rawSlot: string): number {
+  const s = rawSlot.toUpperCase();
+  if (s === "QB" || s === "RB" || s === "WR" || s === "TE") return 0; // position-locked
+  const eligible = getFlexEligiblePositions(s);
+  if (eligible.size === 0) return 0;
+  return eligible.size; // 2 = REC_FLEX, 3 = FLEX, 4 = SUPER_FLEX/OP
+}
+
 // ─── Main Optimizer ───
 
 export function optimizeLineup(
@@ -143,14 +154,24 @@ export function optimizeLineup(
 
   const starters: SlottedPlayer[] = [];
 
-  // Greedy fill: for each slot, find best available eligible player
-  for (const { slot, label, raw } of namedSlots) {
+  // Sort slots: position-locked first, then flex from most restrictive to least.
+  // Stable sort preserves original order within the same flexibility level.
+  const fillOrder = [...namedSlots].sort(
+    (a, b) => slotFlexibility(a.raw) - slotFlexibility(b.raw)
+  );
+
+  // Greedy fill using the RAW slot name for eligibility checks
+  for (const { slot, label, raw } of fillOrder) {
     const best = sorted.find((p) => !used.has(p.player_id) && isEligible(p.position, raw));
     if (best) {
       used.add(best.player_id);
       starters.push({ ...best, slot, slot_label: label, is_starter: true });
     }
   }
+
+  // Re-sort starters to match the original rosterPositions display order
+  const slotOrder = new Map(namedSlots.map((s, i) => [s.slot, i]));
+  starters.sort((a, b) => (slotOrder.get(a.slot) ?? 99) - (slotOrder.get(b.slot) ?? 99));
 
   // Bench: all unslotted players, sorted by edge_score descending
   const bench: SlottedPlayer[] = sorted

@@ -308,6 +308,48 @@ function RecSection({ rec }: { rec: RecInfo }) {
   );
 }
 
+// ─── Trade Comps ───
+
+function TradeComps({ trades }: { trades: { trade_id: string; league_name: string; date: string; gave: string[]; received: string[] }[] }) {
+  if (trades.length === 0) return null;
+  return (
+    <div style={{ display: "grid", gap: 8 }}>
+      {trades.map((t) => (
+        <div
+          key={t.trade_id}
+          style={{
+            background: "var(--card)",
+            border: "1px solid var(--border)",
+            borderRadius: 10,
+            padding: "12px 16px",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+            <span style={{ fontSize: 12, fontWeight: 600 }}>{t.league_name}</span>
+            <span style={{ fontSize: 11, color: "var(--text-muted)", marginLeft: "auto" }}>{t.date}</span>
+          </div>
+          <div style={{ display: "flex", gap: 16, fontSize: 12 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#ef4444", marginBottom: 4, letterSpacing: 0.5 }}>GAVE</div>
+              {t.gave.map((a, i) => (
+                <div key={i} style={{ color: "var(--text-dim)", padding: "1px 0" }}>{a}</div>
+              ))}
+              {t.gave.length === 0 && <div style={{ color: "var(--text-muted)" }}>-</div>}
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#22c55e", marginBottom: 4, letterSpacing: 0.5 }}>RECEIVED</div>
+              {t.received.map((a, i) => (
+                <div key={i} style={{ color: "var(--text-dim)", padding: "1px 0" }}>{a}</div>
+              ))}
+              {t.received.length === 0 && <div style={{ color: "var(--text-muted)" }}>-</div>}
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ─── Quick Actions ───
 
 function QuickActions({ playerName }: { playerName: string }) {
@@ -380,6 +422,13 @@ export default function PlayerDetail() {
 
       <SectionHeader icon="🎯" title="QUICK ACTIONS" subtitle="" />
       <QuickActions playerName={data.summary.player_name} />
+
+      {data.recent_trades && data.recent_trades.length > 0 && (
+        <>
+          <SectionHeader icon="🔀" title="RECENT TRADES" subtitle="Completed trades across your leagues" />
+          <TradeComps trades={data.recent_trades} />
+        </>
+      )}
 
       {data.mentions.length > 0 && (
         <>

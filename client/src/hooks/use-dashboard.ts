@@ -51,7 +51,18 @@ export interface ArchetypeAction {
   leagues: Array<{ name: string; league_id: string; avg_score: number }>;
 }
 
+export interface ActionFeedItem {
+  type: "sell_high" | "buy_low" | "roster_move";
+  title: string;
+  player_name: string;
+  position: string;
+  edge_score: number;
+  signal: string;
+  leagues: string[];
+}
+
 export interface DashboardData {
+  actions_feed: ActionFeedItem[];
   empire: {
     total_leagues: number;
     avg_starter_score: number;

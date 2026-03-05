@@ -62,6 +62,14 @@ export interface RecInfo {
   rec_date: string;
 }
 
+export interface TradeComp {
+  trade_id: string;
+  league_name: string;
+  date: string;
+  gave: string[];
+  received: string[];
+}
+
 export interface PlayerDetail {
   summary: PlayerSummary;
   valueHistory: ValuePoint[];
@@ -70,6 +78,7 @@ export interface PlayerDetail {
   mentions: Mention[];
   prospect: ProspectInfo | null;
   recommendation: RecInfo | null;
+  recent_trades: TradeComp[];
 }
 
 function scoreAgreement(scores: (number | null)[]): "high" | "medium" | "low" {
@@ -223,6 +232,65 @@ export async function getPlayerDetail(
   const prospect = (prospectRows as unknown as ProspectInfo[])[0] ?? null;
   const recommendation = (recRows as unknown as RecInfo[])[0] ?? null;
 
+  // ─── Recent Trades ───
+  let recentTrades: TradeComp[] = [];
+  if (pm?.player_id) {
+    const tradeRows = await db.execute(sql`
+      SELECT ta.trade_id, ta.created_at_ms, l.name AS league_name
+      FROM trade_assets ta
+      JOIN leagues l ON ta.league_id = l.league_id
+      WHERE ta.asset_type = 'player' AND ta.asset_key = ${pm.player_id}
+      GROUP BY ta.trade_id, ta.created_at_ms, l.name
+      ORDER BY ta.created_at_ms DESC
+      LIMIT 10
+    `);
+    type TR = { trade_id: string; created_at_ms: number; league_name: string };
+    const tradeIds = (tradeRows as unknown as TR[]);
+    if (tradeIds.length > 0) {
+      const idFrags = tradeIds.map((t) => sql`${t.trade_id}`);
+      const allAssets = await db.execute(sql`
+        SELECT trade_id, roster_id, direction,
+               COALESCE(asset_name, asset_key) AS label
+        FROM trade_assets
+        WHERE trade_id IN (${sql.join(idFrags, sql`, `)})
+      `);
+      type AR = { trade_id: string; roster_id: number; direction: string; label: string };
+      const assetMap = new Map<string, { gave: string[]; received: string[] }>();
+
+      // Find which roster_id had the target player in each trade
+      const playerRoster = new Map<string, number>();
+      for (const a of allAssets as unknown as AR[]) {
+        if (a.label === pm.player_id || a.label === pm.full_name) {
+          playerRoster.set(a.trade_id, a.roster_id);
+        }
+      }
+
+      for (const a of allAssets as unknown as AR[]) {
+        const rid = playerRoster.get(a.trade_id);
+        if (rid == null) continue;
+        const entry = assetMap.get(a.trade_id) ?? { gave: [], received: [] };
+        if (a.roster_id === rid) {
+          entry[a.direction === "received" ? "received" : "gave"].push(a.label);
+        } else {
+          // Other side's assets are the opposite direction from their perspective
+          entry[a.direction === "received" ? "gave" : "received"].push(a.label);
+        }
+        assetMap.set(a.trade_id, entry);
+      }
+
+      recentTrades = tradeIds.map((t) => {
+        const assets = assetMap.get(t.trade_id) ?? { gave: [], received: [] };
+        return {
+          trade_id: t.trade_id,
+          league_name: t.league_name,
+          date: new Date(t.created_at_ms).toISOString().slice(0, 10),
+          gave: assets.gave,
+          received: assets.received,
+        };
+      });
+    }
+  }
+
   return {
     summary,
     valueHistory: historyRows as unknown as ValuePoint[],
@@ -235,5 +303,6 @@ export async function getPlayerDetail(
     mentions: mentionRows as unknown as Mention[],
     prospect,
     recommendation,
+    recent_trades: recentTrades,
   };
 }

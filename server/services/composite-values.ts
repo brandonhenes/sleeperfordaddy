@@ -1,6 +1,6 @@
 ﻿import { db } from "../db/connection.js";
 import { sql } from "drizzle-orm";
-import { computeEdgeScores } from "./edge-score.js";
+import { computeEdgeScores, type SourceWeights } from "./edge-score.js";
 
 // ─── Types ───
 
@@ -194,7 +194,8 @@ async function readFromDailySnapshot(
 
 async function computeCompositeRuntime(
   playerIds: string[],
-  mode: "sf" | "1qb"
+  mode: "sf" | "1qb",
+  weights?: SourceWeights
 ): Promise<Map<string, CompositeValue>> {
   const result = new Map<string, CompositeValue>();
   if (playerIds.length === 0) return result;
@@ -243,7 +244,8 @@ async function computeCompositeRuntime(
 
   const edgeMap = computeEdgeScores(
     inputs,
-    dpUsable ? globalScale : { fc: globalScale.fc, ktc: globalScale.ktc }
+    dpUsable ? globalScale : { fc: globalScale.fc, ktc: globalScale.ktc },
+    weights
   );
 
   for (const inp of inputs) {
@@ -272,9 +274,15 @@ async function computeCompositeRuntime(
 
 export async function getCompositeValues(
   playerIds: string[],
-  mode: "sf" | "1qb"
+  mode: "sf" | "1qb",
+  weights?: SourceWeights
 ): Promise<Map<string, CompositeValue>> {
   if (playerIds.length === 0) return new Map();
+
+  // When custom weights are provided, skip snapshots and compute fresh
+  if (weights) {
+    return computeCompositeRuntime(playerIds, mode, weights);
+  }
 
   const snapshotMap = await readFromDailySnapshot(playerIds, mode);
   if (snapshotMap && snapshotMap.size === playerIds.length) {
