@@ -27,6 +27,8 @@ const ARCHETYPE_RECEIVE_PREF: Record<string, { prefer_youth: boolean; prefer_pro
 
 const POSITIONS = ["QB", "RB", "WR", "TE"];
 const MIN_STARTERS: Record<string, number> = { QB: 1, RB: 2, WR: 2, TE: 1 };
+type GradeTier = "elite" | "strong" | "average" | "weak" | "hole";
+const TIERS: GradeTier[] = ["elite", "strong", "average", "weak", "hole"];
 
 // ─── Helpers ───
 
@@ -52,7 +54,7 @@ function tradeFairness(delta: number): "fair" | "slight_edge" | "lopsided" {
   return "lopsided";
 }
 
-function gradeLabel(avg: number): string {
+function gradeLabel(avg: number): GradeTier {
   if (avg >= 88) return "elite";
   if (avg >= 78) return "strong";
   if (avg >= 68) return "average";
@@ -157,20 +159,18 @@ function computeRosterImpact(
   const tradedGrade = gradeMap.get(tradedPos);
   const receivedGrade = gradeMap.get(receivedPos);
 
-  const gradeBefore = tradedGrade?.grade ?? "hole";
-  let gradeAfter = gradeBefore;
+  const gradeBefore: GradeTier = tradedGrade?.grade ?? "hole";
+  let gradeAfter: GradeTier = gradeBefore;
   if (tradedGrade && tradedAway.edge_score >= tradedGrade.avg_score) {
-    const tiers = ["elite", "strong", "average", "weak", "hole"];
-    const idx = tiers.indexOf(gradeBefore);
-    gradeAfter = tiers[Math.min(idx + 1, tiers.length - 1)];
+    const idx = TIERS.indexOf(gradeBefore);
+    gradeAfter = TIERS[Math.min(idx + 1, TIERS.length - 1)];
   }
 
-  const gainBefore = receivedGrade?.grade ?? "hole";
-  let gainAfter = gainBefore;
+  const gainBefore: GradeTier = receivedGrade?.grade ?? "hole";
+  let gainAfter: GradeTier = gainBefore;
   if (receivedGrade && received.edge_score > receivedGrade.avg_score) {
-    const tiers = ["elite", "strong", "average", "weak", "hole"];
-    const idx = tiers.indexOf(gainBefore);
-    gainAfter = tiers[Math.max(idx - 1, 0)];
+    const idx = TIERS.indexOf(gainBefore);
+    gainAfter = TIERS[Math.max(idx - 1, 0)];
   } else if (!receivedGrade || receivedGrade.avg_score === 0) {
     gainAfter = gradeLabel(received.edge_score);
   }
