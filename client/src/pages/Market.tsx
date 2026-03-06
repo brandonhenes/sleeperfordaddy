@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useParams } from "wouter";
 import AppShell from "../components/AppShell";
+import FreshnessBar from "../components/FreshnessBar";
 import EdgeScoreBadge from "../components/EdgeScoreBadge";
 import RecommendationsTab from "../components/market/RecommendationsTab";
 import ProspectBoardTab from "../components/market/ProspectBoardTab";
@@ -157,6 +158,7 @@ export default function Market() {
         <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 4 }}>
           Dynasty Daily's data, interactive
         </p>
+        <FreshnessBar />
       </div>
 
       {/* Tab bar */}

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useParams } from "wouter";
 import AppShell from "../components/AppShell";
+import FreshnessBar from "../components/FreshnessBar";
 import EdgeScoreBadge from "../components/EdgeScoreBadge";
 import { PlayerLink } from "../components/ui";
 import { posColor } from "../lib/position-colors";
@@ -298,6 +299,7 @@ export default function InjuryTracker() {
         <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 4 }}>
           Monitor injuries across your portfolio and find buying windows
         </p>
+        <FreshnessBar />
       </div>
 
       {/* Risk summary (only on injuries tab when data loaded) */}

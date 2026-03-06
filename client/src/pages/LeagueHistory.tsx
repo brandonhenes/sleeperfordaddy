@@ -472,14 +472,15 @@ export default function LeagueHistory() {
             <div
               style={{
                 ...cardStyle,
-                padding: 40,
+                padding: "40px 24px",
                 marginTop: 16,
                 textAlign: "center",
                 color: "var(--text-muted)",
                 fontSize: 13,
               }}
             >
-              No history data available for this league group yet.
+              No historical data yet. Snapshots are captured during each sync.
+              Check back after your next sync completes.
             </div>
           ) : null}
         </>

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useParams, Link } from "wouter";
 import AppShell from "../components/AppShell";
+import FreshnessBar from "../components/FreshnessBar";
 import { useEnsureUser } from "../hooks/use-ensure-user";
 import { usePowerRankings } from "../hooks/use-power-rankings";
 import { useTradeSuggestions } from "../hooks/use-trade-finder";
@@ -171,6 +172,24 @@ function SuggestionCard({ suggestion, username }: { suggestion: TradeSuggestion;
           Receive: <strong style={{ color: "var(--text)" }}>{bTotal.toFixed(0)}</strong> edge
         </span>
       </div>
+
+      <div style={{ marginTop: 10, textAlign: "right" }}>
+        <Link
+          href="/trade-calculator"
+          style={{
+            display: "inline-block",
+            padding: "6px 14px",
+            background: "linear-gradient(135deg, var(--amber), var(--amber-dark))",
+            color: "var(--dark-base)",
+            borderRadius: 6,
+            fontSize: 12,
+            fontWeight: 700,
+            textDecoration: "none",
+          }}
+        >
+          Evaluate in Calculator
+        </Link>
+      </div>
     </div>
   );
 }
@@ -219,6 +238,7 @@ export default function TradeFinder() {
         <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 4 }}>
           Suggested trades based on roster composition and positional needs
         </p>
+        <FreshnessBar />
       </div>
 
       {/* League Selector */}
