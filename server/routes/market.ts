@@ -5,6 +5,7 @@ import {
   getMovers,
   getSignals,
 } from "../services/market.js";
+import { getRookieDraftContext } from "../services/rookie-draft-context.js";
 
 const router = Router();
 
@@ -49,6 +50,19 @@ router.get("/api/market/signals", async (_req, res) => {
     res.json(data);
   } catch (err) {
     console.error("[market/signals] Error:", err);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+/** GET /api/rookie-draft/context/:username */
+router.get("/api/rookie-draft/context/:username", async (req, res) => {
+  try {
+    const username = req.params.username;
+    if (!username) return res.status(400).json({ message: "username required" });
+    const data = await getRookieDraftContext(username);
+    res.json(data);
+  } catch (err) {
+    console.error("[rookie-draft] Context error:", err);
     res.status(500).json({ message: "Internal server error" });
   }
 });

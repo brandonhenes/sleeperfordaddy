@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import AppShell from "../components/AppShell";
 import FreshnessBar from "../components/FreshnessBar";
 import { useProspects, type Prospect } from "../hooks/use-market";
+import { useRookieDraftContext, type DraftPickContext, type AggregateNeed, type PickValueReference } from "../hooks/use-rookie-draft";
 import { PlayerLink } from "../components/ui";
 import { posColor } from "../lib/position-colors";
 
@@ -41,6 +42,8 @@ function scoutingReport(p: Prospect): string | null {
 
 export default function RookieDraft() {
   const { data, isLoading, error } = useProspects();
+  const username = typeof window !== "undefined" ? localStorage.getItem("edge_username") ?? "" : "";
+  const { data: draftCtx } = useRookieDraftContext(username);
   const [posFilter, setPosFilter] = useState<string>("ALL");
   const [viewMode, setViewMode] = useState<"board" | "positional">("board");
 
@@ -145,6 +148,65 @@ export default function RookieDraft() {
         ))}
       </div>
 
+      {!username && (
+        <div style={{
+          background: "var(--card)",
+          border: "1px solid var(--border)",
+          borderRadius: 10,
+          padding: "12px 18px",
+          marginTop: 16,
+          fontSize: 12,
+          color: "var(--text-muted)",
+        }}>
+          Enter your Sleeper username on the Dashboard to see which picks you own and
+          get personalized draft recommendations.
+        </div>
+      )}
+
+      {draftCtx && draftCtx.picks_2026.length > 0 && (
+        <div style={{
+          background: "var(--card)",
+          border: "1px solid var(--border)",
+          borderRadius: 12,
+          padding: "16px 20px",
+          marginTop: 16,
+        }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <div>
+              <span style={{ fontSize: 14, fontWeight: 800 }}>Your 2026 Picks</span>
+              <span style={{ fontSize: 12, color: "var(--text-muted)", marginLeft: 8 }}>
+                {draftCtx.picks_2026.length} pick{draftCtx.picks_2026.length !== 1 ? "s" : ""} across {draftCtx.total_leagues} leagues
+              </span>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              {draftCtx.aggregate_needs.filter((n: AggregateNeed) => n.overall_urgency !== "low").map((n: AggregateNeed) => (
+                <span
+                  key={n.position}
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    padding: "3px 8px",
+                    borderRadius: 4,
+                    background: n.overall_urgency === "critical" ? "rgba(239,68,68,0.15)" : "rgba(245,158,11,0.15)",
+                    color: n.overall_urgency === "critical" ? "var(--red)" : "var(--amber)",
+                    border: `1px solid ${n.overall_urgency === "critical" ? "rgba(239,68,68,0.3)" : "rgba(245,158,11,0.3)"}`,
+                  }}
+                >
+                  {n.position}: {n.overall_urgency === "critical" ? "NEED" : "WANT"}
+                  {n.leagues_with_hole > 0 && ` (${n.leagues_with_hole} holes)`}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 4 }}>
+            {draftCtx.picks_2026.map((pick: DraftPickContext, i: number) => (
+              <PickCard key={`${pick.league_id}-${pick.round}-${pick.tier}-${i}`} pick={pick} />
+            ))}
+          </div>
+        </div>
+      )}
+
       {viewMode === "board" ? (
         <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 20 }}>
           {TIER_ORDER.map((tier) => {
@@ -177,6 +239,7 @@ export default function RookieDraft() {
                   <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
                     {prospects.length} prospect{prospects.length !== 1 ? "s" : ""}
                   </span>
+                  {draftCtx && renderTierPickValueOverlay(tier, draftCtx.pick_values, draftCtx.picks_2026)}
                 </div>
 
                 <div style={{ background: cfg.bg }}>
@@ -222,6 +285,193 @@ export default function RookieDraft() {
         </div>
       )}
     </AppShell>
+  );
+}
+
+function renderTierPickValueOverlay(
+  tier: string,
+  pickValues: PickValueReference[],
+  userPicks2026: DraftPickContext[]
+) {
+  const tierPickMap: Record<string, { round: number; tier: string }[]> = {
+    elite: [{ round: 1, tier: "early" }],
+    day1: [{ round: 1, tier: "mid" }, { round: 1, tier: "late" }],
+    day2: [{ round: 2, tier: "early" }, { round: 2, tier: "mid" }],
+    day3: [{ round: 2, tier: "late" }, { round: 3, tier: "early" }],
+    flier: [{ round: 3, tier: "mid" }, { round: 3, tier: "late" }],
+  };
+
+  const pickRefs = tierPickMap[tier] ?? [];
+  const values = pickRefs
+    .map((ref) => pickValues.find(
+      (pv: PickValueReference) => pv.season === 2026 && pv.round === ref.round && pv.tier === ref.tier
+    ))
+    .filter((v): v is PickValueReference => !!v);
+
+  if (values.length === 0) return null;
+
+  const minVal = Math.min(...values.map((v) => v.ktc_sf));
+  const maxVal = Math.max(...values.map((v) => v.ktc_sf));
+  const valStr = minVal === maxVal
+    ? `~${minVal.toLocaleString()} KTC`
+    : `${minVal.toLocaleString()} - ${maxVal.toLocaleString()} KTC`;
+
+  const userPicksHere = userPicks2026.filter((p) =>
+    pickRefs.some((ref) => p.round === ref.round && p.tier === ref.tier)
+  );
+
+  return (
+    <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10, fontSize: 11 }}>
+      <span className="font-mono" style={{ color: "var(--text-dim)" }}>
+        Pick value: {valStr}
+      </span>
+      {userPicksHere.length > 0 && (
+        <span style={{
+          background: "var(--amber)",
+          color: "var(--dark-base)",
+          padding: "2px 8px",
+          borderRadius: 4,
+          fontWeight: 700,
+          fontSize: 10,
+        }}>
+          YOU PICK HERE ({userPicksHere.length})
+        </span>
+      )}
+    </div>
+  );
+}
+
+function PickCard({ pick }: { pick: DraftPickContext }) {
+  const [showNeeds, setShowNeeds] = useState(false);
+  const tierColors: Record<"early" | "mid" | "late", string> = {
+    early: "var(--green)",
+    mid: "var(--amber)",
+    late: "var(--red)",
+  };
+
+  const needsWithUrgency = pick.roster_needs.filter(
+    (n) => n.urgency === "A+" || n.urgency === "A"
+  );
+
+  return (
+    <div
+      style={{
+        background: "var(--dark-base)",
+        border: "1px solid var(--border)",
+        borderRadius: 10,
+        padding: "12px 16px",
+        minWidth: 220,
+        maxWidth: 280,
+        flexShrink: 0,
+        cursor: "pointer",
+        position: "relative",
+      }}
+      onClick={() => setShowNeeds(!showNeeds)}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div>
+          <span style={{ fontSize: 14, fontWeight: 800, color: tierColors[pick.tier] }}>
+            {pick.label}
+          </span>
+        </div>
+        {pick.ktc_value != null && (
+          <span className="font-mono" style={{ fontSize: 11, color: "var(--text-dim)", fontWeight: 600 }}>
+            {pick.ktc_value.toLocaleString()} KTC
+          </span>
+        )}
+      </div>
+
+      <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
+        {pick.league_name}
+        {pick.scoring_label && (
+          <span style={{ color: "var(--amber)", marginLeft: 4 }}>
+            {pick.scoring_label}
+          </span>
+        )}
+      </div>
+
+      {needsWithUrgency.length > 0 && (
+        <div style={{ display: "flex", gap: 4, marginTop: 8 }}>
+          {needsWithUrgency.slice(0, 3).map((n) => (
+            <span key={n.position} style={{
+              fontSize: 9,
+              fontWeight: 700,
+              padding: "2px 6px",
+              borderRadius: 3,
+              background: n.urgency === "A+" ? "rgba(239,68,68,0.15)" : "rgba(245,158,11,0.15)",
+              color: n.urgency === "A+" ? "#fca5a5" : "var(--amber)",
+            }}>
+              {n.position} {n.urgency}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {showNeeds && (
+        <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px solid var(--border)" }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)", letterSpacing: 0.5, marginBottom: 6 }}>
+            ROSTER NEEDS
+          </div>
+          {pick.roster_needs.map((n) => (
+            <div key={n.position} style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              padding: "3px 0",
+              fontSize: 11,
+            }}>
+              <span style={{ fontWeight: 600, color: posColor(n.position) }}>{n.position}</span>
+              <NeedGradeBadge grade={n.grade} urgency={n.urgency} />
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ marginTop: 8 }}>
+        <a
+          href="/trade-calculator"
+          style={{
+            fontSize: 10,
+            color: "var(--amber)",
+            fontWeight: 600,
+            textDecoration: "none",
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          Trade this pick →
+        </a>
+      </div>
+    </div>
+  );
+}
+
+function NeedGradeBadge({ grade, urgency }: { grade: string; urgency: string }) {
+  const colors: Record<string, { bg: string; text: string }> = {
+    "A+": { bg: "rgba(239,68,68,0.15)", text: "#fca5a5" },
+    "A": { bg: "rgba(245,158,11,0.15)", text: "var(--amber)" },
+    "B": { bg: "rgba(148,163,184,0.1)", text: "var(--text-dim)" },
+    "C": { bg: "rgba(34,197,94,0.1)", text: "var(--green)" },
+    "D": { bg: "rgba(34,197,94,0.15)", text: "#86efac" },
+  };
+  const c = colors[urgency] ?? colors.B;
+  const labels: Record<string, string> = {
+    hole: "HOLE",
+    weak: "WEAK",
+    average: "OK",
+    strong: "GOOD",
+    elite: "SET",
+  };
+  return (
+    <span style={{
+      fontSize: 9,
+      fontWeight: 700,
+      padding: "2px 6px",
+      borderRadius: 3,
+      background: c.bg,
+      color: c.text,
+    }}>
+      {labels[grade] ?? grade} ({urgency})
+    </span>
   );
 }
 
