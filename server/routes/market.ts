@@ -171,4 +171,39 @@ router.get("/api/rookie-draft/value-tracker/:playerName", async (req, res) => {
   }
 });
 
+/** GET /api/rookie-draft/prospect-history/:playerName */
+router.get("/api/rookie-draft/prospect-history/:playerName", async (req, res) => {
+  try {
+    const name = decodeURIComponent(req.params.playerName);
+    const rows = await db.execute(sql`
+      SELECT snapshot_date, dp_value_sf, dp_value_1qb, dp_ecr_sf, dp_ecr_1qb,
+             fp_ecr_sf, fp_ecr_best, fp_ecr_worst, fp_ecr_sd
+      FROM prospect_rankings_daily
+      WHERE LOWER(player_name) = LOWER(${name})
+      ORDER BY snapshot_date ASC
+    `);
+    res.json(rows);
+  } catch (err) {
+    console.error("[prospect-history] Error:", err);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+/** GET /api/rookie-draft/latest-rankings */
+router.get("/api/rookie-draft/latest-rankings", async (_req, res) => {
+  try {
+    const rows = await db.execute(sql`
+      SELECT r.player_name, r.position, r.dp_value_sf, r.dp_value_1qb,
+             r.dp_ecr_sf, r.fp_ecr_sf, r.fp_ecr_best, r.fp_ecr_worst, r.fp_ecr_sd
+      FROM prospect_rankings_daily r
+      WHERE r.snapshot_date = (SELECT MAX(snapshot_date) FROM prospect_rankings_daily)
+      ORDER BY r.dp_value_sf DESC NULLS LAST
+    `);
+    res.json(rows);
+  } catch (err) {
+    console.error("[latest-rankings] Error:", err);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
 export default router;

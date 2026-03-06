@@ -7,6 +7,7 @@ import { usePowerRankings, type LeaguePowerRanking } from "../hooks/use-power-ra
 import { useMockDraftSetup, type MockDraftSetup, type MockDraftProspect, type MockDraftPick } from "../hooks/use-mock-draft";
 import { useActiveDrafts, useLiveDraft, type LiveDraftState, type ActiveDraftSummary } from "../hooks/use-live-draft";
 import { useHitRates, useRookieADP, type HitRateData, type LeagueADP } from "../hooks/use-draft-data";
+import { useLatestProspectRankings, type ProspectRanking } from "../hooks/use-prospect-rankings";
 import { PlayerLink } from "../components/ui";
 import { posColor } from "../lib/position-colors";
 
@@ -48,6 +49,11 @@ function cleanText(val: string | null | undefined): string | null {
 
 function scoutingReport(p: Prospect): string | null {
   return cleanText(p.scouting_notes) ?? cleanText(p.fp_scouting_notes) ?? cleanText(p.notes);
+}
+
+function formatMarketNumber(value: number | null | undefined, decimals = 0): string {
+  if (value == null || Number.isNaN(value)) return "-";
+  return decimals > 0 ? value.toFixed(decimals) : Math.round(value).toString();
 }
 
 function loadWatchlist(): Set<string> {
@@ -93,6 +99,7 @@ export default function RookieDraft() {
   const { data: liveDraftState } = useLiveDraft(username, liveDraftId, liveLeagueId);
   const { data: hitRates } = useHitRates();
   const { data: rookieADP } = useRookieADP("2026");
+  const { data: prospectRankings } = useLatestProspectRankings();
 
   function toggleCompare(name: string) {
     setCompareList((prev) => {
@@ -285,6 +292,15 @@ export default function RookieDraft() {
       .map((name) => data.find((p) => p.player_name === name))
       .filter((p): p is Prospect => !!p);
   }, [data, compareList]);
+
+  const rankingsMap = useMemo(() => {
+    const map = new Map<string, ProspectRanking>();
+    for (const r of prospectRankings ?? []) {
+      if (!r.player_name) continue;
+      map.set(r.player_name.toLowerCase(), r);
+    }
+    return map;
+  }, [prospectRankings]);
 
   const overallRanks = useMemo(() => {
     const ranks = new Map<string, number>();
@@ -560,6 +576,7 @@ export default function RookieDraft() {
                       onToggleCompare={() => toggleCompare(p.player_name)}
                       isWatched={watchlist.has(p.player_name)}
                       onToggleWatch={() => toggleWatch(p.player_name)}
+                      ranking={rankingsMap.get(p.player_name.toLowerCase())}
                     />
                   ))}
                 </div>
@@ -891,6 +908,7 @@ function ProspectCard({
   onToggleCompare,
   isWatched,
   onToggleWatch,
+  ranking,
 }: {
   prospect: Prospect;
   overallRank: number;
@@ -899,6 +917,7 @@ function ProspectCard({
   onToggleCompare: () => void;
   isWatched: boolean;
   onToggleWatch: () => void;
+  ranking?: ProspectRanking;
 }) {
   const [expanded, setExpanded] = useState(false);
   const report = scoutingReport(p);
@@ -912,6 +931,10 @@ function ProspectCard({
   const weight = cleanText(p.weight);
   const size = height && weight ? `${height} / ${weight}` : height ?? weight ?? null;
   const draftCapital = cleanText(p.draft_capital);
+  const tierLabel = cleanText(p.tier ? p.tier.toUpperCase() : null);
+  const fpEcrSD = ranking?.fp_ecr_sd ?? null;
+  const sdTone: "neutral" | "good" | "warn" | "bad" =
+    fpEcrSD == null ? "neutral" : fpEcrSD <= 3 ? "good" : fpEcrSD <= 6 ? "warn" : "bad";
 
   return (
     <div style={{ borderBottom: "1px solid var(--border)" }}>
@@ -954,6 +977,16 @@ function ProspectCard({
             {size && <span className="font-mono" style={{ fontSize: 11, color: "var(--text-dim)" }}>{size}</span>}
             {primaryComp && <span style={{ fontSize: 11, fontStyle: "italic", color: "var(--text-dim)" }}>Comp: {primaryComp}</span>}
             {draftCapital && <span style={{ fontSize: 11, color: "var(--text-muted)", background: "var(--card)", padding: "1px 6px", borderRadius: 3, border: "1px solid var(--border)" }}>{draftCapital}</span>}
+            {ranking?.dp_value_sf != null && (
+              <span style={{ fontSize: 11, color: "#93c5fd", background: "rgba(59,130,246,0.12)", padding: "1px 6px", borderRadius: 3, border: "1px solid rgba(59,130,246,0.25)" }}>
+                DP SF {formatMarketNumber(ranking.dp_value_sf)}
+              </span>
+            )}
+            {ranking?.fp_ecr_sf != null && (
+              <span style={{ fontSize: 11, color: "#c4b5fd", background: "rgba(139,92,246,0.12)", padding: "1px 6px", borderRadius: 3, border: "1px solid rgba(139,92,246,0.25)" }}>
+                ECR {formatMarketNumber(ranking.fp_ecr_sf)}
+              </span>
+            )}
             {cleanText(p.landing_spot) && (
               <span style={{
                 fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 4,
@@ -1054,6 +1087,40 @@ function ProspectCard({
               </div>
             )}
 
+            <div>
+              <div className="label" style={{ marginBottom: 6 }}>PROFILE</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 8 }}>
+                <MarketMetric label="Size" value={size ?? "-"} />
+                <MarketMetric label="Age" value={p.age != null ? String(p.age) : "-"} />
+                <MarketMetric label="Draft Capital" value={draftCapital ?? "-"} />
+                <MarketMetric label="Tier" value={tierLabel ?? "-"} />
+              </div>
+            </div>
+
+            {ranking && (
+              <div>
+                <div className="label" style={{ marginBottom: 6 }}>MARKET DATA</div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 8 }}>
+                  <MarketMetric label="DP SF Value" value={formatMarketNumber(ranking.dp_value_sf)} />
+                  <MarketMetric label="DP 1QB Value" value={formatMarketNumber(ranking.dp_value_1qb)} />
+                  <MarketMetric label="FP ECR" value={formatMarketNumber(ranking.fp_ecr_sf)} />
+                  <MarketMetric
+                    label="ECR Range"
+                    value={
+                      ranking.fp_ecr_best != null && ranking.fp_ecr_worst != null
+                        ? `${formatMarketNumber(ranking.fp_ecr_best)}-${formatMarketNumber(ranking.fp_ecr_worst)}`
+                        : "-"
+                    }
+                  />
+                  <MarketMetric
+                    label="ECR SD"
+                    value={formatMarketNumber(ranking.fp_ecr_sd, 1)}
+                    tone={sdTone}
+                  />
+                </div>
+              </div>
+            )}
+
             {cleanText(p.landing_spot) && (
               <div style={{
                 padding: "8px 14px", background: "rgba(34,197,94,0.08)",
@@ -1071,6 +1138,33 @@ function ProspectCard({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function MarketMetric({
+  label,
+  value,
+  tone = "neutral",
+}: {
+  label: string;
+  value: string;
+  tone?: "neutral" | "good" | "warn" | "bad";
+}) {
+  const toneStyles: Record<"neutral" | "good" | "warn" | "bad", { color: string; border: string; background: string }> = {
+    neutral: { color: "var(--text)", border: "var(--border)", background: "var(--card)" },
+    good: { color: "#86efac", border: "rgba(34,197,94,0.35)", background: "rgba(34,197,94,0.08)" },
+    warn: { color: "var(--amber)", border: "rgba(245,158,11,0.35)", background: "rgba(245,158,11,0.08)" },
+    bad: { color: "#fca5a5", border: "rgba(239,68,68,0.35)", background: "rgba(239,68,68,0.08)" },
+  };
+  const style = toneStyles[tone];
+
+  return (
+    <div style={{ border: `1px solid ${style.border}`, borderRadius: 8, padding: "8px 10px", background: style.background }}>
+      <div style={{ fontSize: 10, color: "var(--text-muted)", marginBottom: 2 }}>{label}</div>
+      <div className="font-mono" style={{ fontSize: 13, fontWeight: 700, color: style.color }}>
+        {value}
+      </div>
     </div>
   );
 }

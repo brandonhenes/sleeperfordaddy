@@ -34,6 +34,7 @@ import { syncNflverseStats } from "./sync-nflverse-stats.js";
 import { syncNflDraftHistory } from "./sync-nfl-draft.js";
 import { syncLeagueDraftResults } from "./sync-league-drafts.js";
 import { captureDraftBoardSnapshot } from "./sync-draft-board-snapshot.js";
+import { syncProspectEnrichment, generateScoutingReports } from "./sync-prospect-enrichment.js";
 import { clearDynastyLeagueCache, isDynastyLeagueFromSleeperSettings } from "./dynasty-leagues.js";
 import { clearPowerRankingsCache } from "./power-rankings.js";
 import { clearGlobalScaleCache } from "./composite-values.js";
@@ -321,6 +322,21 @@ async function runSync(jobId: string, username: string) {
     console.error("[sync] Error capturing draft board snapshot:", err);
   }
 
+  // Step 10: Prospect data enrichment
+  try {
+    const enrichStats = await syncProspectEnrichment();
+    console.log("[sync] Prospect enrichment:", enrichStats);
+  } catch (err) {
+    console.error("[sync] Error enriching prospects:", err);
+  }
+
+  // Step 11: AI scouting report generation (only when key is set)
+  try {
+    await generateScoutingReports();
+  } catch (err) {
+    console.error("[sync] Error generating scouting reports:", err);
+  }
+
   clearSleeperCache();
   clearDynastyLeagueCache(sleeperUser.user_id);
   clearGlobalScaleCache();
@@ -331,7 +347,7 @@ async function runSync(jobId: string, username: string) {
   clearActionCache(username);
   clearArbitrageCache(username);
 
-  // Step 10: Done
+  // Step 12: Done
   await updateSyncJob(jobId, {
     status: "completed",
     step: "done",
