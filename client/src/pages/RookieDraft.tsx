@@ -28,6 +28,12 @@ const TIER_CONFIG: Record<string, {
 };
 
 const POS_FILTERS = ["ALL", "QB", "RB", "WR", "TE"] as const;
+const WATCHLIST_KEY = "edge-draft-watchlist";
+const MYBOARD_KEY = "edge-draft-myboard";
+
+interface MyBoardState {
+  [prospectName: string]: string;
+}
 
 function cleanText(val: string | null | undefined): string | null {
   if (val == null) return null;
@@ -40,17 +46,102 @@ function scoutingReport(p: Prospect): string | null {
   return cleanText(p.scouting_notes) ?? cleanText(p.fp_scouting_notes) ?? cleanText(p.notes);
 }
 
+function loadWatchlist(): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const raw = localStorage.getItem(WATCHLIST_KEY);
+    if (raw) return new Set(JSON.parse(raw));
+  } catch {
+    // ignore
+  }
+  return new Set();
+}
+
+function loadMyBoard(): MyBoardState {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = localStorage.getItem(MYBOARD_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {
+    // ignore
+  }
+  return {};
+}
+
 export default function RookieDraft() {
   const { data, isLoading, error } = useProspects();
   const username = typeof window !== "undefined" ? localStorage.getItem("edge_username") ?? "" : "";
   const { data: draftCtx } = useRookieDraftContext(username);
   const [posFilter, setPosFilter] = useState<string>("ALL");
-  const [viewMode, setViewMode] = useState<"board" | "positional">("board");
+  const [viewMode, setViewMode] = useState<"board" | "positional" | "compare" | "myboard">("board");
+  const [compareList, setCompareList] = useState<string[]>([]);
+  const [watchlist, setWatchlist] = useState<Set<string>>(loadWatchlist);
+  const [showWatchlistOnly, setShowWatchlistOnly] = useState(false);
+  const [myBoard, setMyBoard] = useState<MyBoardState>(loadMyBoard);
+
+  function toggleCompare(name: string) {
+    setCompareList((prev) => {
+      if (prev.includes(name)) return prev.filter((n) => n !== name);
+      if (prev.length >= 3) return prev;
+      return [...prev, name];
+    });
+  }
+
+  function toggleWatch(name: string) {
+    setWatchlist((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      localStorage.setItem(WATCHLIST_KEY, JSON.stringify([...next]));
+      return next;
+    });
+  }
+
+  function setPlayerTier(name: string, tier: string) {
+    setMyBoard((prev) => {
+      const next = { ...prev, [name]: tier };
+      localStorage.setItem(MYBOARD_KEY, JSON.stringify(next));
+      return next;
+    });
+  }
+
+  function removeFromBoard(name: string) {
+    setMyBoard((prev) => {
+      const next = { ...prev };
+      delete next[name];
+      localStorage.setItem(MYBOARD_KEY, JSON.stringify(next));
+      return next;
+    });
+  }
+
+  function exportMyBoard() {
+    const assigned = new Map<TierKey, Prospect[]>();
+    for (const t of TIER_ORDER) assigned.set(t, []);
+    for (const p of data ?? []) {
+      const t = myBoard[p.player_name];
+      if (t && assigned.has(t as TierKey)) {
+        assigned.get(t as TierKey)!.push(p);
+      }
+    }
+    const lines: string[] = ["THE EDGE - MY ROOKIE BOARD"];
+    for (const tier of TIER_ORDER) {
+      const players = assigned.get(tier) ?? [];
+      lines.push("");
+      lines.push(`${TIER_CONFIG[tier].label}:`);
+      if (players.length === 0) lines.push("- (none)");
+      else players.forEach((p) => lines.push(`- ${p.player_name} (${p.position ?? "-"})`));
+    }
+    void navigator.clipboard?.writeText(lines.join("\n"));
+  }
 
   const filtered = useMemo(() => {
     if (!data) return [];
-    return posFilter === "ALL" ? data : data.filter((p) => p.position === posFilter);
-  }, [data, posFilter]);
+    let list = posFilter === "ALL" ? data : data.filter((p) => p.position === posFilter);
+    if (showWatchlistOnly) {
+      list = list.filter((p) => watchlist.has(p.player_name));
+    }
+    return list;
+  }, [data, posFilter, showWatchlistOnly, watchlist]);
 
   const byTier = useMemo(() => {
     const groups: Record<string, Prospect[]> = {};
@@ -73,6 +164,13 @@ export default function RookieDraft() {
     return groups;
   }, [data]);
 
+  const compareProspects = useMemo(() => {
+    if (!data) return [];
+    return compareList
+      .map((name) => data.find((p) => p.player_name === name))
+      .filter((p): p is Prospect => !!p);
+  }, [data, compareList]);
+
   const overallRanks = useMemo(() => {
     const ranks = new Map<string, number>();
     let rank = 1;
@@ -87,6 +185,43 @@ export default function RookieDraft() {
     }
     return ranks;
   }, [byTier]);
+
+  const disagreements = useMemo(() => {
+    if (!data) return [];
+    const tierExpectedRange: Record<string, [number, number]> = {
+      elite: [1, 1],
+      day1: [2, 4],
+      day2: [3, 7],
+      day3: [5, 12],
+      flier: [8, 99],
+    };
+
+    return data
+      .map((p) => {
+        const tier = (p.tier ?? "flier").toLowerCase();
+        const posRank = p.fp_rank ?? p.fantasypros_rank ?? null;
+        if (!posRank) return null;
+        const expected = tierExpectedRange[tier] ?? [1, 99];
+        const isHigherThanExpected = posRank < expected[0];
+        const isLowerThanExpected = posRank > expected[1];
+        if (!isHigherThanExpected && !isLowerThanExpected) return null;
+
+        return {
+          prospect: p,
+          posRank,
+          tier,
+          direction: isHigherThanExpected ? "undervalued" as const : "overvalued" as const,
+          note: isHigherThanExpected
+            ? `Ranked ${p.position}${posRank} but only in ${(TIER_CONFIG[tier]?.label ?? tier).toUpperCase()} tier. May be a steal.`
+            : `In ${(TIER_CONFIG[tier]?.label ?? tier).toUpperCase()} tier but ranked ${p.position}${posRank}. Possibly overranked.`,
+        };
+      })
+      .filter((d): d is NonNullable<typeof d> => d !== null)
+      .sort((a, b) => {
+        if (a.direction !== b.direction) return a.direction === "undervalued" ? -1 : 1;
+        return a.posRank - b.posRank;
+      });
+  }, [data]);
 
   if (isLoading) return <AppShell><div className="animate-pulse" style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, height: 400, marginTop: 28 }} /></AppShell>;
   if (error) return <AppShell><div style={{ padding: "28px 0", color: "var(--red)" }}>Error loading prospects</div></AppShell>;
@@ -107,6 +242,7 @@ export default function RookieDraft() {
           {([
             { key: "board" as const, label: "Big Board" },
             { key: "positional" as const, label: "By Position" },
+            { key: "myboard" as const, label: "My Board" },
           ]).map((m) => (
             <button
               key={m.key}
@@ -127,26 +263,79 @@ export default function RookieDraft() {
           ))}
         </div>
 
-        {viewMode === "board" && POS_FILTERS.map((pos) => (
-          <button
-            key={pos}
-            onClick={() => setPosFilter(pos)}
-            style={{
-              background: posFilter === pos ? "var(--amber)" : "var(--card)",
-              color: posFilter === pos ? "var(--dark-base)" : "var(--text-dim)",
-              border: `1px solid ${posFilter === pos ? "var(--amber)" : "var(--border)"}`,
-              borderRadius: 6,
-              padding: "6px 14px",
-              fontSize: 12,
-              fontWeight: 600,
-              cursor: "pointer",
-              letterSpacing: 0.5,
-            }}
-          >
-            {pos}
-          </button>
-        ))}
+        {(viewMode === "board" || viewMode === "positional") && (
+          <>
+            {viewMode === "board" && POS_FILTERS.map((pos) => (
+              <button
+                key={pos}
+                onClick={() => setPosFilter(pos)}
+                style={{
+                  background: posFilter === pos ? "var(--amber)" : "var(--card)",
+                  color: posFilter === pos ? "var(--dark-base)" : "var(--text-dim)",
+                  border: `1px solid ${posFilter === pos ? "var(--amber)" : "var(--border)"}`,
+                  borderRadius: 6,
+                  padding: "6px 14px",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  letterSpacing: 0.5,
+                }}
+              >
+                {pos}
+              </button>
+            ))}
+            <button
+              onClick={() => setShowWatchlistOnly(!showWatchlistOnly)}
+              style={{
+                background: showWatchlistOnly ? "#f59e0b" : "var(--card)",
+                color: showWatchlistOnly ? "var(--dark-base)" : "var(--text-dim)",
+                border: `1px solid ${showWatchlistOnly ? "#f59e0b" : "var(--border)"}`,
+                borderRadius: 6,
+                padding: "6px 14px",
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: "pointer",
+                marginLeft: 8,
+              }}
+            >
+              {"\u2605"} Watchlist ({watchlist.size})
+            </button>
+          </>
+        )}
       </div>
+
+      {viewMode === "board" && disagreements.length > 0 && (
+        <div style={{
+          background: "var(--card)", border: "1px solid var(--border)",
+          borderRadius: 10, padding: "14px 18px", marginTop: 12,
+        }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-muted)", letterSpacing: 0.5, marginBottom: 10 }}>
+            RANKING DISAGREEMENTS ({disagreements.length})
+          </div>
+          <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4 }}>
+            {disagreements.slice(0, 8).map((d) => (
+              <div key={d.prospect.player_name} style={{
+                background: "var(--dark-base)", border: "1px solid var(--border)",
+                borderRadius: 8, padding: "8px 12px", minWidth: 200, flexShrink: 0,
+              }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{
+                    fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 3,
+                    background: d.direction === "undervalued" ? "rgba(34,197,94,0.15)" : "rgba(239,68,68,0.15)",
+                    color: d.direction === "undervalued" ? "#86efac" : "#fca5a5",
+                  }}>
+                    {d.direction === "undervalued" ? "SLEEPER" : "FADING"}
+                  </span>
+                  <span style={{ fontSize: 12, fontWeight: 700 }}>{d.prospect.player_name}</span>
+                </div>
+                <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 4, lineHeight: 1.4 }}>
+                  {d.note}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {!username && (
         <div style={{
@@ -207,7 +396,7 @@ export default function RookieDraft() {
         </div>
       )}
 
-      {viewMode === "board" ? (
+      {viewMode === "board" && (
         <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 20 }}>
           {TIER_ORDER.map((tier) => {
             const prospects = byTier[tier];
@@ -249,6 +438,10 @@ export default function RookieDraft() {
                       prospect={p}
                       overallRank={overallRanks.get(p.player_name) ?? 0}
                       tierColor={cfg.text}
+                      isComparing={compareList.includes(p.player_name)}
+                      onToggleCompare={() => toggleCompare(p.player_name)}
+                      isWatched={watchlist.has(p.player_name)}
+                      onToggleWatch={() => toggleWatch(p.player_name)}
                     />
                   ))}
                 </div>
@@ -256,7 +449,9 @@ export default function RookieDraft() {
             );
           })}
         </div>
-      ) : (
+      )}
+
+      {viewMode === "positional" && (
         <div style={{ marginTop: 16, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
           {(["QB", "RB", "WR", "TE"] as const).map((pos) => {
             const prospects = byPosition[pos] ?? [];
@@ -282,6 +477,68 @@ export default function RookieDraft() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {viewMode === "compare" && compareProspects.length >= 2 && (
+        <CompareView prospects={compareProspects} onBack={() => setViewMode("board")} />
+      )}
+
+      {viewMode === "myboard" && (
+        <MyBoardView
+          prospects={data ?? []}
+          myBoard={myBoard}
+          onSetTier={setPlayerTier}
+          onRemove={removeFromBoard}
+          onExport={exportMyBoard}
+        />
+      )}
+
+      {compareList.length >= 2 && (
+        <div style={{
+          position: "fixed", bottom: 0, left: 0, right: 0,
+          background: "var(--card)", borderTop: "2px solid var(--amber)",
+          padding: "12px 24px", display: "flex", alignItems: "center",
+          justifyContent: "center", gap: 16, zIndex: 100,
+        }}>
+          <span style={{ fontSize: 13, color: "var(--text-muted)" }}>
+            {compareList.length} selected
+          </span>
+          <div style={{ display: "flex", gap: 6 }}>
+            {compareList.map((name) => (
+              <span key={name} style={{
+                padding: "4px 10px", borderRadius: 6, fontSize: 12,
+                background: "var(--dark-base)", border: "1px solid var(--border)",
+                display: "flex", alignItems: "center", gap: 6,
+              }}>
+                {name}
+                <button onClick={() => toggleCompare(name)} style={{
+                  background: "none", border: "none", color: "var(--red)",
+                  cursor: "pointer", fontSize: 10, fontWeight: 800, padding: 0,
+                }}>{"\u2715"}</button>
+              </span>
+            ))}
+          </div>
+          <button
+            onClick={() => setViewMode("compare")}
+            style={{
+              background: "var(--amber)", color: "var(--dark-base)",
+              border: "none", borderRadius: 8, padding: "8px 20px",
+              fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+            }}
+          >
+            Compare
+          </button>
+          <button
+            onClick={() => setCompareList([])}
+            style={{
+              background: "none", border: "1px solid var(--border)",
+              borderRadius: 8, padding: "8px 16px", fontSize: 12,
+              color: "var(--text-muted)", cursor: "pointer", fontFamily: "inherit",
+            }}
+          >
+            Clear
+          </button>
         </div>
       )}
     </AppShell>
@@ -479,10 +736,18 @@ function ProspectCard({
   prospect: p,
   overallRank,
   tierColor,
+  isComparing,
+  onToggleCompare,
+  isWatched,
+  onToggleWatch,
 }: {
   prospect: Prospect;
   overallRank: number;
   tierColor: string;
+  isComparing: boolean;
+  onToggleCompare: () => void;
+  isWatched: boolean;
+  onToggleWatch: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const report = scoutingReport(p);
@@ -500,6 +765,31 @@ function ProspectCard({
   return (
     <div style={{ borderBottom: "1px solid var(--border)" }}>
       <div onClick={() => setExpanded(!expanded)} style={{ display: "flex", alignItems: "flex-start", gap: 12, padding: "14px 18px", cursor: "pointer" }}>
+        <button
+          onClick={(e) => { e.stopPropagation(); onToggleCompare(); }}
+          style={{
+            width: 22, height: 22, borderRadius: 4, flexShrink: 0,
+            border: isComparing ? "2px solid var(--amber)" : "1px solid var(--border)",
+            background: isComparing ? "var(--amber)" : "transparent",
+            color: isComparing ? "var(--dark-base)" : "transparent",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            cursor: "pointer", fontSize: 12, fontWeight: 800,
+          }}
+        >
+          {isComparing ? "\u2713" : ""}
+        </button>
+        <button
+          onClick={(e) => { e.stopPropagation(); onToggleWatch(); }}
+          style={{
+            background: "none", border: "none", cursor: "pointer",
+            fontSize: 16, padding: 0, lineHeight: 1, flexShrink: 0,
+            color: isWatched ? "#f59e0b" : "var(--text-muted)",
+            opacity: isWatched ? 1 : 0.4,
+          }}
+          title={isWatched ? "Remove from watchlist" : "Add to watchlist"}
+        >
+          {"\u2605"}
+        </button>
         <div style={{ width: 36, height: 36, borderRadius: 8, background: "var(--card)", border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 14, color: tierColor, flexShrink: 0 }}>
           {overallRank}
         </div>
@@ -612,6 +902,533 @@ function ProspectCard({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function CompareView({
+  prospects,
+  onBack,
+}: {
+  prospects: Prospect[];
+  onBack: () => void;
+}) {
+  const fields: { label: string; render: (p: Prospect) => string | null }[] = [
+    { label: "Position", render: (p) => cleanText(p.position) },
+    { label: "School", render: (p) => cleanText(p.school) },
+    { label: "Age", render: (p) => (p.age != null ? String(p.age) : null) },
+    { label: "Tier", render: (p) => cleanText((p.tier ?? "").toUpperCase()) },
+    { label: "Pos Rank", render: (p) => (p.fp_rank != null ? `${p.position}${p.fp_rank}` : null) },
+    {
+      label: "Size",
+      render: (p) => {
+        const h = cleanText(p.height);
+        const w = cleanText(p.weight);
+        return h && w ? `${h} / ${w}` : h ?? w;
+      },
+    },
+    {
+      label: "Comp",
+      render: (p) =>
+        cleanText(p.consensus_comp) ??
+        (p.all_comps?.[0]?.comp ? cleanText(p.all_comps[0].comp) : null),
+    },
+    { label: "Draft Capital", render: (p) => cleanText(p.draft_capital) },
+    {
+      label: "40-Yard",
+      render: (p) => cleanText(p.combine_40 != null ? String(p.combine_40) : null),
+    },
+    {
+      label: "Vertical",
+      render: (p) => cleanText(p.combine_vertical != null ? String(p.combine_vertical) : null),
+    },
+  ];
+
+  return (
+    <div style={{ marginTop: 16 }}>
+      <button
+        onClick={onBack}
+        style={{
+          background: "none",
+          border: "1px solid var(--border)",
+          borderRadius: 6,
+          padding: "6px 14px",
+          fontSize: 12,
+          color: "var(--text-muted)",
+          cursor: "pointer",
+          fontFamily: "inherit",
+          marginBottom: 16,
+        }}
+      >
+        ← Back to Board
+      </button>
+
+      <div
+        style={{
+          background: "var(--card)",
+          border: "1px solid var(--border)",
+          borderRadius: 12,
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: `160px repeat(${prospects.length}, 1fr)`,
+            borderBottom: "2px solid var(--border)",
+          }}
+        >
+          <div
+            style={{
+              padding: "14px 16px",
+              fontWeight: 700,
+              fontSize: 12,
+              color: "var(--text-muted)",
+            }}
+          >
+            ATTRIBUTE
+          </div>
+          {prospects.map((p) => (
+            <div
+              key={p.player_name}
+              style={{
+                padding: "14px 16px",
+                textAlign: "center",
+                borderLeft: "1px solid var(--border)",
+              }}
+            >
+              <div style={{ fontWeight: 800, fontSize: 15 }}>{p.player_name}</div>
+              <div
+                style={{
+                  fontSize: 11,
+                  color: posColor(p.position ?? ""),
+                  fontWeight: 700,
+                  marginTop: 2,
+                }}
+              >
+                {p.position}
+              </div>
+              <TierBadge tier={p.tier} />
+            </div>
+          ))}
+        </div>
+
+        {fields.map((field) => (
+          <div
+            key={field.label}
+            style={{
+              display: "grid",
+              gridTemplateColumns: `160px repeat(${prospects.length}, 1fr)`,
+              borderBottom: "1px solid var(--border)",
+            }}
+          >
+            <div
+              style={{
+                padding: "10px 16px",
+                fontSize: 12,
+                fontWeight: 600,
+                color: "var(--text-muted)",
+                background: "var(--dark-base)",
+              }}
+            >
+              {field.label}
+            </div>
+            {prospects.map((p) => {
+              const val = field.render(p);
+              return (
+                <div
+                  key={p.player_name}
+                  style={{
+                    padding: "10px 16px",
+                    fontSize: 13,
+                    textAlign: "center",
+                    borderLeft: "1px solid var(--border)",
+                    color: val ? "var(--text)" : "var(--text-muted)",
+                  }}
+                >
+                  {val ?? "-"}
+                </div>
+              );
+            })}
+          </div>
+        ))}
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: `160px repeat(${prospects.length}, 1fr)`,
+            borderBottom: "1px solid var(--border)",
+          }}
+        >
+          <div
+            style={{
+              padding: "10px 16px",
+              fontSize: 12,
+              fontWeight: 600,
+              color: "#22c55e",
+              background: "var(--dark-base)",
+            }}
+          >
+            Strengths
+          </div>
+          {prospects.map((p) => (
+            <div
+              key={p.player_name}
+              style={{ padding: "10px 16px", borderLeft: "1px solid var(--border)" }}
+            >
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                {(p.key_strengths ?? [])
+                  .map(cleanText)
+                  .filter((s): s is string => !!s)
+                  .map((s, i) => (
+                    <span
+                      key={i}
+                      style={{
+                        fontSize: 10,
+                        padding: "2px 6px",
+                        borderRadius: 999,
+                        background: "rgba(34,197,94,0.12)",
+                        color: "#86efac",
+                      }}
+                    >
+                      {s.length > 40 ? `${s.slice(0, 40)}...` : s}
+                    </span>
+                  ))}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: `160px repeat(${prospects.length}, 1fr)`,
+          }}
+        >
+          <div
+            style={{
+              padding: "10px 16px",
+              fontSize: 12,
+              fontWeight: 600,
+              color: "#ef4444",
+              background: "var(--dark-base)",
+            }}
+          >
+            Concerns
+          </div>
+          {prospects.map((p) => (
+            <div
+              key={p.player_name}
+              style={{ padding: "10px 16px", borderLeft: "1px solid var(--border)" }}
+            >
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                {(p.key_concerns ?? [])
+                  .map(cleanText)
+                  .filter((c): c is string => !!c)
+                  .map((c, i) => (
+                    <span
+                      key={i}
+                      style={{
+                        fontSize: 10,
+                        padding: "2px 6px",
+                        borderRadius: 999,
+                        background: "rgba(239,68,68,0.12)",
+                        color: "#fca5a5",
+                      }}
+                    >
+                      {c.length > 40 ? `${c.slice(0, 40)}...` : c}
+                    </span>
+                  ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MyBoardView({
+  prospects,
+  myBoard,
+  onSetTier,
+  onRemove,
+  onExport,
+}: {
+  prospects: Prospect[];
+  myBoard: MyBoardState;
+  onSetTier: (name: string, tier: string) => void;
+  onRemove: (name: string) => void;
+  onExport: () => void;
+}) {
+  const [addSearch, setAddSearch] = useState("");
+
+  const assigned = new Map<TierKey, Prospect[]>();
+  for (const tier of TIER_ORDER) assigned.set(tier, []);
+  for (const p of prospects) {
+    const customTier = (myBoard[p.player_name] ?? "").toLowerCase();
+    if (TIER_ORDER.includes(customTier as TierKey)) {
+      assigned.get(customTier as TierKey)!.push(p);
+    }
+  }
+
+  const totalAssigned = [...assigned.values()].reduce((sum, arr) => sum + arr.length, 0);
+  const unassigned = prospects.filter((p) => !myBoard[p.player_name]);
+  const searchResults =
+    addSearch.trim().length >= 2
+      ? unassigned
+          .filter(
+            (p) =>
+              p.player_name.toLowerCase().includes(addSearch.toLowerCase()) ||
+              (p.position ?? "").toLowerCase() === addSearch.toLowerCase(),
+          )
+          .slice(0, 10)
+      : [];
+
+  return (
+    <div style={{ marginTop: 16 }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 16,
+        }}
+      >
+        <div>
+          <span style={{ fontSize: 14, fontWeight: 700 }}>My Draft Board</span>
+          <span style={{ fontSize: 12, color: "var(--text-muted)", marginLeft: 8 }}>
+            {totalAssigned} ranked
+          </span>
+        </div>
+        <button
+          onClick={onExport}
+          disabled={totalAssigned === 0}
+          style={{
+            background: totalAssigned > 0 ? "var(--amber)" : "var(--border)",
+            color: totalAssigned > 0 ? "var(--dark-base)" : "var(--text-muted)",
+            border: "none",
+            borderRadius: 6,
+            padding: "6px 14px",
+            fontSize: 12,
+            fontWeight: 700,
+            cursor: totalAssigned > 0 ? "pointer" : "not-allowed",
+            fontFamily: "inherit",
+          }}
+        >
+          Copy to Clipboard
+        </button>
+      </div>
+
+      <div
+        style={{
+          background: "var(--card)",
+          border: "1px solid var(--border)",
+          borderRadius: 10,
+          padding: 12,
+          marginBottom: 16,
+        }}
+      >
+        <input
+          value={addSearch}
+          onChange={(e) => setAddSearch(e.target.value)}
+          placeholder="Search prospect to add to your board..."
+          style={{
+            width: "100%",
+            background: "var(--dark-base)",
+            color: "var(--text)",
+            border: "1px solid var(--border)",
+            borderRadius: 6,
+            padding: "8px 12px",
+            fontSize: 13,
+            fontFamily: "inherit",
+            boxSizing: "border-box",
+          }}
+        />
+        {searchResults.length > 0 && (
+          <div
+            style={{
+              marginTop: 8,
+              display: "grid",
+              gap: 4,
+              maxHeight: 200,
+              overflowY: "auto",
+            }}
+          >
+            {searchResults.map((p) => (
+              <div
+                key={p.player_name}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "6px 8px",
+                  borderRadius: 6,
+                  fontSize: 12,
+                  border: "1px solid var(--border)",
+                }}
+              >
+                <span style={{ fontWeight: 600, flex: 1 }}>
+                  <span style={{ color: posColor(p.position ?? ""), marginRight: 4 }}>
+                    {p.position}
+                  </span>
+                  {p.player_name}
+                </span>
+                <TierBadge tier={p.tier} />
+                {TIER_ORDER.map((t) => {
+                  const cfg = TIER_CONFIG[t];
+                  return (
+                    <button
+                      key={t}
+                      onClick={() => {
+                        onSetTier(p.player_name, t);
+                        setAddSearch("");
+                      }}
+                      style={{
+                        background: "none",
+                        border: `1px solid ${cfg.border}`,
+                        borderRadius: 4,
+                        padding: "2px 6px",
+                        fontSize: 9,
+                        fontWeight: 700,
+                        color: cfg.text,
+                        cursor: "pointer",
+                        fontFamily: "inherit",
+                      }}
+                      title={`Add to ${cfg.label}`}
+                    >
+                      {cfg.label}
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {TIER_ORDER.map((tier) => {
+        const players = assigned.get(tier) ?? [];
+        const cfg = TIER_CONFIG[tier] ?? TIER_CONFIG.flier;
+
+        return (
+          <div
+            key={tier}
+            style={{
+              border: `1px solid ${cfg.border}`,
+              borderRadius: 10,
+              overflow: "hidden",
+              marginBottom: 12,
+              opacity: players.length === 0 ? 0.5 : 1,
+            }}
+          >
+            <div
+              style={{
+                background: cfg.headerBg,
+                padding: "8px 16px",
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                borderBottom: `1px solid ${cfg.border}`,
+              }}
+            >
+              <span
+                style={{
+                  padding: "2px 8px",
+                  borderRadius: 4,
+                  fontSize: 10,
+                  fontWeight: 800,
+                  background: cfg.bg,
+                  color: cfg.text,
+                }}
+              >
+                {cfg.label}
+              </span>
+              <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                {players.length} player{players.length !== 1 ? "s" : ""}
+              </span>
+            </div>
+
+            {players.length === 0 ? (
+              <div
+                style={{
+                  padding: "16px",
+                  fontSize: 12,
+                  color: "var(--text-muted)",
+                  textAlign: "center",
+                  background: cfg.bg,
+                }}
+              >
+                Use search above to add players here
+              </div>
+            ) : (
+              <div style={{ background: cfg.bg }}>
+                {players.map((p) => (
+                  <div
+                    key={p.player_name}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                      padding: "8px 16px",
+                      borderBottom: `1px solid ${cfg.border}`,
+                      fontSize: 13,
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontWeight: 700,
+                        color: posColor(p.position ?? ""),
+                        fontSize: 11,
+                        width: 24,
+                      }}
+                    >
+                      {p.position}
+                    </span>
+                    <PlayerLink name={p.player_name} style={{ flex: 1, fontSize: 13 }} />
+                    {p.school && (
+                      <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{p.school}</span>
+                    )}
+                    <select
+                      value={tier}
+                      onChange={(e) => onSetTier(p.player_name, e.target.value)}
+                      style={{
+                        background: "var(--dark-base)",
+                        color: "var(--text-dim)",
+                        border: "1px solid var(--border)",
+                        borderRadius: 4,
+                        padding: "2px 4px",
+                        fontSize: 10,
+                        cursor: "pointer",
+                      }}
+                    >
+                      {TIER_ORDER.map((t) => (
+                        <option key={t} value={t}>
+                          {TIER_CONFIG[t]?.label ?? t}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      onClick={() => onRemove(p.player_name)}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        color: "var(--red)",
+                        cursor: "pointer",
+                        fontSize: 12,
+                        fontWeight: 700,
+                        padding: "2px 4px",
+                      }}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
