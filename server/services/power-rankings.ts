@@ -8,7 +8,7 @@ import { getCompositeValues } from "./composite-values.js";
 import { computeEdgeScores } from "./edge-score.js";
 import {
   getLeagueDraftPicks, getRookieDraftOrder, estimatePickTiers, scoreDraftPicks,
-  type ScoredPick, type DraftPick,
+  type ScoredPick, type DraftPick, type TieredPick,
 } from "./draft-picks.js";
 import { optimizeLineup, type OptimizedLineup } from "./lineup-optimizer.js";
 import { getDynastyLeagueIdsForUserLatestSeason } from "./dynasty-leagues.js";
@@ -361,6 +361,89 @@ export async function getPowerRankings(username: string): Promise<LeaguePowerRan
   return results;
 }
 
+const ROUND_NAMES: Record<number, string> = {
+  1: "1st", 2: "2nd", 3: "3rd", 4: "4th",
+};
+
+async function loadPickValueLookups(mode: "sf" | "1qb") {
+  const [ktcRows, dpRows] = await Promise.all([
+    db.execute(sql`
+      SELECT player_name, pick_season, pick_round, pick_tier,
+             value_1qb, value_sf
+      FROM ktc_values WHERE is_pick = true
+    `),
+    db.execute(sql`
+      SELECT player_name, value_1qb, value_2qb
+      FROM dynastyprocess_values WHERE is_pick = true
+    `),
+  ]);
+
+  type KtcPickRow = {
+    player_name: string;
+    pick_season: number | null;
+    pick_round: number | null;
+    pick_tier: string | null;
+    value_1qb: number;
+    value_sf: number;
+  };
+  type DpPickRow = {
+    player_name: string;
+    value_1qb: number;
+    value_2qb: number;
+  };
+
+  const ktcMap = new Map<string, number>();
+  for (const r of ktcRows as unknown as KtcPickRow[]) {
+    const val = mode === "sf" ? r.value_sf : r.value_1qb;
+    if (r.pick_season != null && r.pick_round != null) {
+      const tier = (r.pick_tier ?? "").toLowerCase();
+      ktcMap.set(`${r.pick_season}|${tier}|${r.pick_round}`, val);
+      const genKey = `${r.pick_season}||${r.pick_round}`;
+      if (!ktcMap.has(genKey)) {
+        ktcMap.set(genKey, val);
+      }
+    }
+  }
+
+  const dpMap = new Map<string, number>();
+  for (const r of dpRows as unknown as DpPickRow[]) {
+    const val = mode === "sf" ? r.value_2qb : r.value_1qb;
+    dpMap.set(r.player_name.toLowerCase().trim(), val);
+  }
+
+  return { ktcMap, dpMap };
+}
+
+function scoreTieredPicksFromLookups(
+  tieredPicks: TieredPick[],
+  mode: "sf" | "1qb",
+  lookups: { ktcMap: Map<string, number>; dpMap: Map<string, number> }
+): ScoredPick[] {
+  const { ktcMap, dpMap } = lookups;
+  return tieredPicks.map((p) => {
+    const ktcValue =
+      ktcMap.get(`${p.season}|${p.tier}|${p.round}`) ??
+      ktcMap.get(`${p.season}||${p.round}`) ??
+      null;
+
+    const roundName = ROUND_NAMES[p.round] ?? `R${p.round}`;
+    const tierLabel = p.tier.charAt(0).toUpperCase() + p.tier.slice(1);
+    const dpValue =
+      dpMap.get(`${p.season} ${tierLabel} ${roundName}`.toLowerCase()) ??
+      dpMap.get(`${p.season} ${roundName}`.toLowerCase()) ??
+      null;
+
+    return {
+      ...p,
+      ktc_value: ktcValue,
+      dp_value: dpValue,
+      edge_score: 0,
+      ktc_score: null,
+      dp_score: null,
+    };
+  });
+}
+
 function buildDraftPicksFromDB(
   totalRosters: number,
   draftRounds: number,
@@ -505,10 +588,18 @@ async function getPowerRankingsDbOnly(
   });
 
   const baseCompByMode = new Map<"sf" | "1qb", Map<string, any>>();
+  const pickLookupsByMode = new Map<
+    "sf" | "1qb",
+    { ktcMap: Map<string, number>; dpMap: Map<string, number> }
+  >();
   await Promise.all(
     [...modePlayerIds.entries()].map(async ([mode, ids]) => {
-      const comp = await getCompositeValues([...ids], mode);
+      const [comp, pickLookups] = await Promise.all([
+        getCompositeValues([...ids], mode),
+        loadPickValueLookups(mode),
+      ]);
       baseCompByMode.set(mode, comp as Map<string, any>);
+      pickLookupsByMode.set(mode, pickLookups);
     })
   );
 
@@ -533,7 +624,8 @@ async function getPowerRankingsDbOnly(
 
     const rosterDraftOrder = draftOrdersByLeague.get(lid);
     const tiered = estimatePickTiers(picks, rPower, rosterDraftOrder);
-    const valued = await scoreDraftPicks(tiered, mode);
+    const pickLookups = pickLookupsByMode.get(mode) ?? { ktcMap: new Map(), dpMap: new Map() };
+    const valued = scoreTieredPicksFromLookups(tiered, mode, pickLookups);
 
     const pInputs = [...compMap.values()].map((c) => ({
       sleeper_id: c.sleeper_id, fc_value: c.fc_value, ktc_value: c.ktc_value, dp_value: c.dp_value,
