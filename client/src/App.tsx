@@ -11,6 +11,7 @@ import PowerRankings from "./pages/PowerRankings";
 import MarketSignals from "./pages/MarketSignals";
 import TradeCalculator from "./pages/TradeCalculator";
 import TradeFinder from "./pages/TradeFinder";
+import RookieDraft from "./pages/RookieDraft";
 import LeagueHistory from "./pages/LeagueHistory";
 import InjuryTracker from "./pages/InjuryTracker";
 import WaiverWire from "./pages/WaiverWire";
@@ -34,6 +35,7 @@ export default function App() {
       <Route path="/player/:playerName" component={PlayerDetail} />
       <Route path="/trade-calculator" component={TradeCalculator} />
       <Route path="/trade-finder/:username" component={TradeFinder} />
+      <Route path="/rookie-draft" component={RookieDraft} />
       <Route path="/history/:username" component={LeagueHistory} />
       <Route path="/injuries/:username" component={InjuryTracker} />
       <Route path="/waivers/:username" component={WaiverWire} />

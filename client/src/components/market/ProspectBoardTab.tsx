@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { Link } from "wouter";
 import { useProspects, type Prospect } from "../../hooks/use-market";
 import { posColor } from "../../lib/position-colors";
 import { PlayerLink } from "../ui";
@@ -12,6 +13,7 @@ const TIER_STYLES: Record<string, { bg: string; text: string; label: string }> =
   DAY2: { bg: "rgba(74,222,128,0.15)", text: "var(--green)", label: "DAY 2" },
   day3: { bg: "rgba(148,163,184,0.15)", text: "var(--text-dim)", label: "DAY 3" },
   DAY3: { bg: "rgba(148,163,184,0.15)", text: "var(--text-dim)", label: "DAY 3" },
+  flier: { bg: "rgba(107,114,128,0.15)", text: "var(--text-muted)", label: "FLIER" },
 };
 
 const POS_FILTERS = ["ALL", "QB", "RB", "WR", "TE"] as const;
@@ -63,6 +65,19 @@ export default function ProspectBoardTab() {
 
   return (
     <div>
+      <Link href="/rookie-draft" style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        fontSize: 12,
+        color: "var(--amber)",
+        fontWeight: 600,
+        textDecoration: "none",
+        marginBottom: 12,
+      }}>
+        Open full Rookie Draft Hub →
+      </Link>
+
       <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
         {POS_FILTERS.map((pos) => (
           <button
@@ -117,7 +132,8 @@ function ProspectRow({ prospect: p }: { prospect: Prospect }) {
   const height = cleanText(p.height);
   const weight = cleanText(p.weight);
   const size = height && weight ? `${height} / ${weight}` : height ?? weight ?? null;
-  const comp = cleanText(p.consensus_comp);
+  const comp = cleanText(p.consensus_comp)
+    ?? (p.all_comps && p.all_comps.length > 0 ? cleanText(p.all_comps[0].comp) : null);
   const draftCapital = cleanText(p.draft_capital);
 
   return (
@@ -127,13 +143,13 @@ function ProspectRow({ prospect: p }: { prospect: Prospect }) {
         style={{ borderBottom: expanded ? "none" : "1px solid var(--border)", cursor: hasDetail ? "pointer" : "default" }}
       >
         <td className="font-mono" style={{ padding: "10px 14px", fontSize: 13, color: "var(--text-muted)" }}>
-          {p.fp_rank ?? p.fantasypros_rank ?? "-"}
+          {p.position}{p.fp_rank ?? p.fantasypros_rank ?? "?"}
         </td>
         <td style={{ padding: "10px 14px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <PlayerLink name={p.player_name} />
             {p.age != null && <span style={{ fontSize: 11, color: "var(--text-dim)" }}>({p.age})</span>}
-            {hasDetail && <span style={{ fontSize: 10, color: "var(--text-dim)" }}>{expanded ? "?" : "?"}</span>}
+            {hasDetail && <span style={{ fontSize: 10, color: "var(--text-dim)" }}>{expanded ? "\u25B2" : "\u25BC"}</span>}
           </div>
           {report && (
             <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>

@@ -15,6 +15,7 @@ const NAV_ITEMS = [
   { path: "market", label: "Market", icon: "📈" },
   { path: "trade-calculator", label: "Trade Calc", icon: "⚖️" },
   { path: "trade-finder", label: "Trade Finder", icon: "🔍" },
+  { path: "rookie-draft", label: "Draft", icon: "🎓" },
   { path: "free-agents", label: "Free Agents", icon: "🔀" },
   { path: "history", label: "History", icon: "🕒" },
   { path: "injuries", label: "Injuries", icon: "🏥" },
@@ -153,7 +154,7 @@ function NotificationBell({ username }: { username: string }) {
 export default function NavBar({ username, avatarId }: NavBarProps) {
   const [location] = useLocation();
 
-  const noUserPaths = ["market", "trade-calculator", "settings"];
+  const noUserPaths = ["market", "trade-calculator", "settings", "rookie-draft"];
 
   function isActive(path: string): boolean {
     if (noUserPaths.includes(path)) return location.startsWith(`/${path}`);
