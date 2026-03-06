@@ -1,4 +1,6 @@
 import { Router } from "express";
+import { db } from "../db/connection.js";
+import { sql } from "drizzle-orm";
 import {
   getRecommendations,
   getProspects,
@@ -8,6 +10,8 @@ import {
 import { getRookieDraftContext } from "../services/rookie-draft-context.js";
 import { getMockDraftSetup } from "../services/mock-draft.js";
 import { getActiveDrafts, getLiveDraftState } from "../services/live-draft.js";
+import { getDraftHitRates } from "../services/draft-hit-rates.js";
+import { computeRookieADP } from "../services/sync-league-drafts.js";
 
 const router = Router();
 
@@ -102,6 +106,67 @@ router.get("/api/rookie-draft/live/:username/:draftId/:leagueId", async (req, re
     res.json(data);
   } catch (err) {
     console.error("[live-draft] State error:", err);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+/** GET /api/rookie-draft/hit-rates */
+router.get("/api/rookie-draft/hit-rates", async (_req, res) => {
+  try {
+    const data = await getDraftHitRates();
+    res.json(data);
+  } catch (err) {
+    console.error("[hit-rates] Error:", err);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+/** GET /api/rookie-draft/adp/:season */
+router.get("/api/rookie-draft/adp/:season", async (req, res) => {
+  try {
+    const data = await computeRookieADP(req.params.season);
+    res.json(data);
+  } catch (err) {
+    console.error("[adp] Error:", err);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+/** GET /api/rookie-draft/board-movement/:playerName */
+router.get("/api/rookie-draft/board-movement/:playerName", async (req, res) => {
+  try {
+    const rows = await db.execute(sql`
+      SELECT snapshot_date, fp_rank, tier
+      FROM draft_board_snapshots
+      WHERE LOWER(player_name) = LOWER(${decodeURIComponent(req.params.playerName)})
+      ORDER BY snapshot_date ASC
+    `);
+    res.json(rows);
+  } catch (err) {
+    console.error("[board-movement] Error:", err);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+/** GET /api/rookie-draft/value-tracker/:playerName */
+router.get("/api/rookie-draft/value-tracker/:playerName", async (req, res) => {
+  try {
+    const name = decodeURIComponent(req.params.playerName);
+    const pmRows = (await db.execute(sql`
+      SELECT player_id FROM players_master WHERE LOWER(full_name) = LOWER(${name}) LIMIT 1
+    `)) as unknown as Array<{ player_id: string }>;
+    const playerId = pmRows[0]?.player_id;
+    if (!playerId) return res.json([]);
+
+    const rows = await db.execute(sql`
+      SELECT snapshot_date, edge_score, fc_value, ktc_value, dp_value
+      FROM player_value_snapshots
+      WHERE player_id = ${playerId}
+      ORDER BY snapshot_date ASC
+    `);
+    res.json(rows);
+  } catch (err) {
+    console.error("[value-tracker] Error:", err);
     res.status(500).json({ message: "Internal server error" });
   }
 });

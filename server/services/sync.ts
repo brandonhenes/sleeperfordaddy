@@ -31,6 +31,9 @@ import { seedInjuryBaselines } from "../db/seeds/injury-baselines.js";
 import { capturePlayerValueSnapshots } from "./value-snapshots.js";
 import { captureTeamValueSnapshots } from "./team-snapshots.js";
 import { syncNflverseStats } from "./sync-nflverse-stats.js";
+import { syncNflDraftHistory } from "./sync-nfl-draft.js";
+import { syncLeagueDraftResults } from "./sync-league-drafts.js";
+import { captureDraftBoardSnapshot } from "./sync-draft-board-snapshot.js";
 import { clearDynastyLeagueCache, isDynastyLeagueFromSleeperSettings } from "./dynasty-leagues.js";
 import { clearPowerRankingsCache } from "./power-rankings.js";
 import { clearGlobalScaleCache } from "./composite-values.js";
@@ -299,6 +302,25 @@ async function runSync(jobId: string, username: string) {
     console.error("[sync] Error capturing team value snapshots:", err);
   }
 
+  // Step 9: Draft data pipelines
+  try {
+    await syncNflDraftHistory();
+  } catch (err) {
+    console.error("[sync] Error syncing NFL draft history:", err);
+  }
+
+  try {
+    await syncLeagueDraftResults(username);
+  } catch (err) {
+    console.error("[sync] Error syncing league draft results:", err);
+  }
+
+  try {
+    await captureDraftBoardSnapshot();
+  } catch (err) {
+    console.error("[sync] Error capturing draft board snapshot:", err);
+  }
+
   clearSleeperCache();
   clearDynastyLeagueCache(sleeperUser.user_id);
   clearGlobalScaleCache();
@@ -309,7 +331,7 @@ async function runSync(jobId: string, username: string) {
   clearActionCache(username);
   clearArbitrageCache(username);
 
-  // Step 9: Done
+  // Step 10: Done
   await updateSyncJob(jobId, {
     status: "completed",
     step: "done",
