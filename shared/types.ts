@@ -474,3 +474,57 @@ export interface AcquisitionResult {
   summary: string; // "Ja'Marr Chase is owned in 8 of your leagues. Easiest to acquire from Team X in League Y (Rebuilder, he's their WR2)."
 }
 
+// ─── Shop a Player ───
+
+export interface ShopPlayerResult {
+  player_id: string;
+  player_name: string;
+  position: string;
+  edge_score: number;
+  leagues_owned: number;
+  opportunities: ShopOpportunity[];
+}
+
+export interface ShopOpportunity {
+  league_id: string;
+  league_name: string;
+  league_mode: "sf" | "1qb";
+  your_archetype: string;
+  opportunity_score: number; // 0-100, composite of all 5 layers
+
+  // What you send
+  you_send: EvaluatedAsset;
+
+  // What you get back
+  you_receive: EvaluatedAsset[];
+  from_team: string; // opponent display name
+  from_archetype: string;
+
+  // Layer 1: Archetype targeting
+  buyer_motivation: string; // why opponent wants your player
+  motivation_score: number; // 0-100
+
+  // Layer 2: Source disagreement
+  source_edge: string | null; // e.g. "Waddle: crowd at 71, experts at 82"
+  source_edge_score: number; // 0-100, how much value you're capturing
+
+  // Layer 3: Window matching
+  window_match: string; // e.g. "Young WR fits your rebuild timeline"
+  window_score: number; // 0-100
+
+  // Layer 4: Roster impact
+  roster_impact: {
+    position_traded: string;
+    grade_before: string; // "elite" | "strong" | "average" | "weak" | "hole"
+    grade_after: string;
+    position_gained: string;
+    gain_grade_before: string;
+    gain_grade_after: string;
+    net_summary: string; // e.g. "RB Strong→Average, WR Hole→Strong"
+  };
+
+  // Trade fairness
+  fairness: "fair" | "slight_edge" | "lopsided";
+  delta: number; // edge score difference
+}
+

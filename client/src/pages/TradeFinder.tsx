@@ -6,8 +6,9 @@ import FreshnessBar from "../components/FreshnessBar";
 import { PlayerLink } from "../components/ui";
 import { useEnsureUser } from "../hooks/use-ensure-user";
 import { usePowerRankings } from "../hooks/use-power-rankings";
-import { useTradeSuggestions } from "../hooks/use-trade-finder";
+import { useTradeSuggestions, useShopPlayer } from "../hooks/use-trade-finder";
 import { useAcquisition } from "../hooks/use-acquisition";
+import { usePortfolio } from "../hooks/use-portfolio";
 import { apiFetch } from "../lib/api";
 import type {
   TradeSuggestion,
@@ -15,6 +16,8 @@ import type {
   TradePackageAsset,
   AcquisitionOpportunity,
   OpponentPerspective,
+  ShopOpportunity,
+  EvaluatedAsset,
 } from "../../../shared/types";
 
 const POS_COLOR: Record<string, string> = {
@@ -339,16 +342,101 @@ function AcquisitionCard({ opportunity }: { opportunity: AcquisitionOpportunity 
   );
 }
 
+function AssetChip({ asset }: { asset: EvaluatedAsset }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 0", borderBottom: "1px solid var(--border)", fontSize: 12 }}>
+      <span style={{
+        background: asset.edge_score >= 80 ? "var(--green)" : asset.edge_score >= 60 ? "var(--amber)" : asset.edge_score >= 45 ? "var(--text-muted)" : "var(--red)",
+        color: "#fff", fontSize: 10, fontWeight: 700, borderRadius: 3, padding: "1px 5px", minWidth: 24, textAlign: "center",
+      }}>
+        {Math.round(asset.edge_score)}
+      </span>
+      {asset.position && <span style={{ color: posColor(asset.position), fontWeight: 700, fontSize: 10 }}>{asset.position}</span>}
+      <PlayerLink name={asset.label} style={{ flex: 1, fontWeight: 500 }} />
+    </div>
+  );
+}
+
+function ShopOpportunityCard({ opp }: { opp: ShopOpportunity }) {
+  return (
+    <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 12, padding: 16, marginBottom: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+        <div>
+          <span style={{ fontSize: 14, fontWeight: 700 }}>{opp.league_name}</span>
+          <span style={{ fontSize: 10, fontWeight: 600, color: "var(--text-muted)", marginLeft: 8, padding: "2px 6px", background: "rgba(255,255,255,0.05)", borderRadius: 4 }}>
+            {opp.your_archetype}
+          </span>
+        </div>
+        <span style={{ fontSize: 13, fontWeight: 800, color: opp.opportunity_score >= 70 ? "var(--green)" : opp.opportunity_score >= 50 ? "var(--amber)" : "var(--text-muted)" }}>
+          {opp.opportunity_score}/100
+        </span>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", borderBottom: "2px solid #ef4444", paddingBottom: 4, marginBottom: 6 }}>
+            You Send
+          </div>
+          <AssetChip asset={opp.you_send} />
+        </div>
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", borderBottom: "2px solid #22c55e", paddingBottom: 4, marginBottom: 6 }}>
+            You Receive from {opp.from_team}
+          </div>
+          {opp.you_receive.map((a, i) => (
+            <AssetChip key={i} asset={a} />
+          ))}
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, padding: 10, background: "rgba(255,255,255,0.02)", borderRadius: 8, fontSize: 11, color: "var(--text-dim)", lineHeight: 1.5 }}>
+        <div>
+          <span style={{ fontWeight: 700, color: "var(--text-muted)" }}>Why they buy: </span>
+          {opp.buyer_motivation}
+        </div>
+        {opp.source_edge && (
+          <div>
+            <span style={{ fontWeight: 700, color: "var(--text-muted)" }}>Value edge: </span>
+            {opp.source_edge}
+          </div>
+        )}
+        <div>
+          <span style={{ fontWeight: 700, color: "var(--text-muted)" }}>Window fit: </span>
+          {opp.window_match}
+        </div>
+        <div>
+          <span style={{ fontWeight: 700, color: "var(--text-muted)" }}>Roster impact: </span>
+          {opp.roster_impact.net_summary}
+        </div>
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 10, paddingTop: 8, borderTop: "1px solid var(--border)", fontSize: 12 }}>
+        <span style={{
+          color: opp.fairness === "fair" ? "var(--green)" : opp.fairness === "slight_edge" ? "var(--amber)" : "var(--red)",
+          fontWeight: 600, textTransform: "uppercase", fontSize: 11,
+        }}>
+          {opp.fairness === "fair" ? "Fair" : opp.fairness === "slight_edge" ? "Slight Edge" : "Lopsided"} Trade
+        </span>
+        <span style={{ color: "var(--text-muted)" }}>
+          Delta: {opp.delta > 0 ? "+" : ""}{opp.delta.toFixed(0)} edge
+        </span>
+      </div>
+    </div>
+  );
+}
+
 export default function TradeFinder() {
   const { username } = useParams<{ username: string }>();
   const { phase } = useEnsureUser(username);
   const [selectedLeague, setSelectedLeague] = useState<string>("");
-  const [mode, setMode] = useState<"find" | "acquire">("find");
+  const [mode, setMode] = useState<"find" | "acquire" | "shop">("find");
   const [targetSearch, setTargetSearch] = useState("");
   const [selectedTarget, setSelectedTarget] = useState<{ name: string; id: string } | null>(null);
+  const [selectedPlayer, setSelectedPlayer] = useState("");
 
   const { data: leagues, isLoading: leaguesLoading } = usePowerRankings(phase === "ready" ? username : "");
   const { data: suggestions, isLoading: suggestionsLoading, error: suggestionsError } = useTradeSuggestions(phase === "ready" ? username : "", selectedLeague);
+  const { data: portfolio } = usePortfolio(phase === "ready" ? username : undefined);
 
   const { data: targetResults = [] } = useQuery<{ player_id: string; label: string; position: string; team: string | null }[]>({
     queryKey: ["acquire-search", targetSearch],
@@ -357,6 +445,10 @@ export default function TradeFinder() {
   });
 
   const { data: acquisitionData, isLoading: acquisitionLoading } = useAcquisition(phase === "ready" ? username : "", selectedTarget);
+  const { data: shopResult, isLoading: shopLoading } = useShopPlayer(
+    phase === "ready" ? username ?? "" : "",
+    mode === "shop" ? selectedPlayer : ""
+  );
 
   if (phase === "checking" || phase === "syncing") {
     return (
@@ -385,10 +477,11 @@ export default function TradeFinder() {
         {([
           { key: "find" as const, label: "Find Trades" },
           { key: "acquire" as const, label: "What Would It Take?" },
+          { key: "shop" as const, label: "Shop a Player" },
         ]).map((m) => (
           <button
             key={m.key}
-            onClick={() => { setMode(m.key); setSelectedTarget(null); }}
+            onClick={() => { setMode(m.key); setSelectedTarget(null); setSelectedPlayer(""); }}
             style={{ background: "transparent", border: "none", borderBottom: mode === m.key ? "2px solid var(--amber)" : "2px solid transparent", color: mode === m.key ? "var(--amber)" : "var(--text-muted)", padding: "10px 20px", fontSize: 14, fontWeight: 700, cursor: "pointer", letterSpacing: 0.3, transition: "color 0.15s, border-color 0.15s", fontFamily: "inherit" }}
           >
             {m.label}
@@ -458,6 +551,65 @@ export default function TradeFinder() {
               <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: "14px 18px", marginBottom: 16, fontSize: 13, color: "var(--text-dim)", lineHeight: 1.6 }}>{acquisitionData.summary}</div>
               {acquisitionData.opportunities.length === 0 && <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: "48px 24px", textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>This player is not owned by anyone else in your leagues (or you own them in every league).</div>}
               {acquisitionData.opportunities.map((opp) => <AcquisitionCard key={opp.league_id} opportunity={opp} />)}
+            </div>
+          )}
+        </div>
+      )}
+
+      {mode === "shop" && (
+        <div>
+          <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: 16, marginTop: 8 }}>
+            <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 0.5 }}>
+              Select a Player to Shop
+            </label>
+            <select
+              value={selectedPlayer}
+              onChange={(e) => setSelectedPlayer(e.target.value)}
+              style={{ display: "block", width: "100%", marginTop: 8, padding: "10px 12px", background: "var(--dark-base)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text)", fontSize: 14, cursor: "pointer" }}
+            >
+              <option value="">Choose a player...</option>
+              {["QB", "RB", "WR", "TE"].map((pos) => {
+                const posPlayers = portfolio?.players
+                  ?.filter((p) => p.position === pos)
+                  ?.sort((a, b) => b.edge_score - a.edge_score) ?? [];
+                if (posPlayers.length === 0) return null;
+                return (
+                  <optgroup key={pos} label={pos}>
+                    {posPlayers.map((p) => (
+                      <option key={p.player_id} value={p.player_id}>
+                        {p.full_name} (Edge {Math.round(p.edge_score)}) — {p.leagues_owned} league{p.leagues_owned !== 1 ? "s" : ""}
+                      </option>
+                    ))}
+                  </optgroup>
+                );
+              })}
+            </select>
+          </div>
+
+          {selectedPlayer && shopLoading && (
+            <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: "48px 24px", marginTop: 16, textAlign: "center" }}>
+              <span className="animate-pulse" style={{ color: "var(--amber)", fontSize: 14 }}>
+                Scanning all leagues for the best deals...
+              </span>
+            </div>
+          )}
+
+          {selectedPlayer && shopResult && !shopLoading && (
+            <div style={{ marginTop: 16 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                <span style={{ fontSize: 13, color: "var(--text-muted)" }}>
+                  {shopResult.player_name} owned in {shopResult.leagues_owned} league{shopResult.leagues_owned !== 1 ? "s" : ""} — {shopResult.opportunities.length} opportunit{shopResult.opportunities.length !== 1 ? "ies" : "y"} found
+                </span>
+              </div>
+              {shopResult.opportunities.map((opp, i) => (
+                <ShopOpportunityCard key={`${opp.league_id}-${i}`} opp={opp} />
+              ))}
+              {shopResult.opportunities.length === 0 && (
+                <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: "48px 24px", textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>
+                  No good trade opportunities found for this player across your leagues.
+                  This can happen if no opponents have matching needs or fair return assets.
+                </div>
+              )}
             </div>
           )}
         </div>

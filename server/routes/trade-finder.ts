@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { findTrades } from "../services/trade-finder.js";
 import { findAcquisitionPackages } from "../services/acquisition-finder.js";
+import { shopPlayer } from "../services/shop-player.js";
 
 const router = Router();
 
@@ -30,6 +31,24 @@ router.get("/api/trade/acquire/:username/:playerId", async (req, res) => {
     res.json(data);
   } catch (err) {
     console.error("[acquisition-finder] Error:", err);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+/** GET /api/trade/shop/:username/:playerId */
+router.get("/api/trade/shop/:username/:playerId", async (req, res) => {
+  try {
+    const { username, playerId } = req.params;
+    if (!username || !playerId) {
+      return res.status(400).json({ message: "username and playerId are required" });
+    }
+    const data = await shopPlayer(username, playerId);
+    if (!data) {
+      return res.status(404).json({ message: "Player not found in any league" });
+    }
+    res.json(data);
+  } catch (err) {
+    console.error("[shop-player] Error:", err);
     res.status(500).json({ message: "Internal server error" });
   }
 });
