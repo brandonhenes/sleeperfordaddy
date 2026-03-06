@@ -479,23 +479,49 @@ async function getPowerRankingsDbOnly(
   }
 
   const DEFAULT_POS = ["QB", "RB", "RB", "WR", "WR", "WR", "TE", "FLEX", "BN", "BN", "BN", "BN", "BN", "BN", "BN"];
-  const results: LeaguePowerRanking[] = [];
-
-  for (const league of leagues) {
+  const modePlayerIds = new Map<"sf" | "1qb", Set<string>>();
+  const leagueContexts = leagues.map((league) => {
     const lid = league.league_id;
     const teams = nested[lid] ?? {};
     const rosterPositions: string[] = league.roster_positions ?? DEFAULT_POS;
     const sf = detectSF(rosterPositions);
     const slots = countStarterSlots(rosterPositions);
-    const mode = sf ? "sf" : "1qb";
+    const mode: "sf" | "1qb" = sf ? "sf" : "1qb";
     const owners = Object.entries(teams);
     const totalRosters = league.total_rosters ?? 12;
     const draftRounds = league.draft_rounds ?? 4;
+    const picks = buildDraftPicksFromDB(
+      totalRosters,
+      draftRounds,
+      tradedPicksByLeague.get(lid) ?? []
+    );
+    const playerIds = [
+      ...new Set(owners.flatMap(([, ps]) => ps.map((p) => p.player_id))),
+    ];
+    const bucket = modePlayerIds.get(mode) ?? new Set<string>();
+    for (const pid of playerIds) bucket.add(pid);
+    modePlayerIds.set(mode, bucket);
+    return { league, lid, teams, rosterPositions, slots, mode, owners, picks, playerIds };
+  });
 
-    const picks = buildDraftPicksFromDB(totalRosters, draftRounds, tradedPicksByLeague.get(lid) ?? []);
+  const baseCompByMode = new Map<"sf" | "1qb", Map<string, any>>();
+  await Promise.all(
+    [...modePlayerIds.entries()].map(async ([mode, ids]) => {
+      const comp = await getCompositeValues([...ids], mode);
+      baseCompByMode.set(mode, comp as Map<string, any>);
+    })
+  );
 
-    const playerIds = [...new Set(owners.flatMap(([, ps]) => ps.map((p) => p.player_id)))];
-    const compMap = await getCompositeValues(playerIds, mode);
+  const results: LeaguePowerRanking[] = [];
+
+  for (const ctx of leagueContexts) {
+    const { league, lid, rosterPositions, slots, mode, owners, picks, playerIds } = ctx;
+    const baseComp = baseCompByMode.get(mode) ?? new Map<string, any>();
+    const compMap = new Map<string, any>();
+    for (const pid of playerIds) {
+      const cv = baseComp.get(pid);
+      if (cv) compMap.set(pid, { ...cv });
+    }
 
     const initSV = owners.map(([oid, ps]) => {
       const s = ps.map((p) => compMap.get(p.player_id)?.edge_score ?? 0).sort((a, b) => b - a);
