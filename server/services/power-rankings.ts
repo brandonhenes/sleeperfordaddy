@@ -15,6 +15,7 @@ import { getDynastyLeagueIdsForUserLatestSeason } from "./dynasty-leagues.js";
 
 const prCache = new Map<string, { data: LeaguePowerRanking[]; expires: number }>();
 const PR_TTL_MS = 5 * 60 * 1000;
+const PR_DB_ONLY = process.env.POWER_RANKINGS_DB_ONLY === "true";
 
 export function clearPowerRankingsCache(username?: string) {
   if (username) {
@@ -119,6 +120,12 @@ export async function getPowerRankings(username: string): Promise<LeaguePowerRan
 
   const dynastyLeagueIds = await getDynastyLeagueIdsForUserLatestSeason(userId);
   if (dynastyLeagueIds.length === 0) return [];
+
+  if (PR_DB_ONLY) {
+    const dbOnly = await getPowerRankingsDbOnly(username, userId, dynastyLeagueIds);
+    prCache.set(cacheKey, { data: dbOnly, expires: Date.now() + PR_TTL_MS });
+    return dbOnly;
+  }
 
   const leagueIdFrags = dynastyLeagueIds.map((id) => sql`${id}`);
   const leagueInClause = sql.join(leagueIdFrags, sql`, `);
@@ -347,5 +354,277 @@ export async function getPowerRankings(username: string): Promise<LeaguePowerRan
 
   results.sort((a, b) => a.league_name.localeCompare(b.league_name));
   prCache.set(cacheKey, { data: results, expires: Date.now() + PR_TTL_MS });
+  return results;
+}
+
+function buildDraftPicksFromDB(
+  totalRosters: number,
+  draftRounds: number,
+  tradedPicks: { season: string; round: number; roster_id: number; owner_id: number }[]
+): DraftPick[] {
+  const rounds = Math.min(draftRounds, 4);
+  const currentYear = new Date().getFullYear();
+  const seasons = [currentYear, currentYear + 1, currentYear + 2];
+
+  const picks = new Map<string, DraftPick>();
+  for (const season of seasons) {
+    for (let round = 1; round <= rounds; round++) {
+      for (let rid = 1; rid <= totalRosters; rid++) {
+        picks.set(`${season}|${round}|${rid}`, {
+          season: String(season),
+          round,
+          roster_id: rid,
+          original_owner_id: rid,
+          pick_slot: null,
+        });
+      }
+    }
+  }
+
+  for (const t of tradedPicks) {
+    const season = parseInt(t.season, 10);
+    if (season < currentYear || season > currentYear + 2) continue;
+    const key = `${t.season}|${t.round}|${t.roster_id}`;
+    const pick = picks.get(key);
+    if (pick) {
+      pick.roster_id = t.owner_id;
+    }
+  }
+
+  return [...picks.values()];
+}
+
+async function getPowerRankingsDbOnly(
+  _username: string,
+  userId: string,
+  dynastyLeagueIds: string[]
+): Promise<LeaguePowerRanking[]> {
+  const leagueIdFrags = dynastyLeagueIds.map((id) => sql`${id}`);
+  const leagueInClause = sql.join(leagueIdFrags, sql`, `);
+
+  const leagueRows = await db.execute(sql`
+    SELECT league_id, name AS league_name, total_rosters,
+           roster_positions, draft_rounds
+    FROM leagues
+    WHERE league_id IN (${leagueInClause})
+    ORDER BY name ASC
+  `);
+  type LeagueRow = {
+    league_id: string;
+    league_name: string;
+    total_rosters: number;
+    roster_positions: string[] | null;
+    draft_rounds: number | null;
+  };
+  const leagues = leagueRows as unknown as LeagueRow[];
+  if (leagues.length === 0) return [];
+
+  const idFrags = leagues.map((l) => sql`${l.league_id}`);
+  const inClause = sql.join(idFrags, sql`, `);
+
+  const [rosterPlayerRows, ridRows, nmRows, tradedPickRows, draftOrderRows] = await Promise.all([
+    db.execute(sql`
+      SELECT rp.league_id, rp.owner_id, rp.player_id, pm.full_name, pm.position, pm.age
+      FROM roster_players rp
+      JOIN players_master pm ON rp.player_id = pm.player_id
+      WHERE rp.league_id IN (${inClause}) AND pm.position IN ('QB','RB','WR','TE')
+    `),
+    db.execute(sql`SELECT league_id, owner_id, roster_id FROM rosters WHERE league_id IN (${inClause})`),
+    db.execute(sql`SELECT league_id, user_id, display_name, team_name FROM league_users WHERE league_id IN (${inClause})`),
+    db.execute(sql`SELECT league_id, season, round, roster_id, owner_id FROM league_traded_picks WHERE league_id IN (${inClause})`),
+    db.execute(sql`SELECT league_id, season, roster_id, draft_position FROM league_draft_orders WHERE league_id IN (${inClause})`),
+  ]);
+
+  type RR = { league_id: string; owner_id: string; player_id: string; full_name: string; position: string; age: number | null };
+  const rows = rosterPlayerRows as unknown as RR[];
+
+  const ridMap = new Map<string, number>();
+  for (const r of ridRows as unknown as { league_id: string; owner_id: string; roster_id: number }[]) {
+    ridMap.set(`${r.league_id}:${r.owner_id}`, r.roster_id);
+  }
+
+  const nmMap = new Map<string, { display_name: string | null; team_name: string | null }>();
+  for (const r of nmRows as unknown as { league_id: string; user_id: string; display_name: string | null; team_name: string | null }[]) {
+    nmMap.set(`${r.league_id}:${r.user_id}`, { display_name: r.display_name, team_name: r.team_name });
+  }
+
+  type TPRow = { league_id: string; season: string; round: number; roster_id: number; owner_id: number };
+  const tradedPicksByLeague = new Map<string, TPRow[]>();
+  for (const tp of tradedPickRows as unknown as TPRow[]) {
+    const arr = tradedPicksByLeague.get(tp.league_id) ?? [];
+    arr.push(tp);
+    tradedPicksByLeague.set(tp.league_id, arr);
+  }
+
+  type DORow = { league_id: string; season: string; roster_id: number; draft_position: number };
+  const draftOrdersByLeague = new Map<string, Map<number, number>>();
+  for (const d of draftOrderRows as unknown as DORow[]) {
+    let m = draftOrdersByLeague.get(d.league_id);
+    if (!m) {
+      m = new Map();
+      draftOrdersByLeague.set(d.league_id, m);
+    }
+    m.set(d.roster_id, d.draft_position);
+  }
+
+  const nested: Record<string, Record<string, RR[]>> = {};
+  for (const r of rows) {
+    nested[r.league_id] ??= {};
+    nested[r.league_id][r.owner_id] ??= [];
+    nested[r.league_id][r.owner_id].push(r);
+  }
+
+  const DEFAULT_POS = ["QB", "RB", "RB", "WR", "WR", "WR", "TE", "FLEX", "BN", "BN", "BN", "BN", "BN", "BN", "BN"];
+  const results: LeaguePowerRanking[] = [];
+
+  for (const league of leagues) {
+    const lid = league.league_id;
+    const teams = nested[lid] ?? {};
+    const rosterPositions: string[] = league.roster_positions ?? DEFAULT_POS;
+    const sf = detectSF(rosterPositions);
+    const slots = countStarterSlots(rosterPositions);
+    const mode = sf ? "sf" : "1qb";
+    const owners = Object.entries(teams);
+    const totalRosters = league.total_rosters ?? 12;
+    const draftRounds = league.draft_rounds ?? 4;
+
+    const picks = buildDraftPicksFromDB(totalRosters, draftRounds, tradedPicksByLeague.get(lid) ?? []);
+
+    const playerIds = [...new Set(owners.flatMap(([, ps]) => ps.map((p) => p.player_id)))];
+    const compMap = await getCompositeValues(playerIds, mode);
+
+    const initSV = owners.map(([oid, ps]) => {
+      const s = ps.map((p) => compMap.get(p.player_id)?.edge_score ?? 0).sort((a, b) => b - a);
+      return { oid, sv: s.slice(0, slots).reduce((a, v) => a + v, 0) };
+    });
+    const allInit = initSV.map((r) => r.sv);
+    const rPower = new Map<number, number>();
+    for (const r of initSV) rPower.set(ridMap.get(`${lid}:${r.oid}`) ?? 0, percentileRank(allInit, r.sv));
+
+    const rosterDraftOrder = draftOrdersByLeague.get(lid);
+    const tiered = estimatePickTiers(picks, rPower, rosterDraftOrder);
+    const valued = await scoreDraftPicks(tiered, mode);
+
+    const pInputs = [...compMap.values()].map((c) => ({
+      sleeper_id: c.sleeper_id, fc_value: c.fc_value, ktc_value: c.ktc_value, dp_value: c.dp_value,
+    }));
+    const pkInputs = valued.map((p) => ({
+      sleeper_id: `pick_${p.season}_${p.round}_${p.original_owner_id}`,
+      fc_value: null as number | null, ktc_value: p.ktc_value, dp_value: p.dp_value,
+    }));
+    const combined = computeEdgeScores([...pInputs, ...pkInputs]);
+
+    for (const [id, cv] of compMap) {
+      const e = combined.get(id);
+      if (e) {
+        cv.edge_score = e.score;
+        cv.fc_score = e.fc_score;
+        cv.ktc_score = e.ktc_score;
+        cv.dp_score = e.dp_score;
+        cv.sources_available = e.sources_used;
+        cv.source_agreement = scoreAgreement([e.fc_score, e.ktc_score, e.dp_score]);
+      }
+    }
+    for (const p of valued) {
+      const e = combined.get(`pick_${p.season}_${p.round}_${p.original_owner_id}`);
+      if (e) {
+        p.edge_score = e.score;
+        p.ktc_score = e.ktc_score;
+        p.dp_score = e.dp_score;
+      }
+    }
+
+    const picksByRid = new Map<number, ScoredPick[]>();
+    for (const p of valued) {
+      if (p.edge_score <= 0) continue;
+      const a = picksByRid.get(p.roster_id) ?? [];
+      a.push(p);
+      picksByRid.set(p.roster_id, a);
+    }
+
+    const rosterData = owners.map(([oid, players]) => {
+      const wv = players.map((p) => ({ ...p, es: compMap.get(p.player_id)?.edge_score ?? 0, cv: compMap.get(p.player_id) }));
+      const sorted = [...wv].sort((a, b) => b.es - a.es);
+      const starters = sorted.slice(0, slots);
+      const sv = starters.reduce((s, p) => s + p.es, 0);
+      const avgSS = starters.length > 0 ? Math.round((sv / starters.length) * 10) / 10 : 0;
+      const wc = sorted.map((p) => ({ ...p, ac: getAgeCurveStatus(p.position, p.age) }));
+      const coreN = Math.min(12, slots + 3);
+      const core = wc.slice(0, coreN);
+      const wcr = computeWindowRaw(core.map((p) => ({ value: p.es, age_score: p.ac.score })));
+      const wtr = computeWindowRaw(wc.map((p) => ({ value: p.es, age_score: p.ac.score })));
+      const coreAssets: CoreAsset[] = wc.map((p) => ({
+        player_id: p.player_id, full_name: p.full_name, position: p.position,
+        edge_score: p.es, age: p.age, age_curve: p.ac,
+        fc_value: p.cv?.fc_value ?? null, ktc_value: p.cv?.ktc_value ?? null, dp_value: p.cv?.dp_value ?? null,
+        fc_score: p.cv?.fc_score ?? null, ktc_score: p.cv?.ktc_score ?? null, dp_score: p.cv?.dp_score ?? null,
+        sources_available: p.cv?.sources_available ?? 0, source_agreement: p.cv?.source_agreement ?? "high",
+      }));
+      const srcAvg = wc.length > 0 ? Math.round((wc.reduce((s, p) => s + (p.cv?.sources_available ?? 0), 0) / wc.length) * 10) / 10 : 0;
+      const rid = ridMap.get(`${lid}:${oid}`) ?? 0;
+      const rPicks = (picksByRid.get(rid) ?? []).sort((a, b) => b.edge_score - a.edge_score);
+      const dv = rPicks.reduce((s, p) => s + p.edge_score, 0);
+      const lineup = optimizeLineup(coreAssets, rosterPositions);
+      return {
+        oid, sv, avgSS, wcr, wtr,
+        coreCov: core.length > 0 ? (core.filter((p) => p.es > 0).length / coreN) * 100 : 0,
+        totCov: wc.length > 0 ? (wc.filter((p) => p.es > 0).length / wc.length) * 100 : 0,
+        coreAssets, srcAvg, dv, rPicks, lineup,
+      };
+    });
+
+    const allSV = rosterData.map((r) => r.sv);
+    const allDV = rosterData.map((r) => r.dv);
+    const allWCR = rosterData.map((r) => r.wcr);
+    const allWTR = rosterData.map((r) => r.wtr);
+
+    const rosters: RosterRanking[] = rosterData.map((r) => {
+      const pp = percentileRank(allSV, r.sv);
+      const dp = percentileRank(allDV, r.dv);
+      const wcp = percentileRank(allWCR, r.wcr);
+      const wtp = percentileRank(allWTR, r.wtr);
+      const { archetype, reasons } = classifyTeam(pp, dp, wcp);
+      const nameRow = nmMap.get(`${lid}:${r.oid}`);
+      const readableName =
+        nameRow?.team_name?.trim()
+        || nameRow?.display_name?.trim()
+        || (ridMap.get(`${lid}:${r.oid}`) ? `Roster ${ridMap.get(`${lid}:${r.oid}`)}` : null)
+        || r.oid;
+      return {
+        roster_id: ridMap.get(`${lid}:${r.oid}`) ?? 0,
+        owner_id: r.oid,
+        display_name: readableName,
+        is_user: r.oid === userId,
+        starters_value: r.sv,
+        avg_starter_score: r.avgSS,
+        power_pct: Math.round(pp * 10) / 10,
+        draft_value: r.dv,
+        draft_pct: Math.round(dp * 10) / 10,
+        draft_picks: r.rPicks,
+        window_core_raw: Math.round(r.wcr * 10) / 10,
+        window_core_pct: Math.round(wcp * 10) / 10,
+        window_total_raw: Math.round(r.wtr * 10) / 10,
+        window_total_pct: Math.round(wtp * 10) / 10,
+        window_core_coverage_pct: Math.round(r.coreCov),
+        window_total_coverage_pct: Math.round(r.totCov),
+        archetype,
+        reasons,
+        core_assets: r.coreAssets,
+        avg_sources_available: r.srcAvg,
+        lineup: r.lineup,
+      };
+    });
+
+    rosters.sort((a, b) => b.power_pct - a.power_pct);
+    results.push({
+      league_id: lid,
+      league_name: league.league_name,
+      mode,
+      draft_data_available: picks.length > 0,
+      rosters,
+    });
+  }
+
+  results.sort((a, b) => a.league_name.localeCompare(b.league_name));
   return results;
 }
