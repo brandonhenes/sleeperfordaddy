@@ -3,6 +3,9 @@ import AppShell from "../components/AppShell";
 import FreshnessBar from "../components/FreshnessBar";
 import { useProspects, type Prospect } from "../hooks/use-market";
 import { useRookieDraftContext, type DraftPickContext, type AggregateNeed, type PickValueReference } from "../hooks/use-rookie-draft";
+import { usePowerRankings, type LeaguePowerRanking } from "../hooks/use-power-rankings";
+import { useMockDraftSetup, type MockDraftSetup, type MockDraftProspect, type MockDraftPick } from "../hooks/use-mock-draft";
+import { useActiveDrafts, useLiveDraft, type LiveDraftState, type ActiveDraftSummary } from "../hooks/use-live-draft";
 import { PlayerLink } from "../components/ui";
 import { posColor } from "../lib/position-colors";
 
@@ -73,11 +76,20 @@ export default function RookieDraft() {
   const username = typeof window !== "undefined" ? localStorage.getItem("edge_username") ?? "" : "";
   const { data: draftCtx } = useRookieDraftContext(username);
   const [posFilter, setPosFilter] = useState<string>("ALL");
-  const [viewMode, setViewMode] = useState<"board" | "positional" | "compare" | "myboard">("board");
+  const [viewMode, setViewMode] = useState<"board" | "positional" | "compare" | "myboard" | "mock" | "live">("board");
   const [compareList, setCompareList] = useState<string[]>([]);
   const [watchlist, setWatchlist] = useState<Set<string>>(loadWatchlist);
   const [showWatchlistOnly, setShowWatchlistOnly] = useState(false);
   const [myBoard, setMyBoard] = useState<MyBoardState>(loadMyBoard);
+  const [mockLeagueId, setMockLeagueId] = useState<string>("");
+  const [mockPicks, setMockPicks] = useState<MockDraftPick[]>([]);
+  const [mockStarted, setMockStarted] = useState(false);
+  const [liveDraftId, setLiveDraftId] = useState<string | null>(null);
+  const [liveLeagueId, setLiveLeagueId] = useState<string | null>(null);
+  const { data: leagues } = usePowerRankings(username);
+  const { data: mockSetup } = useMockDraftSetup(username, mockLeagueId);
+  const { data: activeDrafts } = useActiveDrafts(username);
+  const { data: liveDraftState } = useLiveDraft(username, liveDraftId, liveLeagueId);
 
   function toggleCompare(name: string) {
     setCompareList((prev) => {
@@ -132,6 +144,106 @@ export default function RookieDraft() {
       else players.forEach((p) => lines.push(`- ${p.player_name} (${p.position ?? "-"})`));
     }
     void navigator.clipboard?.writeText(lines.join("\n"));
+  }
+
+  function startMockDraft() {
+    if (!mockSetup) return;
+    setMockPicks([]);
+    setMockStarted(true);
+    runSimUntilUserPick([]);
+  }
+
+  function runSimUntilUserPick(currentPicks: MockDraftPick[]) {
+    if (!mockSetup) return;
+
+    const totalPicks = mockSetup.total_rosters * mockSetup.draft_rounds;
+    const pickedPlayers = currentPicks
+      .filter((p) => p.selected_player)
+      .map((p) => p.selected_player!);
+    const newPicks = [...currentPicks];
+    let nextPick = newPicks.length + 1;
+
+    while (nextPick <= totalPicks) {
+      const round = Math.ceil(nextPick / mockSetup.total_rosters);
+      const pickInRound = ((nextPick - 1) % mockSetup.total_rosters) + 1;
+      const teamIndex = pickInRound - 1;
+      const team = mockSetup.teams[teamIndex];
+      if (!team) break;
+
+      if (team.is_user) {
+        newPicks.push({
+          pick_number: nextPick,
+          round,
+          pick_in_round: pickInRound,
+          roster_id: team.roster_id,
+          display_name: team.display_name,
+          is_user: true,
+          selected_player: null,
+          selected_position: null,
+          is_auto: false,
+          reasoning: null,
+        });
+        setMockPicks(newPicks);
+        return;
+      }
+
+      const available = mockSetup.prospects.filter((p) => !pickedPlayers.includes(p.player_name));
+      if (available.length === 0) break;
+
+      const scored = available.map((p) => {
+        let score = Math.max(0, 150 - p.overall_rank);
+        const need = team.needs.find((n) => n.position === p.position);
+        if (need) {
+          score += need.urgency * 2;
+          if (need.grade === "hole") score += 50;
+          else if (need.grade === "weak") score += 25;
+        }
+        if (p.tier === "elite") score += 60;
+        else if (p.tier === "day1") score += 30;
+        if (mockSetup.league_mode === "sf" && p.position === "QB") score += 20;
+        return { prospect: p, score };
+      });
+      scored.sort((a, b) => b.score - a.score);
+      const pick = scored[0];
+      const need = team.needs.find((n) => n.position === pick.prospect.position);
+
+      newPicks.push({
+        pick_number: nextPick,
+        round,
+        pick_in_round: pickInRound,
+        roster_id: team.roster_id,
+        display_name: team.display_name,
+        is_user: false,
+        selected_player: pick.prospect.player_name,
+        selected_position: pick.prospect.position,
+        is_auto: true,
+        reasoning: need && (need.grade === "hole" || need.grade === "weak")
+          ? `Fills ${pick.prospect.position} need`
+          : "Best available",
+      });
+      pickedPlayers.push(pick.prospect.player_name);
+      nextPick++;
+    }
+
+    setMockPicks(newPicks);
+  }
+
+  function makeUserPick(playerName: string) {
+    if (!mockSetup) return;
+    const updated = mockPicks.map((p) => {
+      if (p.is_user && !p.selected_player) {
+        const prospect = mockSetup.prospects.find((pr) => pr.player_name === playerName);
+        return {
+          ...p,
+          selected_player: playerName,
+          selected_position: prospect?.position ?? null,
+          reasoning: "Your pick",
+        };
+      }
+      return p;
+    });
+    setMockPicks(updated);
+    setTimeout(() => runSimUntilUserPick(updated), 300);
   }
 
   const filtered = useMemo(() => {
@@ -243,6 +355,8 @@ export default function RookieDraft() {
             { key: "board" as const, label: "Big Board" },
             { key: "positional" as const, label: "By Position" },
             { key: "myboard" as const, label: "My Board" },
+            { key: "mock" as const, label: "Mock Draft" },
+            { key: "live" as const, label: "Live" },
           ]).map((m) => (
             <button
               key={m.key}
@@ -491,6 +605,35 @@ export default function RookieDraft() {
           onSetTier={setPlayerTier}
           onRemove={removeFromBoard}
           onExport={exportMyBoard}
+        />
+      )}
+
+      {viewMode === "mock" && (
+        <MockDraftView
+          leagues={leagues}
+          mockLeagueId={mockLeagueId}
+          setMockLeagueId={(id) => {
+            setMockLeagueId(id);
+            setMockStarted(false);
+            setMockPicks([]);
+          }}
+          mockSetup={mockSetup}
+          mockStarted={mockStarted}
+          onStart={startMockDraft}
+          mockPicks={mockPicks}
+          onUserPick={makeUserPick}
+          prospects={mockSetup?.prospects}
+        />
+      )}
+
+      {viewMode === "live" && (
+        <LiveDraftView
+          activeDrafts={activeDrafts}
+          liveDraftState={liveDraftState}
+          onSelectDraft={(draftId, leagueId) => {
+            setLiveDraftId(draftId);
+            setLiveLeagueId(leagueId);
+          }}
         />
       )}
 
@@ -1429,6 +1572,513 @@ function MyBoardView({
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function MockDraftView({
+  leagues,
+  mockLeagueId,
+  setMockLeagueId,
+  mockSetup,
+  mockStarted,
+  onStart,
+  mockPicks,
+  onUserPick,
+  prospects,
+}: {
+  leagues: LeaguePowerRanking[] | undefined;
+  mockLeagueId: string;
+  setMockLeagueId: (id: string) => void;
+  mockSetup: MockDraftSetup | undefined;
+  mockStarted: boolean;
+  onStart: () => void;
+  mockPicks: MockDraftPick[];
+  onUserPick: (name: string) => void;
+  prospects: MockDraftProspect[] | undefined;
+}) {
+  const pickedNames = new Set(mockPicks.filter((p) => p.selected_player).map((p) => p.selected_player!));
+  const userPending = mockPicks.find((p) => p.is_user && !p.selected_player);
+  const available = (prospects ?? []).filter((p) => !pickedNames.has(p.player_name));
+
+  return (
+    <div style={{ marginTop: 16 }}>
+      {!mockStarted && (
+        <div
+          style={{
+            background: "var(--card)",
+            border: "1px solid var(--border)",
+            borderRadius: 10,
+            padding: 16,
+            marginBottom: 16,
+          }}
+        >
+          <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)" }}>
+            SELECT LEAGUE
+          </label>
+          <select
+            value={mockLeagueId}
+            onChange={(e) => setMockLeagueId(e.target.value)}
+            style={{
+              display: "block",
+              width: "100%",
+              marginTop: 8,
+              padding: "10px 12px",
+              background: "var(--dark-base)",
+              border: "1px solid var(--border)",
+              borderRadius: 8,
+              color: "var(--text)",
+              fontSize: 14,
+              cursor: "pointer",
+            }}
+          >
+            <option value="">Choose a league...</option>
+            {leagues?.map((l) => (
+              <option key={l.league_id} value={l.league_id}>
+                {l.league_name} ({l.mode.toUpperCase()}, {l.rosters.length} teams)
+              </option>
+            ))}
+          </select>
+
+          {mockSetup && (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 8 }}>
+                {mockSetup.total_rosters} teams, {mockSetup.draft_rounds} rounds,{" "}
+                {mockSetup.league_mode.toUpperCase()}
+                {mockSetup.scoring_label && ` | ${mockSetup.scoring_label}`}
+              </div>
+              {mockSetup.teams.filter((t) => t.is_user).map((t) => (
+                <div
+                  key={t.roster_id}
+                  style={{ fontSize: 13, fontWeight: 600, color: "var(--amber)" }}
+                >
+                  You pick at position {t.draft_position} ({t.display_name})
+                </div>
+              ))}
+              <button
+                onClick={onStart}
+                style={{
+                  marginTop: 12,
+                  background: "var(--amber)",
+                  color: "var(--dark-base)",
+                  border: "none",
+                  borderRadius: 8,
+                  padding: "10px 24px",
+                  fontSize: 14,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                }}
+              >
+                Start Mock Draft
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {mockStarted && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: 16 }}>
+          <div
+            style={{
+              background: "var(--card)",
+              border: "1px solid var(--border)",
+              borderRadius: 10,
+              overflow: "hidden",
+            }}
+          >
+            {mockPicks.map((pick) => (
+              <div
+                key={pick.pick_number}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  padding: "8px 14px",
+                  borderBottom: "1px solid var(--border)",
+                  background: pick.is_user ? "rgba(245,158,11,0.08)" : "transparent",
+                  opacity: pick.selected_player ? 1 : 0.6,
+                }}
+              >
+                <span
+                  className="font-mono"
+                  style={{ width: 40, fontSize: 11, color: "var(--text-muted)", textAlign: "center" }}
+                >
+                  {pick.round}.{String(pick.pick_in_round).padStart(2, "0")}
+                </span>
+                <span
+                  style={{
+                    width: 120,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: pick.is_user ? "var(--amber)" : "var(--text)",
+                  }}
+                >
+                  {pick.display_name}
+                </span>
+                {pick.selected_player ? (
+                  <>
+                    <span
+                      style={{
+                        fontWeight: 700,
+                        fontSize: 13,
+                        color: posColor(pick.selected_position ?? ""),
+                      }}
+                    >
+                      {pick.selected_position}
+                    </span>
+                    <span style={{ flex: 1, fontSize: 13, fontWeight: 500 }}>{pick.selected_player}</span>
+                    {pick.reasoning && (
+                      <span style={{ fontSize: 10, color: "var(--text-dim)", fontStyle: "italic" }}>
+                        {pick.reasoning}
+                      </span>
+                    )}
+                  </>
+                ) : pick.is_user ? (
+                  <span style={{ flex: 1, fontSize: 13, color: "var(--amber)", fontWeight: 700 }}>
+                    YOUR PICK: Select from available players {"\u2192"}
+                  </span>
+                ) : (
+                  <span style={{ flex: 1, fontSize: 12, color: "var(--text-muted)" }}>
+                    Simulating...
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <div
+            style={{
+              background: "var(--card)",
+              border: "1px solid var(--border)",
+              borderRadius: 10,
+              overflow: "hidden",
+              maxHeight: 600,
+              overflowY: "auto",
+            }}
+          >
+            <div
+              style={{
+                padding: "10px 14px",
+                borderBottom: "1px solid var(--border)",
+                fontWeight: 700,
+                fontSize: 12,
+                color: "var(--text-muted)",
+              }}
+            >
+              {userPending ? "YOUR PICK: SELECT A PLAYER" : "BEST AVAILABLE"}
+            </div>
+            {available.slice(0, 20).map((p) => (
+              <button
+                key={p.player_name}
+                onClick={() => userPending && onUserPick(p.player_name)}
+                disabled={!userPending}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "8px 14px",
+                  borderBottom: "1px solid var(--border)",
+                  width: "100%",
+                  background: "none",
+                  border: "none",
+                  cursor: userPending ? "pointer" : "default",
+                  fontFamily: "inherit",
+                  color: "var(--text)",
+                  textAlign: "left",
+                  opacity: userPending ? 1 : 0.6,
+                }}
+              >
+                <span className="font-mono" style={{ fontSize: 10, color: "var(--text-muted)", width: 20 }}>
+                  {p.overall_rank}
+                </span>
+                <span style={{ fontWeight: 700, fontSize: 11, color: posColor(p.position), width: 24 }}>
+                  {p.position}
+                </span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600 }}>{p.player_name}</div>
+                  {p.school && <div style={{ fontSize: 10, color: "var(--text-muted)" }}>{p.school}</div>}
+                </div>
+                <span style={{ fontSize: 9, fontWeight: 700, color: "var(--text-dim)" }}>
+                  {p.tier.toUpperCase()}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LiveDraftView({
+  activeDrafts,
+  liveDraftState,
+  onSelectDraft,
+}: {
+  activeDrafts: ActiveDraftSummary[] | undefined;
+  liveDraftState: LiveDraftState | undefined;
+  onSelectDraft: (draftId: string, leagueId: string) => void;
+}) {
+  if (!activeDrafts || activeDrafts.length === 0) {
+    return (
+      <div
+        style={{
+          background: "var(--card)",
+          border: "1px solid var(--border)",
+          borderRadius: 10,
+          padding: "48px 24px",
+          marginTop: 16,
+          textAlign: "center",
+          color: "var(--text-muted)",
+          fontSize: 13,
+        }}
+      >
+        No active 2026 rookie drafts found. Drafts will appear here when they start on Sleeper.
+      </div>
+    );
+  }
+
+  if (!liveDraftState) {
+    return (
+      <div style={{ marginTop: 16 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>Active Drafts</div>
+        {activeDrafts.map((d) => (
+          <button
+            key={d.draft_id}
+            onClick={() => onSelectDraft(d.draft_id, d.league_id)}
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              background: "var(--card)",
+              border: "1px solid var(--border)",
+              borderRadius: 10,
+              padding: "14px 18px",
+              marginBottom: 8,
+              width: "100%",
+              cursor: "pointer",
+              fontFamily: "inherit",
+              color: "var(--text)",
+            }}
+          >
+            <div style={{ textAlign: "left" }}>
+              <div style={{ fontSize: 14, fontWeight: 700 }}>{d.league_name}</div>
+              <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                {d.status === "drafting" ? `${d.picks_made}/${d.total_picks} picks made` : "Pre-draft"}
+              </div>
+            </div>
+            <span
+              style={{
+                padding: "4px 10px",
+                borderRadius: 6,
+                fontSize: 11,
+                fontWeight: 700,
+                background:
+                  d.status === "drafting" ? "rgba(34,197,94,0.15)" : "rgba(245,158,11,0.15)",
+                color: d.status === "drafting" ? "var(--green)" : "var(--amber)",
+              }}
+            >
+              {d.status === "drafting" ? "LIVE" : "PRE-DRAFT"}
+            </span>
+          </button>
+        ))}
+      </div>
+    );
+  }
+
+  const ds = liveDraftState;
+  return (
+    <div style={{ marginTop: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+        <div>
+          <span style={{ fontSize: 16, fontWeight: 800 }}>{ds.league_name}</span>
+          <span style={{ fontSize: 12, color: "var(--text-muted)", marginLeft: 8 }}>
+            Pick {ds.current_pick} of {ds.total_rosters * ds.total_rounds}
+          </span>
+        </div>
+        <span
+          style={{
+            padding: "4px 12px",
+            borderRadius: 6,
+            fontSize: 12,
+            fontWeight: 700,
+            background: "rgba(34,197,94,0.15)",
+            color: "var(--green)",
+          }}
+        >
+          LIVE (refreshes every 15s)
+        </span>
+      </div>
+
+      {ds.on_the_clock && (
+        <div
+          style={{
+            background: ds.on_the_clock.is_user ? "rgba(245,158,11,0.1)" : "var(--card)",
+            border: ds.on_the_clock.is_user ? "2px solid var(--amber)" : "1px solid var(--border)",
+            borderRadius: 10,
+            padding: "14px 18px",
+            marginBottom: 16,
+          }}
+        >
+          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-muted)", letterSpacing: 0.5 }}>
+            ON THE CLOCK
+          </div>
+          <div
+            style={{
+              fontSize: 18,
+              fontWeight: 800,
+              color: ds.on_the_clock.is_user ? "var(--amber)" : "var(--text)",
+              marginTop: 4,
+            }}
+          >
+            {ds.on_the_clock.display_name}
+            {ds.on_the_clock.is_user && " (YOU)"}
+          </div>
+          {ds.on_the_clock.needs.length > 0 && (
+            <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+              {ds.on_the_clock.needs.map((n) => (
+                <span
+                  key={n.position}
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    padding: "2px 6px",
+                    borderRadius: 3,
+                    background:
+                      n.grade === "hole" ? "rgba(239,68,68,0.15)" : "rgba(245,158,11,0.15)",
+                    color: n.grade === "hole" ? "#fca5a5" : "var(--amber)",
+                  }}
+                >
+                  {n.position} {n.grade.toUpperCase()}
+                </span>
+              ))}
+            </div>
+          )}
+          {ds.user_recommendation && (
+            <div
+              style={{
+                marginTop: 8,
+                padding: "8px 12px",
+                background: "rgba(245,158,11,0.08)",
+                borderRadius: 8,
+                fontSize: 12,
+                color: "var(--amber)",
+                fontWeight: 600,
+              }}
+            >
+              {ds.user_recommendation}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: 16 }}>
+        <div
+          style={{
+            background: "var(--card)",
+            border: "1px solid var(--border)",
+            borderRadius: 10,
+            overflow: "hidden",
+            maxHeight: 500,
+            overflowY: "auto",
+          }}
+        >
+          <div
+            style={{
+              padding: "10px 14px",
+              borderBottom: "1px solid var(--border)",
+              fontWeight: 700,
+              fontSize: 12,
+              color: "var(--text-muted)",
+            }}
+          >
+            PICKS MADE ({ds.picks_made.length})
+          </div>
+          {ds.picks_made.length === 0 ? (
+            <div style={{ padding: 20, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>
+              No picks yet. Waiting for draft to begin...
+            </div>
+          ) : (
+            [...ds.picks_made].reverse().map((pick) => (
+              <div
+                key={pick.pick_number}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  padding: "8px 14px",
+                  borderBottom: "1px solid var(--border)",
+                  background: pick.is_user_pick ? "rgba(245,158,11,0.08)" : "transparent",
+                }}
+              >
+                <span className="font-mono" style={{ width: 40, fontSize: 11, color: "var(--text-muted)" }}>
+                  {pick.round}.{String(pick.pick_in_round).padStart(2, "0")}
+                </span>
+                <span
+                  style={{
+                    width: 100,
+                    fontSize: 11,
+                    color: pick.is_user_pick ? "var(--amber)" : "var(--text-muted)",
+                  }}
+                >
+                  {pick.display_name}
+                </span>
+                <span style={{ fontWeight: 700, fontSize: 11, color: posColor(pick.position ?? "") }}>
+                  {pick.position}
+                </span>
+                <span style={{ flex: 1, fontSize: 13, fontWeight: 600 }}>{pick.player_name}</span>
+              </div>
+            ))
+          )}
+        </div>
+
+        <div
+          style={{
+            background: "var(--card)",
+            border: "1px solid var(--border)",
+            borderRadius: 10,
+            overflow: "hidden",
+            maxHeight: 500,
+            overflowY: "auto",
+          }}
+        >
+          <div
+            style={{
+              padding: "10px 14px",
+              borderBottom: "1px solid var(--border)",
+              fontWeight: 700,
+              fontSize: 12,
+              color: "var(--text-muted)",
+            }}
+          >
+            BEST AVAILABLE
+          </div>
+          {ds.best_available.map((p) => (
+            <div
+              key={p.player_name}
+              style={{
+                padding: "8px 14px",
+                borderBottom: "1px solid var(--border)",
+                background: p.fit_for_user ? "rgba(34,197,94,0.06)" : "transparent",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontWeight: 700, fontSize: 11, color: posColor(p.position) }}>{p.position}</span>
+                <span style={{ fontSize: 12, fontWeight: 600, flex: 1 }}>{p.player_name}</span>
+                <span style={{ fontSize: 9, fontWeight: 700, color: "var(--text-dim)" }}>
+                  {p.tier.toUpperCase()}
+                </span>
+              </div>
+              {p.fit_for_user && (
+                <div style={{ fontSize: 10, color: "var(--green)", fontWeight: 600, marginTop: 2 }}>
+                  {p.fit_for_user}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

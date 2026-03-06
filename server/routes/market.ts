@@ -6,6 +6,8 @@ import {
   getSignals,
 } from "../services/market.js";
 import { getRookieDraftContext } from "../services/rookie-draft-context.js";
+import { getMockDraftSetup } from "../services/mock-draft.js";
+import { getActiveDrafts, getLiveDraftState } from "../services/live-draft.js";
 
 const router = Router();
 
@@ -63,6 +65,43 @@ router.get("/api/rookie-draft/context/:username", async (req, res) => {
     res.json(data);
   } catch (err) {
     console.error("[rookie-draft] Context error:", err);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+/** GET /api/rookie-draft/mock-setup/:username/:leagueId */
+router.get("/api/rookie-draft/mock-setup/:username/:leagueId", async (req, res) => {
+  try {
+    const { username, leagueId } = req.params;
+    const data = await getMockDraftSetup(username, leagueId);
+    if (!data) return res.status(404).json({ message: "League not found" });
+    res.json(data);
+  } catch (err) {
+    console.error("[mock-draft] Setup error:", err);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+/** GET /api/rookie-draft/active-drafts/:username */
+router.get("/api/rookie-draft/active-drafts/:username", async (req, res) => {
+  try {
+    const data = await getActiveDrafts(req.params.username);
+    res.json(data);
+  } catch (err) {
+    console.error("[live-draft] Active drafts error:", err);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+/** GET /api/rookie-draft/live/:username/:draftId/:leagueId */
+router.get("/api/rookie-draft/live/:username/:draftId/:leagueId", async (req, res) => {
+  try {
+    const { username, draftId, leagueId } = req.params;
+    const data = await getLiveDraftState(username, draftId, leagueId);
+    if (!data) return res.status(404).json({ message: "Draft not found" });
+    res.json(data);
+  } catch (err) {
+    console.error("[live-draft] State error:", err);
     res.status(500).json({ message: "Internal server error" });
   }
 });
