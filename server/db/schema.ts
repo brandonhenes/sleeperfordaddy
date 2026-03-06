@@ -243,6 +243,53 @@ export const players_master = pgTable("players_master", {
   updated_at: bigint("updated_at", { mode: "number" }).notNull(),
 });
 
+export const player_id_crosswalk = pgTable(
+  "player_id_crosswalk",
+  {
+    sleeper_id: text("sleeper_id").primaryKey(),
+    name: text("name"),
+    position: text("position"),
+    team: text("team"),
+    mfl_id: text("mfl_id"),
+    ktc_id: text("ktc_id"),
+    fantasypros_id: text("fantasypros_id"),
+    espn_id: text("espn_id"),
+    yahoo_id: text("yahoo_id"),
+    gsis_id: text("gsis_id"),
+    updated_at: text("updated_at"),
+  },
+  (table) => [
+    index("idx_crosswalk_mfl").on(table.mfl_id),
+    index("idx_crosswalk_ktc").on(table.ktc_id),
+    index("idx_crosswalk_gsis").on(table.gsis_id),
+  ]
+);
+
+export const player_seasonal_stats = pgTable(
+  "player_seasonal_stats",
+  {
+    sleeper_id: text("sleeper_id").notNull(),
+    season: integer("season").notNull(),
+    games_played: integer("games_played").default(0),
+    receptions_pg: real("receptions_pg").default(0),
+    targets_pg: real("targets_pg").default(0),
+    carries_pg: real("carries_pg").default(0),
+    passing_tds_pg: real("passing_tds_pg").default(0),
+    rushing_tds_pg: real("rushing_tds_pg").default(0),
+    receiving_tds_pg: real("receiving_tds_pg").default(0),
+    passing_yds_pg: real("passing_yds_pg").default(0),
+    rushing_yds_pg: real("rushing_yds_pg").default(0),
+    receiving_yds_pg: real("receiving_yds_pg").default(0),
+    passing_attempts_pg: real("passing_attempts_pg").default(0),
+    total_receptions: integer("total_receptions").default(0),
+    total_carries: integer("total_carries").default(0),
+    total_passing_tds: integer("total_passing_tds").default(0),
+    total_rushing_tds: integer("total_rushing_tds").default(0),
+    total_receiving_tds: integer("total_receiving_tds").default(0),
+  },
+  (table) => [index("idx_seasonal_stats_season").on(table.season)]
+);
+
 // ─── Exposure ───
 
 export const user_exposure_summary = pgTable(

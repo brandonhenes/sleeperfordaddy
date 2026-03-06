@@ -7,6 +7,7 @@ interface EvaluateTradeInput {
   sideA: TradeAssetInput[];
   sideB: TradeAssetInput[];
   mode?: "sf" | "1qb";
+  leagueId?: string;
 }
 
 export function useEvaluateTrade() {

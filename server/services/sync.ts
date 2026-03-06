@@ -30,6 +30,7 @@ import { buildLeagueGroups } from "./league-groups.js";
 import { seedInjuryBaselines } from "../db/seeds/injury-baselines.js";
 import { capturePlayerValueSnapshots } from "./value-snapshots.js";
 import { captureTeamValueSnapshots } from "./team-snapshots.js";
+import { syncNflverseStats } from "./sync-nflverse-stats.js";
 import { clearDynastyLeagueCache, isDynastyLeagueFromSleeperSettings } from "./dynasty-leagues.js";
 import { clearPowerRankingsCache } from "./power-rankings.js";
 import { clearGlobalScaleCache } from "./composite-values.js";
@@ -251,6 +252,11 @@ async function runSync(jobId: string, username: string) {
       } catch (err) {
         console.error("[sync] Error seeding injury baselines:", err);
       }
+      try {
+        await syncNflverseStats();
+      } catch (err) {
+        console.error("[sync] Error syncing nflverse stats:", err);
+      }
     } catch (err) {
       console.error("[sync] Error syncing players:", err);
       // Non-fatal, continue
@@ -362,7 +368,7 @@ async function processLeague(league: SleeperLeague, userId: string) {
     });
   }
 
-  // Fetch and store rosters — collect ALL data first, then batch write
+  // Fetch and store rosters - collect ALL data first, then batch write
   const rosterList = await getLeagueRosters(league.league_id);
   const allPlayers: { owner_id: string; player_id: string }[] = [];
 

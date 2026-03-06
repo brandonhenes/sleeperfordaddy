@@ -47,6 +47,8 @@ function assetFromPlayer(a: CoreAsset): TradePackageAsset {
     fc_score: a.fc_score,
     ktc_score: a.ktc_score,
     dp_score: a.dp_score,
+    league_adjusted_score: null,
+    scoring_delta_ppg: null,
     source_agreement: a.source_agreement,
   };
 }
@@ -60,6 +62,8 @@ function assetFromPick(p: ScoredPick): TradePackageAsset {
     fc_score: null,
     ktc_score: p.ktc_score,
     dp_score: p.dp_score,
+    league_adjusted_score: null,
+    scoring_delta_ppg: null,
     source_agreement: "high",
   };
 }

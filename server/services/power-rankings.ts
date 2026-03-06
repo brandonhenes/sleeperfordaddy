@@ -12,6 +12,7 @@ import {
 } from "./draft-picks.js";
 import { optimizeLineup, type OptimizedLineup } from "./lineup-optimizer.js";
 import { getDynastyLeagueIdsForUserLatestSeason } from "./dynasty-leagues.js";
+import { parseLeagueScoring, scoringLabel } from "./scoring-adjustment.js";
 
 const prCache = new Map<string, { data: LeaguePowerRanking[]; expires: number }>();
 const PR_TTL_MS = 5 * 60 * 1000;
@@ -73,6 +74,7 @@ export interface LeaguePowerRanking {
   league_name: string;
   mode: "sf" | "1qb";
   draft_data_available: boolean;
+  scoring_label: string;
   rosters: RosterRanking[];
 }
 
@@ -261,7 +263,7 @@ export async function getPowerRankings(username: string): Promise<LeaguePowerRan
     const rPower = new Map<number, number>();
     for (const r of initSV) rPower.set(ridMap.get(`${lid}:${r.oid}`) ?? 0, percentileRank(allInit, r.sv));
 
-    // Step 3: Draft picks — tiers, values, combined scoring
+    // Step 3: Draft picks - tiers, values, combined scoring
     const rosterDraftOrder = draftOrderMap.get(lid);
 
     const tiered = estimatePickTiers(dpMap.get(lid) ?? [], rPower, rosterDraftOrder);
@@ -353,7 +355,7 @@ export async function getPowerRankings(username: string): Promise<LeaguePowerRan
     });
 
     rosters.sort((a, b) => b.power_pct - a.power_pct);
-    results.push({ league_id: lid, league_name: league.league_name, mode, draft_data_available: (dpMap.get(lid) ?? []).length > 0, rosters });
+    results.push({ league_id: lid, league_name: league.league_name, mode, draft_data_available: (dpMap.get(lid) ?? []).length > 0, scoring_label: "", rosters });
   }
 
   results.sort((a, b) => a.league_name.localeCompare(b.league_name));
@@ -491,7 +493,7 @@ async function getPowerRankingsDbOnly(
 
   const leagueRows = await db.execute(sql`
     SELECT league_id, name AS league_name, total_rosters,
-           roster_positions, draft_rounds
+           roster_positions, draft_rounds, scoring_settings
     FROM leagues
     WHERE league_id IN (${leagueInClause})
     ORDER BY name ASC
@@ -502,6 +504,7 @@ async function getPowerRankingsDbOnly(
     total_rosters: number;
     roster_positions: string[] | null;
     draft_rounds: number | null;
+    scoring_settings: Record<string, unknown> | null;
   };
   const leagues = leagueRows as unknown as LeagueRow[];
   if (leagues.length === 0) return [];
@@ -607,6 +610,8 @@ async function getPowerRankingsDbOnly(
 
   for (const ctx of leagueContexts) {
     const { league, lid, rosterPositions, slots, mode, owners, picks, playerIds } = ctx;
+    const leagueScoring = parseLeagueScoring(league.scoring_settings as Record<string, unknown> | null);
+    const sLabel = scoringLabel(leagueScoring);
     const baseComp = baseCompByMode.get(mode) ?? new Map<string, any>();
     const compMap = new Map<string, any>();
     for (const pid of playerIds) {
@@ -743,6 +748,7 @@ async function getPowerRankingsDbOnly(
       league_name: league.league_name,
       mode,
       draft_data_available: picks.length > 0,
+      scoring_label: sLabel,
       rosters,
     });
   }

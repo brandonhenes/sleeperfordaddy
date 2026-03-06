@@ -3,12 +3,23 @@ import type {
   TradePackage,
   TradePackageAsset,
 } from "../../shared/types.js";
+import { db } from "../db/connection.js";
+import { sql } from "drizzle-orm";
 import {
   getPowerRankings,
   type RosterRanking,
   type CoreAsset,
 } from "./power-rankings.js";
 import type { ScoredPick } from "./draft-picks.js";
+import {
+  parseLeagueScoring,
+  loadPlayerUsageStats,
+  computeScoringDelta,
+  computeAdjustedEdgeScore,
+  estimateBaselineFPPG,
+  isNonStandardScoring,
+  type LeagueScoringSettings,
+} from "./scoring-adjustment.js";
 
 // Constants
 
@@ -67,8 +78,29 @@ function assetFromPlayer(a: CoreAsset): TradePackageAsset {
     fc_score: a.fc_score,
     ktc_score: a.ktc_score,
     dp_score: a.dp_score,
+    league_adjusted_score: null,
+    scoring_delta_ppg: null,
     source_agreement: a.source_agreement,
   };
+}
+
+type UsageStats = Awaited<ReturnType<typeof loadPlayerUsageStats>>;
+
+function assetFromPlayerWithScoring(
+  a: CoreAsset,
+  scoring: LeagueScoringSettings,
+  usage: UsageStats,
+  hasCustom: boolean
+): TradePackageAsset {
+  const base = assetFromPlayer(a);
+  if (!hasCustom) return base;
+  const u = usage.get(a.player_id);
+  if (!u) return base;
+  const { delta_ppg } = computeScoringDelta(u, a.position, scoring);
+  const baselineFPPG = estimateBaselineFPPG(u, a.position);
+  base.league_adjusted_score = computeAdjustedEdgeScore(a.edge_score, delta_ppg, baselineFPPG);
+  base.scoring_delta_ppg = delta_ppg;
+  return base;
 }
 
 function assetFromPick(p: ScoredPick): TradePackageAsset {
@@ -80,6 +112,8 @@ function assetFromPick(p: ScoredPick): TradePackageAsset {
     fc_score: null,
     ktc_score: p.ktc_score,
     dp_score: p.dp_score,
+    league_adjusted_score: null,
+    scoring_delta_ppg: null,
     source_agreement: "high",
   };
 }
@@ -209,7 +243,10 @@ function scoreCompatibility(
 function generatePackages(
   user: RosterProfile,
   opp: RosterProfile,
-  _mode: "sf" | "1qb"
+  _mode: "sf" | "1qb",
+  scoring: LeagueScoringSettings,
+  usage: UsageStats,
+  hasCustom: boolean
 ): TradePackage[] {
   const packages: TradePackage[] = [];
 
@@ -229,8 +266,8 @@ function generatePackages(
       const f = fairness(delta);
       if (f === "lopsided") continue;
 
-      const send = [assetFromPlayer(userGives)];
-      const receive = [assetFromPlayer(oppGives)];
+      const send = [assetFromPlayerWithScoring(userGives, scoring, usage, hasCustom)];
+      const receive = [assetFromPlayerWithScoring(oppGives, scoring, usage, hasCustom)];
 
       packages.push({
         type: "balanced",
@@ -284,8 +321,8 @@ function generatePackages(
 
     if (sendAssets.length < 2) continue;
 
-    const send = sendAssets.map(assetFromPlayer);
-    const receive = [assetFromPlayer(target)];
+    const send = sendAssets.map((a) => assetFromPlayerWithScoring(a, scoring, usage, hasCustom));
+    const receive = [assetFromPlayerWithScoring(target, scoring, usage, hasCustom)];
     const delta = totalEdge(receive) - totalEdge(send);
     const f = fairness(delta);
     if (f === "lopsided" && delta < -FAIRNESS_BAND) continue;
@@ -336,7 +373,7 @@ function generatePackages(
               (a) => a.edge_score >= 40 && a.edge_score <= gap + 5
             );
             if (depth && depth.length > 0) {
-              send.push(assetFromPlayer(depth[0]));
+              send.push(assetFromPlayerWithScoring(depth[0], scoring, usage, hasCustom));
               sendVal += depth[0].edge_score;
               break;
             }
@@ -344,7 +381,7 @@ function generatePackages(
         }
       }
 
-      const receive = [assetFromPlayer(target)];
+      const receive = [assetFromPlayerWithScoring(target, scoring, usage, hasCustom)];
       const delta = totalEdge(receive) - totalEdge(send);
       const f = fairness(delta);
       if (f === "lopsided" && delta < -FAIRNESS_BAND) continue;
@@ -404,6 +441,19 @@ export async function findTrades(
   const league = allLeagues.find((l) => l.league_id === leagueId);
   if (!league || league.rosters.length < 2) return [];
 
+  const leagueRow = await db.execute(sql`
+    SELECT scoring_settings FROM leagues WHERE league_id = ${leagueId} LIMIT 1
+  `);
+  const leagueScoring = parseLeagueScoring(
+    (leagueRow as unknown as { scoring_settings: Record<string, unknown> | null }[])[0]?.scoring_settings ?? null
+  );
+  const hasCustomScoring = isNonStandardScoring(leagueScoring);
+  let usageMap: UsageStats = new Map();
+  if (hasCustomScoring) {
+    const allPlayerIds = league.rosters.flatMap((r) => r.core_assets.map((a) => a.player_id));
+    usageMap = await loadPlayerUsageStats([...new Set(allPlayerIds)]);
+  }
+
   const mode = league.mode;
   const medians = computeLeagueMedians(league.rosters);
   const profiles = league.rosters.map((r) => buildProfile(r, medians));
@@ -425,7 +475,7 @@ export async function findTrades(
   const suggestions: TradeSuggestion[] = [];
 
   for (const { opp, score, reason } of ranked) {
-    const packages = generatePackages(userProfile, opp, mode);
+    const packages = generatePackages(userProfile, opp, mode, leagueScoring, usageMap, hasCustomScoring);
     if (packages.length === 0) continue;
 
     suggestions.push({

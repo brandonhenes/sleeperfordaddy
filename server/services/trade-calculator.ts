@@ -4,6 +4,13 @@ import type { EvaluatedAsset, TradeAssetInput, TradeEvaluation } from "../../sha
 import type { SourceWeights } from "./edge-score.js";
 import { getCompositeValues, getGlobalScaleParams } from "./composite-values.js";
 import { computeEdgeScores } from "./edge-score.js";
+import {
+  parseLeagueScoring,
+  loadPlayerUsageStats,
+  computeScoringDelta,
+  computeAdjustedEdgeScore,
+  estimateBaselineFPPG,
+} from "./scoring-adjustment.js";
 
 const ROUND_NAMES: Record<number, string> = {
   1: "1st",
@@ -96,6 +103,8 @@ async function loadPickValueMaps(mode: "sf" | "1qb"): Promise<{
 }
 
 type RawEval = {
+  player_id: string | null;
+  position: string | null;
   label: string;
   fc_value: number | null;
   ktc_value: number | null;
@@ -135,6 +144,8 @@ async function evaluateAssets(
       const comp = compMap.get(asset.player_id);
       const meta = names.get(asset.player_id);
       return {
+        player_id: asset.player_id,
+        position: meta?.position ?? null,
         label: meta ? `${meta.full_name} (${meta.position})` : `Player ${asset.player_id}`,
         fc_value: comp?.fc_value ?? null,
         ktc_value: comp?.ktc_value ?? null,
@@ -157,6 +168,8 @@ async function evaluateAssets(
       null;
 
     return {
+      player_id: null,
+      position: null,
       label,
       fc_value: null,
       ktc_value: ktcValue,
@@ -167,11 +180,15 @@ async function evaluateAssets(
 
 function toEvaluatedAsset(raw: RawEval, edge: { score: number; fc_score: number | null; ktc_score: number | null; dp_score: number | null }): EvaluatedAsset {
   return {
+    player_id: raw.player_id,
+    position: raw.position,
     label: raw.label,
     edge_score: edge.score,
     fc_score: edge.fc_score,
     ktc_score: edge.ktc_score,
     dp_score: edge.dp_score,
+    league_adjusted_score: null,
+    scoring_delta_ppg: null,
     source_agreement: agreementFromScores([edge.fc_score, edge.ktc_score, edge.dp_score]),
   };
 }
@@ -180,7 +197,8 @@ export async function evaluateTrade(
   sideA: TradeAssetInput[],
   sideB: TradeAssetInput[],
   mode: "sf" | "1qb",
-  weights?: SourceWeights
+  weights?: SourceWeights,
+  leagueId?: string
 ): Promise<TradeEvaluation> {
   const [rawA, rawB, globalScale] = await Promise.all([
     evaluateAssets(sideA, mode),
@@ -211,6 +229,28 @@ export async function evaluateTrade(
   const totalA = Math.round(evalA.reduce((s, a) => s + a.edge_score, 0) * 10) / 10;
   const totalB = Math.round(evalB.reduce((s, a) => s + a.edge_score, 0) * 10) / 10;
   const delta = Math.round((totalA - totalB) * 10) / 10;
+
+  if (leagueId) {
+    const leagueRow = await db.execute(sql`
+      SELECT scoring_settings FROM leagues WHERE league_id = ${leagueId} LIMIT 1
+    `);
+    const settings = parseLeagueScoring(
+      (leagueRow as unknown as { scoring_settings: Record<string, unknown> | null }[])[0]?.scoring_settings ?? null
+    );
+
+    const allPlayerIds = [...new Set([...evalA, ...evalB].map((a) => a.player_id).filter((id): id is string => !!id))];
+    const usageMap = await loadPlayerUsageStats(allPlayerIds);
+
+    for (const asset of [...evalA, ...evalB]) {
+      if (!asset.player_id || !asset.position) continue;
+      const usage = usageMap.get(asset.player_id);
+      if (!usage) continue;
+      const { delta_ppg } = computeScoringDelta(usage, asset.position, settings);
+      const baselineFPPG = estimateBaselineFPPG(usage, asset.position);
+      asset.league_adjusted_score = computeAdjustedEdgeScore(asset.edge_score, delta_ppg, baselineFPPG);
+      asset.scoring_delta_ppg = delta_ppg;
+    }
+  }
 
   return {
     sideA: { assets: evalA, total_edge: totalA },

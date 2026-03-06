@@ -35,8 +35,10 @@ function fairnessLabel(fairness: string): string {
 }
 
 function AssetRow({ asset }: { asset: TradePackageAsset }) {
+  const adjustedDiff =
+    asset.league_adjusted_score != null ? asset.league_adjusted_score - asset.edge_score : 0;
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: "1px solid var(--border)", fontSize: 13 }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: "1px solid var(--border)", fontSize: 13, flexWrap: "wrap" }}>
       <span
         style={{
           display: "inline-block",
@@ -55,6 +57,20 @@ function AssetRow({ asset }: { asset: TradePackageAsset }) {
       {asset.asset_type === "pick" && <span style={{ color: "#06b6d4", fontWeight: 700, fontSize: 10 }}>PICK</span>}
       {asset.position && <span style={{ color: posColor(asset.position), fontWeight: 700, fontSize: 10 }}>{asset.position}</span>}
       <PlayerLink name={asset.label} style={{ flex: 1, fontWeight: 500 }} />
+      {asset.league_adjusted_score != null && Math.abs(adjustedDiff) >= 1 && (
+        <span
+          style={{
+            fontSize: 10,
+            color: adjustedDiff > 0 ? "var(--green)" : "var(--red)",
+            fontWeight: 600,
+            width: "100%",
+            paddingLeft: 36,
+          }}
+        >
+          {adjustedDiff > 0 ? "+" : ""}
+          {Math.round(adjustedDiff)} in this league
+        </span>
+      )}
     </div>
   );
 }
@@ -389,7 +405,7 @@ export default function TradeFinder() {
             ) : (
               <select value={selectedLeague} onChange={(e) => setSelectedLeague(e.target.value)} style={{ display: "block", width: "100%", marginTop: 8, padding: "10px 12px", background: "var(--dark-base)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text)", fontSize: 14, cursor: "pointer" }}>
                 <option value="">Choose a league...</option>
-                {leagues?.map((league) => <option key={league.league_id} value={league.league_id}>{league.league_name} ({league.mode.toUpperCase()}, {league.rosters.length} teams)</option>)}
+                {leagues?.map((league) => <option key={league.league_id} value={league.league_id}>{league.league_name} ({league.mode.toUpperCase()}{league.scoring_label ? ` · ${league.scoring_label}` : ""})</option>)}
               </select>
             )}
           </div>

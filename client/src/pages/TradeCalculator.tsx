@@ -5,6 +5,7 @@ import EdgeScoreBadge from "../components/EdgeScoreBadge";
 import ShareButton from "../components/ShareButton";
 import { posColor } from "../lib/position-colors";
 import { useEvaluateTrade } from "../hooks/use-trade-calculator";
+import { usePowerRankings } from "../hooks/use-power-rankings";
 import { apiFetch } from "../lib/api";
 import type { TradeAssetInput, EvaluatedAsset, TradeEvaluation } from "../../../shared/types";
 
@@ -97,6 +98,8 @@ function ScoreCell({ label, value }: { label: string; value: number | null }) {
 
 function AssetRow({ asset }: { asset: EvaluatedAsset }) {
   const outlier = sourceOutlier(asset);
+  const adjustedDiff =
+    asset.league_adjusted_score != null ? asset.league_adjusted_score - asset.edge_score : 0;
   return (
     <div
       style={{
@@ -128,6 +131,21 @@ function AssetRow({ asset }: { asset: EvaluatedAsset }) {
           {agreementLabel(asset.source_agreement)}
         </span>
       </div>
+      {asset.league_adjusted_score != null && Math.abs(adjustedDiff) >= 1 && (
+        <span
+          style={{
+            fontSize: 10,
+            color: adjustedDiff > 0 ? "var(--green)" : "var(--red)",
+            fontWeight: 600,
+            width: "100%",
+            paddingLeft: 36,
+          }}
+        >
+          {Math.round(asset.league_adjusted_score)} in this league ({adjustedDiff > 0 ? "+" : ""}
+          {adjustedDiff.toFixed(1)})
+          {asset.scoring_delta_ppg != null ? ` · ${asset.scoring_delta_ppg > 0 ? "+" : ""}${asset.scoring_delta_ppg.toFixed(2)} ppg` : ""}
+        </span>
+      )}
       {outlier && (
         <span style={{ fontSize: 10, color: "var(--text-muted)", fontStyle: "italic", width: "100%", paddingLeft: 36 }}>
           {outlier}
@@ -215,6 +233,7 @@ function SideAsset({
 
 export default function TradeCalculator() {
   const [mode, setMode] = useState<"sf" | "1qb">("sf");
+  const [selectedLeague, setSelectedLeague] = useState("");
   const [sideA, setSideA] = useState<TradeAssetInput[]>([]);
   const [sideB, setSideB] = useState<TradeAssetInput[]>([]);
   const [labelsA, setLabelsA] = useState<string[]>([]);
@@ -227,6 +246,8 @@ export default function TradeCalculator() {
   const [pickTier, setPickTier] = useState<"early" | "mid" | "late">("mid");
 
   const evalMutation = useEvaluateTrade();
+  const storedUsername = typeof window !== "undefined" ? localStorage.getItem("edge_username") ?? "" : "";
+  const { data: leagues = [] } = usePowerRankings(storedUsername);
 
   const { data: searchResults = [], isLoading: searchLoading } = useQuery<SearchAsset[]>({
     queryKey: ["trade-asset-search", search],
@@ -285,7 +306,7 @@ export default function TradeCalculator() {
 
   function evaluate() {
     if (!hasBothSides) return;
-    evalMutation.mutate({ sideA, sideB, mode });
+    evalMutation.mutate({ sideA, sideB, mode, leagueId: selectedLeague || undefined });
   }
 
   const result = evalMutation.data;
@@ -322,6 +343,15 @@ export default function TradeCalculator() {
 
       {/* Mode selector */}
       <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 8 }}>
+        <label style={{ fontSize: 12, color: "var(--text-muted)" }}>League</label>
+        <select value={selectedLeague} onChange={(e) => setSelectedLeague(e.target.value)} style={selectStyle}>
+          <option value="">No league context</option>
+          {leagues.map((l) => (
+            <option key={l.league_id} value={l.league_id}>
+              {l.league_name} ({l.mode.toUpperCase()}{l.scoring_label ? ` · ${l.scoring_label}` : ""})
+            </option>
+          ))}
+        </select>
         <label style={{ fontSize: 12, color: "var(--text-muted)" }}>Mode</label>
         <select value={mode} onChange={(e) => setMode(e.target.value as "sf" | "1qb")} style={selectStyle}>
           <option value="sf">Superflex</option>
@@ -459,7 +489,7 @@ export default function TradeCalculator() {
           </h2>
           {sideA.length === 0 && (
             <div style={{ fontSize: 13, color: "var(--text-muted)", padding: "12px 0" }}>
-              No assets yet — search above to add players
+              No assets yet - search above to add players
             </div>
           )}
           {sideA.map((a, i) => (
@@ -474,7 +504,7 @@ export default function TradeCalculator() {
           </h2>
           {sideB.length === 0 && (
             <div style={{ fontSize: 13, color: "var(--text-muted)", padding: "12px 0" }}>
-              No assets yet — search above to add players
+              No assets yet - search above to add players
             </div>
           )}
           {sideB.map((a, i) => (
@@ -546,7 +576,7 @@ export default function TradeCalculator() {
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 20 }}>
               <div>
                 <div style={{ fontSize: 12, fontWeight: 700, color: "#3b82f6", marginBottom: 6 }}>
-                  SIDE A — {result.sideA.total_edge.toFixed(1)} total
+                  SIDE A - {result.sideA.total_edge.toFixed(1)} total
                 </div>
                 <div style={{ border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden" }}>
                   {result.sideA.assets.map((a, i) => (
@@ -556,7 +586,7 @@ export default function TradeCalculator() {
               </div>
               <div>
                 <div style={{ fontSize: 12, fontWeight: 700, color: "#8b5cf6", marginBottom: 6 }}>
-                  SIDE B — {result.sideB.total_edge.toFixed(1)} total
+                  SIDE B - {result.sideB.total_edge.toFixed(1)} total
                 </div>
                 <div style={{ border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden" }}>
                   {result.sideB.assets.map((a, i) => (

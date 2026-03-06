@@ -21,16 +21,17 @@ router.get("/api/trade/assets", async (req, res) => {
 /** POST /api/trade/evaluate */
 router.post("/api/trade/evaluate", async (req, res) => {
   try {
-    const { sideA, sideB, mode } = req.body as {
+    const { sideA, sideB, mode, leagueId } = req.body as {
       sideA: TradeAssetInput[];
       sideB: TradeAssetInput[];
       mode?: "sf" | "1qb";
+      leagueId?: string;
     };
     if (!sideA?.length || !sideB?.length) {
       return res.status(400).json({ message: "sideA and sideB are required" });
     }
     const weights = parseWeights(req);
-    const data = await evaluateTrade(sideA, sideB, mode ?? "sf", weights);
+    const data = await evaluateTrade(sideA, sideB, mode ?? "sf", weights, leagueId);
     res.json(data);
   } catch (err) {
     console.error("[trade-calculator] Error:", err);

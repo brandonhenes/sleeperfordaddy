@@ -62,6 +62,7 @@ export async function syncPlayerIdCrosswalk(): Promise<CrosswalkStats> {
     fantasypros_id: string;
     espn_id: string;
     yahoo_id: string;
+    gsis_id: string;
   }[] = [];
 
   for (const row of rows) {
@@ -81,6 +82,7 @@ export async function syncPlayerIdCrosswalk(): Promise<CrosswalkStats> {
       fantasypros_id: row["fantasypros_id"] ?? "",
       espn_id: row["espn_id"] ?? "",
       yahoo_id: row["yahoo_id"] ?? "",
+      gsis_id: row["gsis_id"] ?? "",
     });
   }
 
@@ -95,12 +97,12 @@ export async function syncPlayerIdCrosswalk(): Promise<CrosswalkStats> {
     const fragments = chunk.map(
       (r) => sql`(
         ${r.sleeper_id}, ${r.name}, ${r.position}, ${r.team},
-        ${r.mfl_id}, ${r.ktc_id}, ${r.fantasypros_id}, ${r.espn_id}, ${r.yahoo_id}, NOW()
+        ${r.mfl_id}, ${r.ktc_id}, ${r.fantasypros_id}, ${r.espn_id}, ${r.yahoo_id}, ${r.gsis_id}, NOW()
       )`
     );
     await db.execute(sql`
       INSERT INTO player_id_crosswalk
-        (sleeper_id, name, position, team, mfl_id, ktc_id, fantasypros_id, espn_id, yahoo_id, updated_at)
+        (sleeper_id, name, position, team, mfl_id, ktc_id, fantasypros_id, espn_id, yahoo_id, gsis_id, updated_at)
       VALUES ${sql.join(fragments, sql`, `)}
       ON CONFLICT (sleeper_id) DO UPDATE SET
         name = EXCLUDED.name,
@@ -111,6 +113,7 @@ export async function syncPlayerIdCrosswalk(): Promise<CrosswalkStats> {
         fantasypros_id = EXCLUDED.fantasypros_id,
         espn_id = EXCLUDED.espn_id,
         yahoo_id = EXCLUDED.yahoo_id,
+        gsis_id = EXCLUDED.gsis_id,
         updated_at = NOW()
     `);
   }

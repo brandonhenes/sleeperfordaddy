@@ -304,6 +304,12 @@ function LeagueCard({ league }: { league: LeaguePowerRanking }) {
           <div style={{ fontWeight: 600, fontSize: 14 }}>{league.league_name}</div>
           <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
             {league.rosters.length} teams · {league.mode.toUpperCase()} · Values: {valueSources(league)}
+            {league.scoring_label && (
+              <>
+                {" "}·{" "}
+                <span style={{ color: "var(--amber)", fontWeight: 600 }}>{league.scoring_label}</span>
+              </>
+            )}
           </span>
         </div>
         {userRoster && <EdgeScoreBadge score={Math.round(userRoster.avg_starter_score)} size="md" />}

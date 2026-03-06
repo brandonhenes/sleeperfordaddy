@@ -93,6 +93,7 @@ export interface LeaguePowerRanking {
   league_name: string;
   mode: "sf" | "1qb";
   draft_data_available: boolean;
+  scoring_label: string;
   rosters: RosterRanking[];
 }
 

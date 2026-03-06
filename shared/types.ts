@@ -262,11 +262,15 @@ export interface TradeEvaluation {
 }
 
 export interface EvaluatedAsset {
+  player_id: string | null;
+  position: string | null;
   label: string;
   edge_score: number;
   fc_score: number | null;
   ktc_score: number | null;
   dp_score: number | null;
+  league_adjusted_score: number | null;
+  scoring_delta_ppg: number | null;
   source_agreement: "high" | "medium" | "low";
 }
 
@@ -305,6 +309,8 @@ export interface TradePackageAsset {
   fc_score: number | null;
   ktc_score: number | null;
   dp_score: number | null;
+  league_adjusted_score: number | null;
+  scoring_delta_ppg: number | null;
   source_agreement: "high" | "medium" | "low";
 }
 
