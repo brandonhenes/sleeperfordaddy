@@ -378,3 +378,93 @@ export interface InjuryRecoveryBaseline {
   min_weeks: number;
   max_weeks: number;
 }
+
+// ─── What Would It Take (Reverse Finder) ───
+
+export interface AcquisitionTarget {
+  player_id: string;
+  player_name: string;
+  position: string;
+  team: string | null;
+  age: number | null;
+  edge_score: number;
+}
+
+export interface AcquisitionOpportunity {
+  // Which league and who owns the target
+  league_id: string;
+  league_name: string;
+  league_mode: "sf" | "1qb";
+  owner: {
+    roster_id: number;
+    display_name: string;
+    archetype: string;
+  };
+
+  // How hard is it to get this player from this owner?
+  difficulty: AcquisitionDifficulty;
+
+  // What packages could work?
+  packages: AcquisitionOffer[];
+
+  // What has this player previously traded for in this league?
+  trade_history: TradeComp[];
+}
+
+export interface AcquisitionDifficulty {
+  score: number; // 0-100
+  label: "easy" | "moderate" | "hard" | "near_impossible";
+  reasons: string[];
+  // Breakdown of what makes it easy or hard
+  positional_importance: string; // "Their WR1 (starter)" or "Their RB4 (bench depth)"
+  replacement_gap: number; // edge score gap to their next man up
+  archetype_resistance: string; // "Rebuilder - likely willing to sell veterans"
+}
+
+export interface AcquisitionOffer {
+  type: "balanced" | "consolidation" | "picks_heavy" | "overpay";
+  label: string;
+  acceptance_likelihood: number; // 0-100
+  you_send: TradePackageAsset[];
+  you_receive: TradePackageAsset[]; // just the target player
+  send_total: number;
+  receive_total: number;
+  delta: number;
+  fairness: "fair" | "slight_edge" | "lopsided";
+  sweetener_hint: string | null;
+
+  // Feature #9: Full opponent perspective
+  their_perspective: OpponentPerspective;
+}
+
+export interface OpponentPerspective {
+  // Roster impact
+  lineup_before: { position: string; player: string; edge_score: number }[];
+  lineup_after: { position: string; player: string; edge_score: number }[];
+  positions_upgraded: string[];
+  positions_downgraded: string[];
+  net_starter_value_change: number;
+
+  // Strategic fit
+  archetype_analysis: string; // "As a Rebuilder, gaining 2 first-round picks accelerates their rebuild timeline by a full year."
+  needs_addressed: string[]; // ["Fills QB hole", "Adds RB depth"]
+  needs_still_open: string[]; // ["Still weak at TE"]
+
+  // Bottom line
+  verdict: "likely_accept" | "might_accept" | "unlikely" | "no_chance";
+  verdict_reason: string;
+}
+
+export interface TradeComp {
+  league_name: string;
+  date: string;
+  gave: string[];
+  received: string[];
+}
+
+export interface AcquisitionResult {
+  target: AcquisitionTarget;
+  opportunities: AcquisitionOpportunity[];
+  summary: string; // "Ja'Marr Chase is owned in 8 of your leagues. Easiest to acquire from Team X in League Y (Rebuilder, he's their WR2)."
+}
+
