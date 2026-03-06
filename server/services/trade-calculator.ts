@@ -1,6 +1,7 @@
 import { db } from "../db/connection.js";
 import { sql } from "drizzle-orm";
 import type { EvaluatedAsset, TradeAssetInput, TradeEvaluation } from "../../shared/types.js";
+import type { SourceWeights } from "./edge-score.js";
 import { getCompositeValues, getGlobalScaleParams } from "./composite-values.js";
 import { computeEdgeScores } from "./edge-score.js";
 
@@ -178,7 +179,8 @@ function toEvaluatedAsset(raw: RawEval, edge: { score: number; fc_score: number 
 export async function evaluateTrade(
   sideA: TradeAssetInput[],
   sideB: TradeAssetInput[],
-  mode: "sf" | "1qb"
+  mode: "sf" | "1qb",
+  weights?: SourceWeights
 ): Promise<TradeEvaluation> {
   const [rawA, rawB, globalScale] = await Promise.all([
     evaluateAssets(sideA, mode),
@@ -194,7 +196,7 @@ export async function evaluateTrade(
     dp_value: a.dp_value,
   }));
 
-  const edgeMap = computeEdgeScores(inputs, globalScale);
+  const edgeMap = computeEdgeScores(inputs, globalScale, weights);
 
   const evalA: EvaluatedAsset[] = rawA.map((a, i) =>
     toEvaluatedAsset(a, edgeMap.get(String(i)) ?? { score: 0, fc_score: null, ktc_score: null, dp_score: null })

@@ -1,6 +1,7 @@
 import { db } from "../db/connection.js";
 import { sql } from "drizzle-orm";
 import { getDynastyLeagueIdsForUserLatestSeason } from "./dynasty-leagues.js";
+import type { SourceWeights } from "./edge-score.js";
 import { getCompositeValues } from "./composite-values.js";
 import { computeEdgeScores } from "./edge-score.js";
 import { getAgeCurveStatus, type AgeCurveStatus } from "./age-curves.js";
@@ -81,6 +82,14 @@ export interface PlayerDetail {
   recent_trades: TradeComp[];
 }
 
+export interface ComparablePlayer {
+  player_name: string;
+  position: string;
+  team: string | null;
+  age: number | null;
+  edge_score: number;
+}
+
 function scoreAgreement(scores: (number | null)[]): "high" | "medium" | "low" {
   const v = scores.filter((s): s is number => s != null);
   if (v.length <= 1) return "high";
@@ -90,7 +99,8 @@ function scoreAgreement(scores: (number | null)[]): "high" | "medium" | "low" {
 
 export async function getPlayerDetail(
   playerName: string,
-  username: string
+  username: string,
+  weights?: SourceWeights
 ): Promise<PlayerDetail | null> {
   // Resolve user_id
   const userRows = await db.execute(sql`
@@ -190,11 +200,11 @@ export async function getPlayerDetail(
 
   if (pm) {
     const mode: "sf" | "1qb" = "sf"; // default to SF for player detail
-    const compMap = await getCompositeValues([pm.player_id], mode);
+    const compMap = await getCompositeValues([pm.player_id], mode, weights);
     const comp = compMap.get(pm.player_id);
     if (comp) {
       const inputs = [{ sleeper_id: pm.player_id, fc_value: comp.fc_value, ktc_value: comp.ktc_value, dp_value: comp.dp_value }];
-      const edgeMap = computeEdgeScores(inputs);
+      const edgeMap = computeEdgeScores(inputs, undefined, weights);
       const e = edgeMap.get(pm.player_id);
       if (e) {
         edgeScore = e.score;
@@ -305,4 +315,53 @@ export async function getPlayerDetail(
     recommendation,
     recent_trades: recentTrades,
   };
+}
+
+export async function getPlayerComparables(
+  playerName: string,
+  limit = 5,
+  weights?: SourceWeights
+): Promise<ComparablePlayer[]> {
+  const targetRows = await db.execute(sql`
+    SELECT player_id, full_name, position
+    FROM players_master
+    WHERE LOWER(full_name) = LOWER(${playerName})
+      AND position IN ('QB', 'RB', 'WR', 'TE')
+    LIMIT 1
+  `);
+  const target = (targetRows as unknown as { player_id: string; full_name: string; position: string }[])[0];
+  if (!target) return [];
+
+  const candidateRows = await db.execute(sql`
+    SELECT player_id, full_name, position, team, age
+    FROM players_master
+    WHERE position = ${target.position}
+      AND player_id <> ${target.player_id}
+  `);
+  const candidates = candidateRows as unknown as Array<{
+    player_id: string;
+    full_name: string;
+    position: string;
+    team: string | null;
+    age: number | null;
+  }>;
+  if (candidates.length === 0) return [];
+
+  const ids = [target.player_id, ...candidates.map((c) => c.player_id)];
+  const compMap = await getCompositeValues(ids, "sf", weights);
+  const targetEdge = compMap.get(target.player_id)?.edge_score ?? 0;
+  if (targetEdge <= 0) return [];
+
+  const max = Math.max(1, Math.min(limit, 20));
+  return candidates
+    .map((c) => ({
+      player_name: c.full_name,
+      position: c.position,
+      team: c.team,
+      age: c.age,
+      edge_score: compMap.get(c.player_id)?.edge_score ?? 0,
+    }))
+    .filter((c) => c.edge_score > 0 && Math.abs(c.edge_score - targetEdge) <= 10)
+    .sort((a, b) => Math.abs(a.edge_score - targetEdge) - Math.abs(b.edge_score - targetEdge) || b.edge_score - a.edge_score)
+    .slice(0, max);
 }

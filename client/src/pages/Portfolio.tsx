@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { useParams } from "wouter";
 import AppShell from "../components/AppShell";
+import FreshnessBar from "../components/FreshnessBar";
 import ExposureTable from "../components/ExposureTable";
 import { StatCard, SectionHeader } from "../components/ui";
 import EdgeScoreBadge from "../components/EdgeScoreBadge";
@@ -48,6 +49,7 @@ export default function Portfolio() {
         <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 4 }}>
           {stats.total_players} players across {stats.total_leagues} leagues
         </p>
+        <FreshnessBar />
       </div>
 
       {/* Stat Cards */}

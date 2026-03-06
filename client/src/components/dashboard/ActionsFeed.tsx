@@ -1,4 +1,5 @@
 import EdgeScoreBadge from "../EdgeScoreBadge";
+import { PlayerLink } from "../ui";
 import type { ActionFeedItem } from "../../hooks/use-dashboard";
 
 const CARD_ACCENTS: Record<
@@ -44,9 +45,7 @@ export default function ActionsFeed({ items }: { items: ActionFeedItem[] }) {
               </span>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-              <span style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}>
-                {item.player_name}
-              </span>
+              <PlayerLink name={item.player_name} style={{ fontSize: 14 }} />
               <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 600 }}>
                 {item.position}
               </span>

@@ -1,4 +1,5 @@
 import EdgeScoreBadge from "../EdgeScoreBadge";
+import { PlayerLink } from "../ui";
 import { posColor } from "../../lib/position-colors";
 import type { ExposureEntry } from "../../hooks/use-dashboard";
 
@@ -24,9 +25,7 @@ export default function ExposureChart({ players }: { players: ExposureEntry[] })
             gap: 10,
           }}
         >
-          <span style={{ fontSize: 13, fontWeight: 600, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {p.full_name}
-          </span>
+          <PlayerLink name={p.full_name} style={{ fontSize: 13 }} />
           <span style={{ fontSize: 11, fontWeight: 600, color: posColor(p.position) }}>{p.position}</span>
           <EdgeScoreBadge score={p.edge_score} />
           <span className="font-mono" style={{ fontSize: 12, color: "var(--text-muted)", minWidth: 55, textAlign: "right" }}>

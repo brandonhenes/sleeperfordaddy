@@ -147,6 +147,13 @@ export default function Settings() {
           ))}
         </div>
       </div>
+
+      <div style={{ ...cardStyle, marginTop: 12 }}>
+        <div style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.6 }}>
+          Custom weights currently apply to Trade Calculator, Player Detail, and Waiver Wire.
+          Power Rankings and Dashboard use the default equal weighting for cache efficiency.
+        </div>
+      </div>
     </AppShell>
   );
 }

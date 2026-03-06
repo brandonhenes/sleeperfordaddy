@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import { useParams } from "wouter";
 import AppShell from "../components/AppShell";
 import { StatCard } from "../components/ui";
+import { PlayerLink } from "../components/ui";
 import SourceBadge from "../components/SourceBadge";
 import EdgeScoreBadge from "../components/EdgeScoreBadge";
 import { posColor } from "../lib/position-colors";
@@ -122,7 +123,7 @@ function PlayerRow({ p, slotLabel }: { p: SlottedPlayer | CoreAsset; slotLabel?:
       <span style={{ color: labelColor, fontWeight: 700, fontSize: 10, width: 36, textAlign: "right" }}>
         {label}
       </span>
-      <span style={{ flex: 1, fontWeight: 500 }}>{p.full_name}</span>
+      <PlayerLink name={p.full_name} style={{ flex: 1, fontWeight: 500, fontSize: 12 }} />
       <EdgeScoreBadge score={p.edge_score} size="sm" />
       <SourceBadge
         fc_score={p.fc_score} ktc_score={p.ktc_score} dp_score={p.dp_score}
@@ -168,7 +169,7 @@ function ExpandedRosterView({ roster }: { roster: RosterRanking }) {
             <span style={{ color: slotColor(p.edge_score), fontWeight: 700, fontSize: 10, width: 36, textAlign: "right" }}>
               {p.slot}
             </span>
-            <span style={{ flex: 1, fontWeight: 500 }}>{p.full_name}</span>
+            <PlayerLink name={p.full_name} style={{ flex: 1, fontWeight: 500, fontSize: 12 }} />
             <EdgeScoreBadge score={p.edge_score} size="sm" />
             <SourceBadge
               fc_score={p.fc_score} ktc_score={p.ktc_score} dp_score={p.dp_score}

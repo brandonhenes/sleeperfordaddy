@@ -1,4 +1,5 @@
 import { posColor } from "../../lib/position-colors";
+import { PlayerLink } from "../ui";
 import type { DashboardData, SourceMover } from "../../hooks/use-dashboard";
 
 function MoverRow({ m, direction }: { m: SourceMover; direction: "up" | "down" }) {
@@ -7,9 +8,7 @@ function MoverRow({ m, direction }: { m: SourceMover; direction: "up" | "down" }
   const sign = direction === "up" ? "+" : "";
   return (
     <div style={{ display: "flex", alignItems: "center", padding: "8px 0", gap: 8 }}>
-      <span style={{ fontSize: 13, fontWeight: 600, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-        {m.full_name}
-      </span>
+      <PlayerLink name={m.full_name} style={{ fontSize: 13 }} />
       <span style={{ fontSize: 11, fontWeight: 600, color: posColor(m.position) }}>{m.position}</span>
       <span className="font-mono" style={{ fontSize: 12, color: "var(--text-muted)" }}>
         {m.previous_score} {arrow} {m.current_score}

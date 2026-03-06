@@ -12,6 +12,7 @@ import AppShell from "../components/AppShell";
 import EdgeScoreBadge from "../components/EdgeScoreBadge";
 import ShareButton from "../components/ShareButton";
 import { TrendArrow, SectionHeader } from "../components/ui";
+import { PlayerLink } from "../components/ui";
 import { posColor, dirColor } from "../lib/position-colors";
 import {
   usePlayer,
@@ -23,6 +24,7 @@ import {
   type OwnershipEntry,
   type ExposureInfo,
 } from "../hooks/use-player";
+import { useComparables } from "../hooks/use-comparables";
 
 // ─── Zone Colors ───
 
@@ -391,6 +393,7 @@ export default function PlayerDetail() {
   const decoded = playerName ? decodeURIComponent(playerName) : undefined;
   const username = typeof window !== "undefined" ? localStorage.getItem("edge_username") ?? "" : "";
   const { data, isLoading, error } = usePlayer(decoded, username);
+  const { data: comparables } = useComparables(decoded);
 
   if (isLoading) return <AppShell><LoadingSkeleton name={decoded} /></AppShell>;
   if (error || !data) {
@@ -422,6 +425,33 @@ export default function PlayerDetail() {
 
       <SectionHeader icon="🎯" title="QUICK ACTIONS" subtitle="" />
       <QuickActions playerName={data.summary.player_name} />
+
+      {comparables && comparables.length > 0 && (
+        <>
+          <SectionHeader icon="👥" title="SIMILAR PLAYERS" subtitle="Comparable edge scores at same position" />
+          <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
+            {comparables.map((c) => (
+              <div
+                key={c.player_name}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  padding: "10px 16px",
+                  borderBottom: "1px solid var(--border)",
+                  fontSize: 13,
+                }}
+              >
+                <EdgeScoreBadge score={Math.round(c.edge_score)} size="sm" />
+                <PlayerLink name={c.player_name} style={{ flex: 1 }} />
+                <span style={{ color: posColor(c.position), fontWeight: 700, fontSize: 11 }}>{c.position}</span>
+                {c.team && <span style={{ color: "var(--text-muted)", fontSize: 11 }}>{c.team}</span>}
+                {c.age != null && <span style={{ color: "var(--text-dim)", fontSize: 11 }}>Age {c.age}</span>}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
 
       {data.recent_trades && data.recent_trades.length > 0 && (
         <>

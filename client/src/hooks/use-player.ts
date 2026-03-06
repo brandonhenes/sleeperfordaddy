@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "../lib/api";
+import { weightQueryParams } from "../lib/weights";
 
 export interface AgeCurveStatus {
   age: number | null;
@@ -66,11 +67,12 @@ export interface PlayerDetail {
 }
 
 export function usePlayer(playerName: string | undefined, username: string) {
+  const weights = weightQueryParams();
   return useQuery<PlayerDetail>({
-    queryKey: ["player", playerName, username],
+    queryKey: ["player", playerName, username, weights],
     queryFn: () =>
       apiFetch(
-        `/api/player/${encodeURIComponent(playerName!)}?username=${encodeURIComponent(username)}`
+        `/api/player/${encodeURIComponent(playerName!)}?username=${encodeURIComponent(username)}${weights}`
       ),
     enabled: !!playerName,
   });

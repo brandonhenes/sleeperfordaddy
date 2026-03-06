@@ -1,4 +1,5 @@
 import EdgeScoreBadge from "../EdgeScoreBadge";
+import { PlayerLink } from "../ui";
 import { posColor } from "../../lib/position-colors";
 import type { RosterHole } from "../../hooks/use-dashboard";
 
@@ -34,9 +35,7 @@ export default function RosterHoles({ holes }: { holes: RosterHole[] }) {
           <span style={{ fontSize: 13, color: "var(--text-muted)", minWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {h.league_name}
           </span>
-          <span style={{ fontSize: 13, fontWeight: 500, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {h.player_name}
-          </span>
+          <PlayerLink name={h.player_name} style={{ fontSize: 13 }} />
           <EdgeScoreBadge score={h.edge_score} />
         </div>
       ))}

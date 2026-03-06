@@ -61,7 +61,7 @@ function AssetChip({ asset }: { asset: EvaluatedAsset }) {
       padding: "6px 0",
     }}>
       <EdgeBadge score={asset.edge_score} />
-      <span style={{ fontSize: 13, fontWeight: 600 }}>{asset.label}</span>
+      <PlayerLink name={asset.label} style={{ fontSize: 13, fontWeight: 600 }} />
       <div style={{ display: "flex", gap: 4, marginLeft: "auto" }}>
         {asset.fc_score != null && (
           <span style={{ fontSize: 10, color: "var(--text-muted)" }}>FC:{asset.fc_score}</span>

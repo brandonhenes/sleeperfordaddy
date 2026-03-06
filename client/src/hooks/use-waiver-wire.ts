@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "../lib/api";
+import { weightQueryParams } from "../lib/weights";
 
 export interface WaiverPlayer {
   player_id: string;
@@ -17,9 +18,11 @@ export interface WaiverPlayer {
 }
 
 export function useWaiverWire(leagueId: string) {
+  const weights = weightQueryParams();
+  const querySuffix = weights ? `?${weights.slice(1)}` : "";
   return useQuery<WaiverPlayer[]>({
-    queryKey: ["waiver-wire", leagueId],
-    queryFn: () => apiFetch(`/api/waiver-wire/${encodeURIComponent(leagueId)}`),
+    queryKey: ["waiver-wire", leagueId, weights],
+    queryFn: () => apiFetch(`/api/waiver-wire/${encodeURIComponent(leagueId)}${querySuffix}`),
     enabled: !!leagueId,
   });
 }

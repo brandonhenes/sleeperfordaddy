@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { evaluateTrade, searchTradeAssets } from "../services/trade-calculator.js";
+import { parseWeights } from "../lib/parse-weights.js";
 import type { TradeAssetInput } from "../../shared/types.js";
 
 const router = Router();
@@ -28,7 +29,8 @@ router.post("/api/trade/evaluate", async (req, res) => {
     if (!sideA?.length || !sideB?.length) {
       return res.status(400).json({ message: "sideA and sideB are required" });
     }
-    const data = await evaluateTrade(sideA, sideB, mode ?? "sf");
+    const weights = parseWeights(req);
+    const data = await evaluateTrade(sideA, sideB, mode ?? "sf", weights);
     res.json(data);
   } catch (err) {
     console.error("[trade-calculator] Error:", err);

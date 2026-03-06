@@ -1,5 +1,6 @@
 import type { PortfolioPlayer } from "../hooks/use-portfolio";
 import { ExposureBar } from "./ui";
+import { PlayerLink } from "./ui";
 import EdgeScoreBadge from "./EdgeScoreBadge";
 import { posColor } from "../lib/position-colors";
 
@@ -34,9 +35,7 @@ export default function ExposureTable({ players }: ExposureTableProps) {
         <div key={p.player_id} style={{ display: "grid", gridTemplateColumns: GRID, padding: "10px 16px", borderBottom: "1px solid rgba(51,65,85,0.13)", gap: 8, alignItems: "center" }}>
           {/* Player */}
           <div style={{ display: "flex", alignItems: "center", gap: 6, overflow: "hidden" }}>
-            <span style={{ fontWeight: 600, fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-              {p.full_name}
-            </span>
+            <PlayerLink name={p.full_name} style={{ fontSize: 13, fontWeight: 600 }} />
           </div>
 
           {/* Pos */}
