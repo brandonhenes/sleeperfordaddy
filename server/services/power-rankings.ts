@@ -122,9 +122,13 @@ export async function getPowerRankings(username: string): Promise<LeaguePowerRan
   if (dynastyLeagueIds.length === 0) return [];
 
   if (PR_DB_ONLY) {
-    const dbOnly = await getPowerRankingsDbOnly(username, userId, dynastyLeagueIds);
-    prCache.set(cacheKey, { data: dbOnly, expires: Date.now() + PR_TTL_MS });
-    return dbOnly;
+    try {
+      const dbOnly = await getPowerRankingsDbOnly(username, userId, dynastyLeagueIds);
+      prCache.set(cacheKey, { data: dbOnly, expires: Date.now() + PR_TTL_MS });
+      return dbOnly;
+    } catch (err) {
+      console.error("[power-rankings] DB-only path failed, falling back to legacy path", err);
+    }
   }
 
   const leagueIdFrags = dynastyLeagueIds.map((id) => sql`${id}`);
