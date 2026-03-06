@@ -9,6 +9,21 @@ const sellInFlight = new Map<string, Promise<SellCandidate[]>>();
 const buyCache = new Map<string, { data: BuyOpportunity[]; expires: number }>();
 const buyInFlight = new Map<string, Promise<BuyOpportunity[]>>();
 
+export function clearActionCache(username?: string) {
+  if (username) {
+    const key = username.toLowerCase();
+    sellCache.delete(key);
+    sellInFlight.delete(key);
+    buyCache.delete(key);
+    buyInFlight.delete(key);
+    return;
+  }
+  sellCache.clear();
+  sellInFlight.clear();
+  buyCache.clear();
+  buyInFlight.clear();
+}
+
 // ─── Types ───
 
 export interface SellCandidate {

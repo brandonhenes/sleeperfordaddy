@@ -8,6 +8,17 @@ const PORTFOLIO_TTL_MS = 30_000;
 const portfolioCache = new Map<string, { data: PortfolioData | null; expires: number }>();
 const portfolioInFlight = new Map<string, Promise<PortfolioData | null>>();
 
+export function clearPortfolioCache(username?: string) {
+  if (username) {
+    const key = username.toLowerCase();
+    portfolioCache.delete(key);
+    portfolioInFlight.delete(key);
+    return;
+  }
+  portfolioCache.clear();
+  portfolioInFlight.clear();
+}
+
 // ─── Types ───
 
 export interface PortfolioPlayer {

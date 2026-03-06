@@ -16,6 +16,17 @@ const overviewInFlight = new Map<
   Promise<{ overview: OverviewData; league_groups: LeagueGroup[] } | null>
 >();
 
+export function clearOverviewCache(username?: string) {
+  if (username) {
+    const key = username.toLowerCase();
+    overviewCache.delete(key);
+    overviewInFlight.delete(key);
+    return;
+  }
+  overviewCache.clear();
+  overviewInFlight.clear();
+}
+
 async function buildOverviewForUser(user: {
   user_id: string;
   username: string;

@@ -7,6 +7,17 @@ const DASHBOARD_TTL_MS = 30_000;
 const dashboardCache = new Map<string, { data: DashboardData | null; expires: number }>();
 const dashboardInFlight = new Map<string, Promise<DashboardData | null>>();
 
+export function clearDashboardCache(username?: string) {
+  if (username) {
+    const key = username.toLowerCase();
+    dashboardCache.delete(key);
+    dashboardInFlight.delete(key);
+    return;
+  }
+  dashboardCache.clear();
+  dashboardInFlight.clear();
+}
+
 // ─── Types ───
 
 export interface SlotGradeInfo {

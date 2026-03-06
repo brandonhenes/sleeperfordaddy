@@ -32,6 +32,11 @@ import { capturePlayerValueSnapshots } from "./value-snapshots.js";
 import { captureTeamValueSnapshots } from "./team-snapshots.js";
 import { isDynastyLeagueFromSleeperSettings } from "./dynasty-leagues.js";
 import { clearPowerRankingsCache } from "./power-rankings.js";
+import { clearOverviewCache } from "./overview.js";
+import { clearDashboardCache } from "./dashboard.js";
+import { clearPortfolioCache } from "./portfolio.js";
+import { clearActionCache } from "./action.js";
+import { clearArbitrageCache } from "./arbitrage.js";
 import type {
   SleeperLeague,
   SleeperRoster,
@@ -289,6 +294,11 @@ async function runSync(jobId: string, username: string) {
 
   clearSleeperCache();
   clearPowerRankingsCache(username);
+  clearOverviewCache(username);
+  clearDashboardCache(username);
+  clearPortfolioCache(username);
+  clearActionCache(username);
+  clearArbitrageCache(username);
 
   // Step 9: Done
   await updateSyncJob(jobId, {

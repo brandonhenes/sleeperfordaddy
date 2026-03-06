@@ -7,6 +7,17 @@ const ARBITRAGE_TTL_MS = 30_000;
 const arbitrageCache = new Map<string, { data: ArbitrageGap[]; expires: number }>();
 const arbitrageInFlight = new Map<string, Promise<ArbitrageGap[]>>();
 
+export function clearArbitrageCache(username?: string) {
+  if (username) {
+    const key = username.toLowerCase();
+    arbitrageCache.delete(key);
+    arbitrageInFlight.delete(key);
+    return;
+  }
+  arbitrageCache.clear();
+  arbitrageInFlight.clear();
+}
+
 // ─── Types ───
 
 export interface ArbitrageGap {
