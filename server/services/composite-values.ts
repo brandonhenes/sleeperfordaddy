@@ -88,7 +88,10 @@ export async function getGlobalScaleParams(
           max(dp.value_2qb)::real AS dp_max
         FROM players_master pm
         LEFT JOIN fantasycalc_daily fc
-          ON LOWER(pm.full_name) = LOWER(fc.player_name)
+          ON (
+            fc.sleeper_id = pm.player_id
+            OR (fc.sleeper_id IS NULL AND LOWER(pm.full_name) = LOWER(fc.player_name))
+          )
           AND fc.snapshot_date = (SELECT MAX(snapshot_date) FROM fantasycalc_daily)
         LEFT JOIN ktc_values ktc ON ktc.sleeper_id = pm.player_id
         LEFT JOIN dynastyprocess_values dp ON dp.sleeper_id = pm.player_id
@@ -104,7 +107,10 @@ export async function getGlobalScaleParams(
           max(dp.value_1qb)::real AS dp_max
         FROM players_master pm
         LEFT JOIN fantasycalc_daily fc
-          ON LOWER(pm.full_name) = LOWER(fc.player_name)
+          ON (
+            fc.sleeper_id = pm.player_id
+            OR (fc.sleeper_id IS NULL AND LOWER(pm.full_name) = LOWER(fc.player_name))
+          )
           AND fc.snapshot_date = (SELECT MAX(snapshot_date) FROM fantasycalc_daily)
         LEFT JOIN ktc_values ktc ON ktc.sleeper_id = pm.player_id
         LEFT JOIN dynastyprocess_values dp ON dp.sleeper_id = pm.player_id
@@ -243,7 +249,10 @@ async function computeCompositeRuntime(
       dp.value_2qb AS dp_2qb
     FROM players_master pm
     LEFT JOIN fantasycalc_daily fc
-      ON LOWER(pm.full_name) = LOWER(fc.player_name)
+      ON (
+        fc.sleeper_id = pm.player_id
+        OR (fc.sleeper_id IS NULL AND LOWER(pm.full_name) = LOWER(fc.player_name))
+      )
       AND fc.snapshot_date = (SELECT MAX(snapshot_date) FROM fantasycalc_daily)
     LEFT JOIN ktc_values ktc ON ktc.sleeper_id = pm.player_id
     LEFT JOIN dynastyprocess_values dp ON dp.sleeper_id = pm.player_id

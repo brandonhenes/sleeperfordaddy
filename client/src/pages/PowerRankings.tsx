@@ -118,8 +118,9 @@ function formatPickLabel(pk: ScoredPick): string {
 function PlayerRow({ p, slotLabel }: { p: SlottedPlayer | CoreAsset; slotLabel?: string }) {
   const label = slotLabel ?? ("slot_label" in p ? (p as SlottedPlayer).slot : p.position);
   const labelColor = slotLabel ? posColor(p.position) : slotColor(p.edge_score);
+  const opacity = p.sources_available === 0 ? 0.4 : 1;
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12 }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12, opacity }}>
       <span style={{ color: labelColor, fontWeight: 700, fontSize: 10, width: 36, textAlign: "right" }}>
         {label}
       </span>
@@ -165,7 +166,16 @@ function ExpandedRosterView({ roster }: { roster: RosterRanking }) {
       </div>
       <div style={{ display: "grid", gap: 6 }}>
         {starters.map((p) => (
-          <div key={p.player_id} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12 }}>
+          <div
+            key={p.player_id}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              fontSize: 12,
+              opacity: p.sources_available === 0 ? 0.4 : 1,
+            }}
+          >
             <span style={{ color: slotColor(p.edge_score), fontWeight: 700, fontSize: 10, width: 36, textAlign: "right" }}>
               {p.slot}
             </span>

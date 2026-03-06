@@ -661,19 +661,19 @@ async function getTradeHistory(
 
 export async function findAcquisitionPackages(
   username: string,
-  playerName: string
+  playerId: string
 ): Promise<AcquisitionResult> {
   // 1. Find the player
   const playerRows = await db.execute(sql`
     SELECT player_id, full_name, position, team, age
     FROM players_master
-    WHERE LOWER(full_name) = LOWER(${playerName})
+    WHERE player_id = ${playerId}
     AND position IN ('QB', 'RB', 'WR', 'TE')
     LIMIT 1
   `);
   type PR = { player_id: string; full_name: string; position: string; team: string | null; age: number | null };
   const pm = (playerRows as unknown as PR[])[0];
-  if (!pm) return { target: { player_id: "", player_name: playerName, position: "", team: null, age: null, edge_score: 0 }, opportunities: [], summary: `Player "${playerName}" not found.` };
+  if (!pm) return { target: { player_id: "", player_name: playerId, position: "", team: null, age: null, edge_score: 0 }, opportunities: [], summary: `Player not found.` };
 
   // 2. Get all power rankings
   const allLeagues = await getPowerRankings(username);

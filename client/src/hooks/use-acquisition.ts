@@ -2,14 +2,14 @@ import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "../lib/api";
 import type { AcquisitionResult } from "../../../shared/types";
 
-export function useAcquisition(username: string, playerName: string | null) {
+export function useAcquisition(username: string, target: { name: string; id: string } | null) {
   return useQuery<AcquisitionResult>({
-    queryKey: ["acquisition", username, playerName],
+    queryKey: ["acquisition", username, target?.id],
     queryFn: () =>
       apiFetch(
-        `/api/trade/acquire/${encodeURIComponent(username)}/${encodeURIComponent(playerName!)}`
+        `/api/trade/acquire/${encodeURIComponent(username)}/${encodeURIComponent(target!.id)}`
       ),
-    enabled: !!username && !!playerName,
+    enabled: !!username && !!target,
     staleTime: 10 * 60 * 1000,
   });
 }

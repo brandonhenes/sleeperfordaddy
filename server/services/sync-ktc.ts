@@ -1,5 +1,6 @@
 import { db } from "../db/connection.js";
 import { sql } from "drizzle-orm";
+import { backfillKtcSleeperIds } from "./source-coverage-backfill.js";
 
 const KTC_URL = "https://keeptradecut.com/dynasty-rankings";
 
@@ -19,6 +20,7 @@ interface KtcSyncStats {
   matched_to_sleeper: number;
   unmatched: number;
   picks_found: number;
+  fallback_name_matched: number;
 }
 
 const PICK_RE = /^(\d{4})\s+(Early|Mid|Late)?\s*(1st|2nd|3rd|4th)/i;
@@ -157,6 +159,8 @@ export async function syncKtcValues(): Promise<KtcSyncStats> {
     `);
   }
 
+  const fallbackNameMatched = await backfillKtcSleeperIds();
+
   if (unmatchedNames.length > 0) {
     console.log(`[ktc] Unmatched players (${unmatchedNames.length}):`,
       unmatchedNames.slice(0, 20).join(", "),
@@ -168,6 +172,7 @@ export async function syncKtcValues(): Promise<KtcSyncStats> {
     matched_to_sleeper: matched,
     unmatched,
     picks_found: picksFound,
+    fallback_name_matched: fallbackNameMatched,
   };
   console.log("[ktc] Sync complete:", stats);
   return stats;

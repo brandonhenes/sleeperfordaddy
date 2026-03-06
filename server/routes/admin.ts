@@ -5,6 +5,10 @@ import { syncKtcValues } from "../services/sync-ktc.js";
 import { syncDynastyProcessValues } from "../services/sync-dynastyprocess.js";
 import { syncFpEliteValues } from "../services/sync-fp-elite.js";
 import { snapshotEdgeScores } from "../services/snapshot-scores.js";
+import {
+  backfillFantasyCalcSleeperIds,
+  backfillKtcSleeperIds,
+} from "../services/source-coverage-backfill.js";
 
 import { db } from "../db/connection.js";
 import { sql } from "drizzle-orm";
@@ -99,10 +103,24 @@ router.post("/api/admin/sync-values", async (_req, res) => {
     const crosswalk = await syncPlayerIdCrosswalk();
     const ktc = await syncKtcValues();
     const fp = await syncFpEliteValues();
-    res.json({ crosswalk, ktc, fp });
+    const fcBackfill = await backfillFantasyCalcSleeperIds();
+    const ktcBackfill = await backfillKtcSleeperIds();
+    res.json({ crosswalk, ktc, fp, fcBackfill, ktcBackfill });
   } catch (err) {
     console.error("[admin/sync-values] Error:", err);
     res.status(500).json({ message: (err as Error).message ?? "Internal server error" });
+  }
+});
+
+/** POST /api/admin/backfill-fc-ids â€” one-time source coverage backfill */
+router.post("/api/admin/backfill-fc-ids", async (_req, res) => {
+  try {
+    const fc = await backfillFantasyCalcSleeperIds();
+    const ktc = await backfillKtcSleeperIds();
+    res.json({ ok: true, fc, ktc });
+  } catch (err) {
+    console.error("[admin/backfill-fc-ids] Error:", err);
+    res.status(500).json({ message: (err as Error).message ?? "Backfill failed" });
   }
 });
 

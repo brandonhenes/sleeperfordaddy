@@ -4,6 +4,8 @@ import {
   serial,
   integer,
   real,
+  date,
+  boolean as pgBoolean,
   primaryKey,
   bigint,
   index,
@@ -288,6 +290,24 @@ export const player_seasonal_stats = pgTable(
     total_receiving_tds: integer("total_receiving_tds").default(0),
   },
   (table) => [index("idx_seasonal_stats_season").on(table.season)]
+);
+
+export const fantasycalc_daily = pgTable(
+  "fantasycalc_daily",
+  {
+    id: bigint("id", { mode: "number" }),
+    snapshot_date: date("snapshot_date"),
+    player_name: text("player_name"),
+    position: text("position"),
+    team: text("team"),
+    dynasty_value: integer("dynasty_value"),
+    trend_30day: integer("trend_30day"),
+    overall_rank: integer("overall_rank"),
+    is_rookie: pgBoolean("is_rookie"),
+    is_pick: pgBoolean("is_pick"),
+    sleeper_id: text("sleeper_id"),
+  },
+  (table) => [index("idx_fc_sleeper_id").on(table.sleeper_id)]
 );
 
 // ─── Exposure ───

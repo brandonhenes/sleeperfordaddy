@@ -19,14 +19,14 @@ router.get("/api/trade/find/:username/:leagueId", async (req, res) => {
   }
 });
 
-/** GET /api/trade/acquire/:username/:playerName */
-router.get("/api/trade/acquire/:username/:playerName", async (req, res) => {
+/** GET /api/trade/acquire/:username/:playerId */
+router.get("/api/trade/acquire/:username/:playerId", async (req, res) => {
   try {
-    const { username, playerName } = req.params;
-    if (!username || !playerName) {
-      return res.status(400).json({ message: "username and playerName are required" });
+    const { username, playerId } = req.params;
+    if (!username || !playerId) {
+      return res.status(400).json({ message: "username and playerId are required" });
     }
-    const data = await findAcquisitionPackages(username, decodeURIComponent(playerName));
+    const data = await findAcquisitionPackages(username, decodeURIComponent(playerId));
     res.json(data);
   } catch (err) {
     console.error("[acquisition-finder] Error:", err);

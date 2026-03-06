@@ -345,7 +345,7 @@ export default function TradeFinder() {
   const [selectedLeague, setSelectedLeague] = useState<string>("");
   const [mode, setMode] = useState<"find" | "acquire">("find");
   const [targetSearch, setTargetSearch] = useState("");
-  const [selectedTarget, setSelectedTarget] = useState<string | null>(null);
+  const [selectedTarget, setSelectedTarget] = useState<{ name: string; id: string } | null>(null);
 
   const { data: leagues, isLoading: leaguesLoading } = usePowerRankings(phase === "ready" ? username : "");
   const { data: suggestions, isLoading: suggestionsLoading, error: suggestionsError } = useTradeSuggestions(phase === "ready" ? username : "", selectedLeague);
@@ -441,7 +441,7 @@ export default function TradeFinder() {
             {targetResults.length > 0 && !selectedTarget && (
               <div style={{ marginTop: 8, display: "grid", gap: 4, maxHeight: 240, overflowY: "auto" }}>
                 {targetResults.map((r) => (
-                  <button key={r.player_id} onClick={() => { setSelectedTarget(r.label); setTargetSearch(r.label); }} style={{ display: "flex", alignItems: "center", gap: 8, border: "1px solid var(--border)", borderRadius: 8, padding: "8px 10px", background: "none", color: "var(--text)", cursor: "pointer", fontFamily: "inherit", fontSize: 13, textAlign: "left", width: "100%" }}>
+                  <button key={r.player_id} onClick={() => { setSelectedTarget({ name: r.label, id: r.player_id }); setTargetSearch(r.label); }} style={{ display: "flex", alignItems: "center", gap: 8, border: "1px solid var(--border)", borderRadius: 8, padding: "8px 10px", background: "none", color: "var(--text)", cursor: "pointer", fontFamily: "inherit", fontSize: 13, textAlign: "left", width: "100%" }}>
                     <span style={{ fontWeight: 700, fontSize: 11, width: 24 }}>{r.position}</span>
                     <span style={{ flex: 1 }}>{r.label}</span>
                     {r.team && <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{r.team}</span>}
