@@ -5,6 +5,7 @@ import {
   integer,
   real,
   date,
+  timestamp,
   boolean as pgBoolean,
   primaryKey,
   bigint,
@@ -308,6 +309,20 @@ export const fantasycalc_daily = pgTable(
     sleeper_id: text("sleeper_id"),
   },
   (table) => [index("idx_fc_sleeper_id").on(table.sleeper_id)]
+);
+
+export const player_aliases = pgTable(
+  "player_aliases",
+  {
+    player_id: text("player_id").notNull(),
+    alias: text("alias").notNull(),
+    source: text("source").notNull().default("generated"),
+    created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.player_id, table.alias] }),
+    index("idx_player_aliases_alias_lower").on(table.alias),
+  ]
 );
 
 // ─── Exposure ───

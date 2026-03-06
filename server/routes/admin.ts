@@ -9,6 +9,7 @@ import {
   backfillFantasyCalcSleeperIds,
   backfillKtcSleeperIds,
 } from "../services/source-coverage-backfill.js";
+import { backfillPlayerAliases } from "../services/player-resolver.js";
 
 import { db } from "../db/connection.js";
 import { sql } from "drizzle-orm";
@@ -121,6 +122,17 @@ router.post("/api/admin/backfill-fc-ids", async (_req, res) => {
   } catch (err) {
     console.error("[admin/backfill-fc-ids] Error:", err);
     res.status(500).json({ message: (err as Error).message ?? "Backfill failed" });
+  }
+});
+
+/** POST /api/admin/backfill-player-aliases */
+router.post("/api/admin/backfill-player-aliases", async (_req, res) => {
+  try {
+    const stats = await backfillPlayerAliases();
+    res.json({ ok: true, ...stats });
+  } catch (err) {
+    console.error("[admin/backfill-player-aliases] Error:", err);
+    res.status(500).json({ message: (err as Error).message ?? "Alias backfill failed" });
   }
 });
 

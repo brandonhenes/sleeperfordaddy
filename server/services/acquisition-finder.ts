@@ -18,6 +18,7 @@ import type {
   TradeComp,
 } from "../../shared/types.js";
 import { getDynastyLeagueIdsForUserLatestSeason } from "./dynasty-leagues.js";
+import { resolvePlayer } from "./player-resolver.js";
 
 // ─── Constants ───
 
@@ -663,16 +664,8 @@ export async function findAcquisitionPackages(
   username: string,
   playerId: string
 ): Promise<AcquisitionResult> {
-  // 1. Find the player
-  const playerRows = await db.execute(sql`
-    SELECT player_id, full_name, position, team, age
-    FROM players_master
-    WHERE player_id = ${playerId}
-    AND position IN ('QB', 'RB', 'WR', 'TE')
-    LIMIT 1
-  `);
-  type PR = { player_id: string; full_name: string; position: string; team: string | null; age: number | null };
-  const pm = (playerRows as unknown as PR[])[0];
+  const lookup = decodeURIComponent(playerId).trim();
+  const pm = await resolvePlayer(lookup);
   if (!pm) return { target: { player_id: "", player_name: playerId, position: "", team: null, age: null, edge_score: 0 }, opportunities: [], summary: `Player not found.` };
 
   // 2. Get all power rankings
@@ -767,4 +760,3 @@ export async function findAcquisitionPackages(
     summary,
   };
 }
-

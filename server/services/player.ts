@@ -5,6 +5,7 @@ import type { SourceWeights } from "./edge-score.js";
 import { getCompositeValues } from "./composite-values.js";
 import { computeEdgeScores } from "./edge-score.js";
 import { getAgeCurveStatus, type AgeCurveStatus } from "./age-curves.js";
+import { resolvePlayer } from "./player-resolver.js";
 
 export interface PlayerSummary {
   player_name: string;
@@ -102,6 +103,9 @@ export async function getPlayerDetail(
   username: string,
   weights?: SourceWeights
 ): Promise<PlayerDetail | null> {
+  const normalizedInput = playerName.trim();
+  if (!normalizedInput) return null;
+
   // Resolve user_id
   const userRows = await db.execute(sql`
     SELECT user_id FROM users WHERE LOWER(username) = LOWER(${username}) LIMIT 1
@@ -116,14 +120,8 @@ export async function getPlayerDetail(
     : sql`''`;
 
   // Resolve player_id from players_master
-  const pmRows = await db.execute(sql`
-    SELECT player_id, full_name, position, age
-    FROM players_master
-    WHERE LOWER(full_name) = LOWER(${playerName})
-      AND position IN ('QB', 'RB', 'WR', 'TE')
-    LIMIT 1
-  `);
-  const pm = (pmRows as unknown as { player_id: string; full_name: string; position: string; age: number | null }[])[0];
+  const pm = await resolvePlayer(normalizedInput);
+  const resolvedName = pm?.full_name ?? normalizedInput;
 
   const [summaryRows, historyRows, ownershipRows, mentionRows, prospectRows, recRows] =
     await Promise.all([
@@ -132,7 +130,13 @@ export async function getPlayerDetail(
         SELECT player_name, position, team,
                dynasty_value::int, trend_30day::int, overall_rank::int
         FROM fantasycalc_daily
-        WHERE LOWER(player_name) = LOWER(${playerName})
+        WHERE (
+          (
+            ${pm?.player_id ?? null}::text IS NOT NULL
+            AND sleeper_id = ${pm?.player_id ?? null}
+          )
+          OR LOWER(player_name) = LOWER(${resolvedName})
+        )
           AND snapshot_date = (SELECT MAX(snapshot_date) FROM fantasycalc_daily)
         LIMIT 1
       `),
@@ -141,7 +145,13 @@ export async function getPlayerDetail(
       db.execute(sql`
         SELECT snapshot_date AS date, dynasty_value::int AS value
         FROM fantasycalc_daily
-        WHERE LOWER(player_name) = LOWER(${playerName})
+        WHERE (
+          (
+            ${pm?.player_id ?? null}::text IS NOT NULL
+            AND sleeper_id = ${pm?.player_id ?? null}
+          )
+          OR LOWER(player_name) = LOWER(${resolvedName})
+        )
           AND snapshot_date >= (SELECT MAX(snapshot_date) FROM fantasycalc_daily) - INTERVAL '90 days'
         ORDER BY snapshot_date ASC
       `),
@@ -163,7 +173,7 @@ export async function getPlayerDetail(
       db.execute(sql`
         SELECT mention_date, source, article_title, sentiment, key_quote
         FROM player_mentions
-        WHERE LOWER(player_name) = LOWER(${playerName})
+        WHERE LOWER(player_name) = LOWER(${resolvedName})
         ORDER BY mention_date DESC
         LIMIT 10
       `),
@@ -173,7 +183,7 @@ export async function getPlayerDetail(
         SELECT school, tier, consensus_comp, key_strengths,
                draft_capital, notes
         FROM prospect_profiles
-        WHERE LOWER(player_name) = LOWER(${playerName})
+        WHERE LOWER(player_name) = LOWER(${resolvedName})
         LIMIT 1
       `),
 
@@ -181,7 +191,7 @@ export async function getPlayerDetail(
       db.execute(sql`
         SELECT direction, fc_at_rec, rationale, rec_date
         FROM recommendations
-        WHERE LOWER(player_name) = LOWER(${playerName})
+        WHERE LOWER(player_name) = LOWER(${resolvedName})
         ORDER BY rec_date DESC
         LIMIT 1
       `),
@@ -223,7 +233,7 @@ export async function getPlayerDetail(
   const ownedLeagues = ownershipRows as unknown as OwnershipEntry[];
 
   const summary: PlayerSummary = {
-    player_name: pm?.full_name ?? fcSummary?.player_name ?? playerName,
+    player_name: pm?.full_name ?? fcSummary?.player_name ?? normalizedInput,
     position,
     team: fcSummary?.team ?? null,
     age,
@@ -290,10 +300,14 @@ export async function getPlayerDetail(
 
       recentTrades = tradeIds.map((t) => {
         const assets = assetMap.get(t.trade_id) ?? { gave: [], received: [] };
+        const createdAt = Number(t.created_at_ms);
+        const date = Number.isFinite(createdAt) && createdAt > 0
+          ? new Date(createdAt).toISOString().slice(0, 10)
+          : "";
         return {
           trade_id: t.trade_id,
           league_name: t.league_name,
-          date: new Date(t.created_at_ms).toISOString().slice(0, 10),
+          date,
           gave: assets.gave,
           received: assets.received,
         };
@@ -322,14 +336,7 @@ export async function getPlayerComparables(
   limit = 5,
   weights?: SourceWeights
 ): Promise<ComparablePlayer[]> {
-  const targetRows = await db.execute(sql`
-    SELECT player_id, full_name, position
-    FROM players_master
-    WHERE LOWER(full_name) = LOWER(${playerName})
-      AND position IN ('QB', 'RB', 'WR', 'TE')
-    LIMIT 1
-  `);
-  const target = (targetRows as unknown as { player_id: string; full_name: string; position: string }[])[0];
+  const target = await resolvePlayer(playerName);
   if (!target) return [];
 
   const candidateRows = await db.execute(sql`
