@@ -30,8 +30,9 @@ import { buildLeagueGroups } from "./league-groups.js";
 import { seedInjuryBaselines } from "../db/seeds/injury-baselines.js";
 import { capturePlayerValueSnapshots } from "./value-snapshots.js";
 import { captureTeamValueSnapshots } from "./team-snapshots.js";
-import { isDynastyLeagueFromSleeperSettings } from "./dynasty-leagues.js";
+import { clearDynastyLeagueCache, isDynastyLeagueFromSleeperSettings } from "./dynasty-leagues.js";
 import { clearPowerRankingsCache } from "./power-rankings.js";
+import { clearGlobalScaleCache } from "./composite-values.js";
 import { clearOverviewCache } from "./overview.js";
 import { clearDashboardCache } from "./dashboard.js";
 import { clearPortfolioCache } from "./portfolio.js";
@@ -293,6 +294,8 @@ async function runSync(jobId: string, username: string) {
   }
 
   clearSleeperCache();
+  clearDynastyLeagueCache(sleeperUser.user_id);
+  clearGlobalScaleCache();
   clearPowerRankingsCache(username);
   clearOverviewCache(username);
   clearDashboardCache(username);

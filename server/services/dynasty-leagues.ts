@@ -3,6 +3,30 @@ import { sql } from "drizzle-orm";
 import { getLeague } from "../sleeper/leagues.js";
 
 const DYNASTY_TYPE = 2;
+const DYNASTY_IDS_TTL_MS = 5 * 60 * 1000;
+const LEAGUE_TYPE_TTL_MS = 6 * 60 * 60 * 1000;
+
+const latestDynastyCache = new Map<string, { ids: string[]; expires: number }>();
+const latestDynastyInFlight = new Map<string, Promise<string[]>>();
+const allSeasonsDynastyCache = new Map<string, { ids: string[]; expires: number }>();
+const allSeasonsDynastyInFlight = new Map<string, Promise<string[]>>();
+const leagueTypeCache = new Map<string, { type: number | null; expires: number }>();
+
+export function clearDynastyLeagueCache(userId?: string) {
+  if (!userId) {
+    latestDynastyCache.clear();
+    latestDynastyInFlight.clear();
+    allSeasonsDynastyCache.clear();
+    allSeasonsDynastyInFlight.clear();
+    leagueTypeCache.clear();
+    return;
+  }
+
+  latestDynastyCache.delete(userId);
+  latestDynastyInFlight.delete(userId);
+  allSeasonsDynastyCache.delete(userId);
+  allSeasonsDynastyInFlight.delete(userId);
+}
 
 function toNumber(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -28,6 +52,10 @@ function isDynastyType(type: number | null): boolean {
 }
 
 async function fetchAndCacheLeagueType(leagueId: string): Promise<number | null> {
+  const now = Date.now();
+  const hit = leagueTypeCache.get(leagueId);
+  if (hit && hit.expires > now) return hit.type;
+
   try {
     const league = await getLeague(leagueId);
     if (!league) return null;
@@ -37,8 +65,10 @@ async function fetchAndCacheLeagueType(leagueId: string): Promise<number | null>
       SET raw_json = ${JSON.stringify(league)}, updated_at = ${Date.now()}
       WHERE league_id = ${leagueId}
     `);
+    leagueTypeCache.set(leagueId, { type, expires: Date.now() + LEAGUE_TYPE_TTL_MS });
     return type;
   } catch {
+    leagueTypeCache.set(leagueId, { type: null, expires: Date.now() + 60_000 });
     return null;
   }
 }
@@ -68,29 +98,69 @@ async function resolveDynastyLeagueIds(
 }
 
 export async function getDynastyLeagueIdsForUserLatestSeason(userId: string): Promise<string[]> {
-  const rows = await db.execute(sql`
-    SELECT l.league_id, l.raw_json, l.league_type
-    FROM user_leagues ul
-    JOIN leagues l ON ul.league_id = l.league_id
-    WHERE ul.user_id = ${userId}
-      AND l.season = (
-        SELECT MAX(l2.season)
-        FROM user_leagues ul2
-        JOIN leagues l2 ON ul2.league_id = l2.league_id
-        WHERE ul2.user_id = ${userId}
-      )
-  `);
-  return resolveDynastyLeagueIds(rows as unknown as Array<{ league_id: string; raw_json: string | null; league_type: number | null }>);
+  const now = Date.now();
+  const hit = latestDynastyCache.get(userId);
+  if (hit && hit.expires > now) return hit.ids;
+
+  const pending = latestDynastyInFlight.get(userId);
+  if (pending) return pending;
+
+  const work = (async () => {
+    const rows = await db.execute(sql`
+      SELECT l.league_id, l.raw_json, l.league_type
+      FROM user_leagues ul
+      JOIN leagues l ON ul.league_id = l.league_id
+      WHERE ul.user_id = ${userId}
+        AND l.season = (
+          SELECT MAX(l2.season)
+          FROM user_leagues ul2
+          JOIN leagues l2 ON ul2.league_id = l2.league_id
+          WHERE ul2.user_id = ${userId}
+        )
+    `);
+    const ids = await resolveDynastyLeagueIds(
+      rows as unknown as Array<{ league_id: string; raw_json: string | null; league_type: number | null }>
+    );
+    latestDynastyCache.set(userId, { ids, expires: Date.now() + DYNASTY_IDS_TTL_MS });
+    return ids;
+  })();
+
+  latestDynastyInFlight.set(userId, work);
+  try {
+    return await work;
+  } finally {
+    latestDynastyInFlight.delete(userId);
+  }
 }
 
 export async function getDynastyLeagueIdsForUserAllSeasons(userId: string): Promise<string[]> {
-  const rows = await db.execute(sql`
-    SELECT l.league_id, l.raw_json, l.league_type
-    FROM user_leagues ul
-    JOIN leagues l ON ul.league_id = l.league_id
-    WHERE ul.user_id = ${userId}
-  `);
-  return resolveDynastyLeagueIds(rows as unknown as Array<{ league_id: string; raw_json: string | null; league_type: number | null }>);
+  const now = Date.now();
+  const hit = allSeasonsDynastyCache.get(userId);
+  if (hit && hit.expires > now) return hit.ids;
+
+  const pending = allSeasonsDynastyInFlight.get(userId);
+  if (pending) return pending;
+
+  const work = (async () => {
+    const rows = await db.execute(sql`
+      SELECT l.league_id, l.raw_json, l.league_type
+      FROM user_leagues ul
+      JOIN leagues l ON ul.league_id = l.league_id
+      WHERE ul.user_id = ${userId}
+    `);
+    const ids = await resolveDynastyLeagueIds(
+      rows as unknown as Array<{ league_id: string; raw_json: string | null; league_type: number | null }>
+    );
+    allSeasonsDynastyCache.set(userId, { ids, expires: Date.now() + DYNASTY_IDS_TTL_MS });
+    return ids;
+  })();
+
+  allSeasonsDynastyInFlight.set(userId, work);
+  try {
+    return await work;
+  } finally {
+    allSeasonsDynastyInFlight.delete(userId);
+  }
 }
 
 export function isDynastyLeagueFromSleeperSettings(

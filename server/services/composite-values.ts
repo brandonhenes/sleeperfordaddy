@@ -28,6 +28,18 @@ export interface GlobalScaleParams {
   dp: Scale;
 }
 
+const GLOBAL_SCALE_TTL_MS = 10 * 60 * 1000;
+const globalScaleCache = new Map<
+  "sf" | "1qb",
+  { value: GlobalScaleParams; expires: number }
+>();
+const globalScaleInFlight = new Map<"sf" | "1qb", Promise<GlobalScaleParams>>();
+
+export function clearGlobalScaleCache() {
+  globalScaleCache.clear();
+  globalScaleInFlight.clear();
+}
+
 // ─── Helpers ───
 
 function computeAgreement(scores: number[]): "high" | "medium" | "low" {
@@ -57,7 +69,15 @@ function safeScale(floor: number | null, max: number | null): Scale {
 export async function getGlobalScaleParams(
   mode: "sf" | "1qb"
 ): Promise<GlobalScaleParams> {
-  const rows = mode === "sf"
+  const now = Date.now();
+  const hit = globalScaleCache.get(mode);
+  if (hit && hit.expires > now) return hit.value;
+
+  const pending = globalScaleInFlight.get(mode);
+  if (pending) return pending;
+
+  const work = (async () => {
+    const rows = mode === "sf"
     ? await db.execute(sql`
         SELECT
           percentile_cont(0.05) WITHIN GROUP (ORDER BY fc.dynasty_value)::real AS fc_floor,
@@ -91,20 +111,30 @@ export async function getGlobalScaleParams(
         WHERE pm.position IN ('QB', 'RB', 'WR', 'TE')
       `);
 
-  const r = (rows as unknown as {
-    fc_floor: number | null;
-    fc_max: number | null;
-    ktc_floor: number | null;
-    ktc_max: number | null;
-    dp_floor: number | null;
-    dp_max: number | null;
-  }[])[0];
+    const r = (rows as unknown as {
+      fc_floor: number | null;
+      fc_max: number | null;
+      ktc_floor: number | null;
+      ktc_max: number | null;
+      dp_floor: number | null;
+      dp_max: number | null;
+    }[])[0];
 
-  return {
-    fc: safeScale(r?.fc_floor ?? null, r?.fc_max ?? null),
-    ktc: safeScale(r?.ktc_floor ?? null, r?.ktc_max ?? null),
-    dp: safeScale(r?.dp_floor ?? null, r?.dp_max ?? null),
-  };
+    const value = {
+      fc: safeScale(r?.fc_floor ?? null, r?.fc_max ?? null),
+      ktc: safeScale(r?.ktc_floor ?? null, r?.ktc_max ?? null),
+      dp: safeScale(r?.dp_floor ?? null, r?.dp_max ?? null),
+    };
+    globalScaleCache.set(mode, { value, expires: Date.now() + GLOBAL_SCALE_TTL_MS });
+    return value;
+  })();
+
+  globalScaleInFlight.set(mode, work);
+  try {
+    return await work;
+  } finally {
+    globalScaleInFlight.delete(mode);
+  }
 }
 
 async function getSnapshotAsOfDate(): Promise<string | null> {
