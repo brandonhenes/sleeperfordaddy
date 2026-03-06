@@ -273,10 +273,39 @@ export interface EvaluatedAsset {
 // ─── Trade Finder ───
 
 export interface TradeSuggestion {
-  team_a: { roster_id: number; display_name: string; gives: EvaluatedAsset[]; reason: string };
-  team_b: { roster_id: number; display_name: string; gives: EvaluatedAsset[]; reason: string };
-  mutual_benefit_score: number;
+  partner: {
+    roster_id: number;
+    display_name: string;
+    archetype: string;
+    compatibility_score: number;
+    compatibility_reason: string;
+  };
+  packages: TradePackage[];
+}
+
+export interface TradePackage {
+  type: "balanced" | "consolidation" | "picks_heavy";
+  label: string;
+  you_send: TradePackageAsset[];
+  you_receive: TradePackageAsset[];
+  send_total: number;
+  receive_total: number;
+  delta: number;
   fairness: "fair" | "slight_edge" | "lopsided";
+  why_you_do_it: string;
+  why_they_accept: string;
+  sweetener_hint: string | null;
+}
+
+export interface TradePackageAsset {
+  asset_type: "player" | "pick";
+  label: string;
+  position: string | null;
+  edge_score: number;
+  fc_score: number | null;
+  ktc_score: number | null;
+  dp_score: number | null;
+  source_agreement: "high" | "medium" | "low";
 }
 
 // ─── League History ───

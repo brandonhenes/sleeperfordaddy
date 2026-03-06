@@ -1,34 +1,68 @@
-import type { TradeSuggestion, EvaluatedAsset } from "../../shared/types.js";
-import { getPowerRankings, type RosterRanking, type CoreAsset } from "./power-rankings.js";
+import type {
+  TradeSuggestion,
+  TradePackage,
+  TradePackageAsset,
+} from "../../shared/types.js";
+import {
+  getPowerRankings,
+  type RosterRanking,
+  type CoreAsset,
+} from "./power-rankings.js";
+import type { ScoredPick } from "./draft-picks.js";
 
-// ─── Types ───
+// Constants
 
-interface PositionAnalysis {
-  surplus: CoreAsset[];   // assets above league median at this position
-  deficit: boolean;       // true if position is a need
+const POSITIONS = ["QB", "RB", "WR", "TE"] as const;
+type Pos = (typeof POSITIONS)[number];
+
+const MIN_STARTERS: Record<Pos, number> = { QB: 1, RB: 2, WR: 2, TE: 1 };
+const MIN_EDGE_SCORE = 42;
+const FAIRNESS_BAND = 15;
+
+const ARCHETYPE_WANTS: Record<string, string> = {
+  "Dynasty Juggernaut": "depth maintenance",
+  "All-In Contender": "win-now upgrades",
+  "Fragile Contender": "young replacements for aging stars",
+  "Productive Struggle": "young assets and draft picks",
+  Rebuilder: "draft picks and prospects",
+  "Dead Zone": "either direction, picks or win-now pieces",
+  Competitor: "small upgrades to push into contention",
+};
+
+// Types
+
+interface RosterProfile {
+  roster: RosterRanking;
+  byPos: Record<Pos, CoreAsset[]>;
+  needs: Pos[];
+  surplus: Record<Pos, CoreAsset[]>;
+  needUrgency: Record<Pos, number>;
+  tradeablePicks: ScoredPick[];
 }
 
-interface RosterAnalysis {
-  roster_id: number;
-  owner_id: string | null;
-  display_name: string;
-  is_user: boolean;
-  positions: Record<string, PositionAnalysis>;
-  core_assets: CoreAsset[];
-}
-
-// ─── Helpers ───
+// Helpers
 
 function median(arr: number[]): number {
   if (arr.length === 0) return 0;
   const sorted = [...arr].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  return sorted.length % 2 !== 0
+    ? sorted[mid]
+    : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
-function toEvaluatedAsset(a: CoreAsset): EvaluatedAsset {
+function fairness(delta: number): "fair" | "slight_edge" | "lopsided" {
+  const abs = Math.abs(delta);
+  if (abs <= 5) return "fair";
+  if (abs <= FAIRNESS_BAND) return "slight_edge";
+  return "lopsided";
+}
+
+function assetFromPlayer(a: CoreAsset): TradePackageAsset {
   return {
+    asset_type: "player",
     label: a.full_name,
+    position: a.position,
     edge_score: a.edge_score,
     fc_score: a.fc_score,
     ktc_score: a.ktc_score,
@@ -37,79 +71,330 @@ function toEvaluatedAsset(a: CoreAsset): EvaluatedAsset {
   };
 }
 
-function tradeFairness(delta: number): "fair" | "slight_edge" | "lopsided" {
-  const abs = Math.abs(delta);
-  if (abs <= 4) return "fair";
-  if (abs <= 10) return "slight_edge";
-  return "lopsided";
-}
-
-const POSITIONS = ["QB", "RB", "WR", "TE"];
-
-/** Minimum starter slots per position to consider a position "needed" */
-const MIN_STARTERS: Record<string, number> = { QB: 1, RB: 2, WR: 2, TE: 1 };
-
-// ─── Analysis ───
-
-function computeLeagueMedians(
-  rosters: RosterRanking[]
-): Record<string, number> {
-  const byPos: Record<string, number[]> = { QB: [], RB: [], WR: [], TE: [] };
-  for (const r of rosters) {
-    // Use starter-level assets (top N per position) for medians
-    const posCounts: Record<string, number> = {};
-    for (const a of r.core_assets) {
-      if (!POSITIONS.includes(a.position)) continue;
-      posCounts[a.position] = (posCounts[a.position] ?? 0) + 1;
-      // Only count the first few meaningful assets per position
-      if (posCounts[a.position] <= (MIN_STARTERS[a.position] ?? 1) + 1) {
-        byPos[a.position].push(a.edge_score);
-      }
-    }
-  }
-  const result: Record<string, number> = {};
-  for (const pos of POSITIONS) {
-    result[pos] = median(byPos[pos]);
-  }
-  return result;
-}
-
-function analyzeRoster(
-  roster: RosterRanking,
-  medians: Record<string, number>
-): RosterAnalysis {
-  const positions: Record<string, PositionAnalysis> = {};
-
-  for (const pos of POSITIONS) {
-    const posPlayers = roster.core_assets
-      .filter((a) => a.position === pos)
-      .sort((a, b) => b.edge_score - a.edge_score);
-
-    const aboveMedian = posPlayers.filter((p) => p.edge_score > medians[pos]);
-    const minNeeded = MIN_STARTERS[pos] ?? 1;
-
-    // Surplus: more above-median players than needed
-    const surplus = aboveMedian.length > minNeeded
-      ? aboveMedian.slice(minNeeded)
-      : [];
-
-    // Deficit: fewer above-median players than minimum starters
-    const deficit = aboveMedian.length < minNeeded;
-
-    positions[pos] = { surplus, deficit };
-  }
-
+function assetFromPick(p: ScoredPick): TradePackageAsset {
   return {
-    roster_id: roster.roster_id,
-    owner_id: roster.owner_id,
-    display_name: roster.display_name,
-    is_user: roster.is_user,
-    positions,
-    core_assets: roster.core_assets,
+    asset_type: "pick",
+    label: p.label,
+    position: null,
+    edge_score: p.edge_score,
+    fc_score: null,
+    ktc_score: p.ktc_score,
+    dp_score: p.dp_score,
+    source_agreement: "high",
   };
 }
 
-// ─── Main ───
+function totalEdge(assets: TradePackageAsset[]): number {
+  return assets.reduce((s, a) => s + a.edge_score, 0);
+}
+
+function roundTo(n: number, d: number): number {
+  const f = Math.pow(10, d);
+  return Math.round(n * f) / f;
+}
+
+// Profile Building
+
+function computeLeagueMedians(rosters: RosterRanking[]): Record<Pos, number> {
+  const byPos: Record<Pos, number[]> = { QB: [], RB: [], WR: [], TE: [] };
+  for (const r of rosters) {
+    const counts: Partial<Record<Pos, number>> = {};
+    for (const a of r.core_assets) {
+      const pos = a.position as Pos;
+      if (!POSITIONS.includes(pos)) continue;
+      counts[pos] = (counts[pos] ?? 0) + 1;
+      if ((counts[pos] ?? 0) <= (MIN_STARTERS[pos] ?? 1) + 1) {
+        byPos[pos].push(a.edge_score);
+      }
+    }
+  }
+  const result: Partial<Record<Pos, number>> = {};
+  for (const pos of POSITIONS) result[pos] = median(byPos[pos]);
+  return result as Record<Pos, number>;
+}
+
+function buildProfile(
+  roster: RosterRanking,
+  medians: Record<Pos, number>
+): RosterProfile {
+  const byPos: Record<Pos, CoreAsset[]> = { QB: [], RB: [], WR: [], TE: [] };
+  for (const a of roster.core_assets) {
+    const pos = a.position as Pos;
+    if (POSITIONS.includes(pos)) byPos[pos].push(a);
+  }
+  for (const pos of POSITIONS) {
+    byPos[pos].sort((a, b) => b.edge_score - a.edge_score);
+  }
+
+  const needs: Pos[] = [];
+  const surplus: Record<Pos, CoreAsset[]> = { QB: [], RB: [], WR: [], TE: [] };
+  const needUrgency: Record<Pos, number> = { QB: 0, RB: 0, WR: 0, TE: 0 };
+
+  for (const pos of POSITIONS) {
+    const min = MIN_STARTERS[pos];
+    const aboveMedian = byPos[pos].filter((a) => a.edge_score > medians[pos]);
+
+    if (aboveMedian.length < min) {
+      needs.push(pos);
+      const gap = min - aboveMedian.length;
+      const bestScore = byPos[pos][0]?.edge_score ?? 0;
+      const medianGap = Math.max(0, medians[pos] - bestScore);
+      needUrgency[pos] = Math.min(100, gap * 30 + medianGap);
+    }
+
+    if (aboveMedian.length > min) {
+      surplus[pos] = aboveMedian.slice(min);
+    }
+  }
+
+  const tradeablePicks = (roster.draft_picks ?? [])
+    .filter((p) => p.edge_score > 0)
+    .sort((a, b) => b.edge_score - a.edge_score);
+
+  return { roster, byPos, needs, surplus, needUrgency, tradeablePicks };
+}
+
+// Compatibility Scoring
+
+function scoreCompatibility(
+  user: RosterProfile,
+  opp: RosterProfile
+): { score: number; reason: string } {
+  let score = 0;
+  const reasons: string[] = [];
+
+  for (const pos of POSITIONS) {
+    const userHasSurplus = user.surplus[pos].length > 0;
+    const oppNeedsIt = opp.needs.includes(pos);
+    const oppHasSurplus = opp.surplus[pos].length > 0;
+    const userNeedsIt = user.needs.includes(pos);
+
+    if (userHasSurplus && oppNeedsIt) {
+      score += 25 + (opp.needUrgency[pos] ?? 0) * 0.2;
+      reasons.push(`They need ${pos}, you have surplus`);
+    }
+    if (oppHasSurplus && userNeedsIt) {
+      score += 25 + (user.needUrgency[pos] ?? 0) * 0.2;
+      reasons.push(`You need ${pos}, they have surplus`);
+    }
+  }
+
+  const userArch = user.roster.archetype;
+  const oppArch = opp.roster.archetype;
+  if (
+    (userArch.includes("Contender") && oppArch === "Rebuilder") ||
+    (userArch === "Rebuilder" && oppArch.includes("Contender"))
+  ) {
+    score += 15;
+    reasons.push("Contender/Rebuilder alignment");
+  }
+
+  if (user.tradeablePicks.length > 3 && opp.needs.length > 0) {
+    score += 5;
+  }
+  if (opp.tradeablePicks.length > 3 && user.needs.length > 0) {
+    score += 5;
+  }
+
+  const reason =
+    reasons.length > 0
+      ? reasons.slice(0, 3).join(". ") + "."
+      : "Limited overlap in needs and surplus.";
+
+  return { score: Math.min(100, Math.round(score)), reason };
+}
+
+// Package Generation
+
+function generatePackages(
+  user: RosterProfile,
+  opp: RosterProfile,
+  _mode: "sf" | "1qb"
+): TradePackage[] {
+  const packages: TradePackage[] = [];
+
+  for (const userPos of POSITIONS) {
+    if (user.surplus[userPos].length === 0) continue;
+    for (const oppPos of POSITIONS) {
+      if (userPos === oppPos) continue;
+      if (opp.surplus[oppPos].length === 0) continue;
+
+      const userGives = user.surplus[userPos][0];
+      const oppGives = opp.surplus[oppPos][0];
+      if (userGives.edge_score < MIN_EDGE_SCORE || oppGives.edge_score < MIN_EDGE_SCORE) {
+        continue;
+      }
+
+      const delta = oppGives.edge_score - userGives.edge_score;
+      const f = fairness(delta);
+      if (f === "lopsided") continue;
+
+      const send = [assetFromPlayer(userGives)];
+      const receive = [assetFromPlayer(oppGives)];
+
+      packages.push({
+        type: "balanced",
+        label: "Balanced Swap",
+        you_send: send,
+        you_receive: receive,
+        send_total: roundTo(totalEdge(send), 1),
+        receive_total: roundTo(totalEdge(receive), 1),
+        delta: roundTo(delta, 1),
+        fairness: f,
+        why_you_do_it: user.needs.includes(oppPos as Pos)
+          ? `Fills your ${oppPos} need with their surplus`
+          : `Upgrades ${oppPos} depth, trades ${userPos} surplus`,
+        why_they_accept: opp.needs.includes(userPos as Pos)
+          ? `Fills their ${userPos} need. ${ARCHETYPE_WANTS[opp.roster.archetype] ?? ""}`
+          : `Upgrades their ${userPos}, trades ${oppPos} depth`,
+        sweetener_hint: Math.abs(delta) > 3 && Math.abs(delta) <= 10
+          ? `Add a late-round pick to ${delta > 0 ? "sweeten for them" : "balance for you"}`
+          : null,
+      });
+    }
+  }
+
+  for (const oppPos of POSITIONS) {
+    if (opp.surplus[oppPos].length === 0) continue;
+    if (!user.needs.includes(oppPos as Pos)) continue;
+
+    const target = opp.surplus[oppPos][0];
+    if (target.edge_score < 55) continue;
+
+    const sendAssets: CoreAsset[] = [];
+    const usedPos = new Set<string>();
+
+    for (const pos of POSITIONS) {
+      if (pos === oppPos) continue;
+      if (usedPos.size >= 2) break;
+      const oppNeedsThis = opp.needs.includes(pos as Pos);
+      const available = user.surplus[pos].length > 0
+        ? user.surplus[pos]
+        : oppNeedsThis
+          ? user.byPos[pos].filter((a) => a.edge_score >= MIN_EDGE_SCORE)
+          : [];
+      if (available.length === 0) continue;
+
+      const pick = available.find((a) => !sendAssets.some((s) => s.player_id === a.player_id));
+      if (pick && !usedPos.has(pos)) {
+        sendAssets.push(pick);
+        usedPos.add(pos);
+      }
+    }
+
+    if (sendAssets.length < 2) continue;
+
+    const send = sendAssets.map(assetFromPlayer);
+    const receive = [assetFromPlayer(target)];
+    const delta = totalEdge(receive) - totalEdge(send);
+    const f = fairness(delta);
+    if (f === "lopsided" && delta < -FAIRNESS_BAND) continue;
+
+    packages.push({
+      type: "consolidation",
+      label: "2-for-1 Consolidation",
+      you_send: send,
+      you_receive: receive,
+      send_total: roundTo(totalEdge(send), 1),
+      receive_total: roundTo(totalEdge(receive), 1),
+      delta: roundTo(delta, 1),
+      fairness: f,
+      why_you_do_it: `Consolidate depth into a ${oppPos} starter upgrade`,
+      why_they_accept: `Gets ${[...usedPos].join(" + ")} help. They're a ${opp.roster.archetype} who wants ${ARCHETYPE_WANTS[opp.roster.archetype] ?? "flexibility"}.`,
+      sweetener_hint: delta < -3
+        ? "You may need to add a mid-round pick to get them to accept"
+        : delta > 8
+          ? "You're overpaying slightly. Try removing the weaker piece."
+          : null,
+    });
+  }
+
+  if (user.tradeablePicks.length > 0) {
+    for (const oppPos of POSITIONS) {
+      if (!user.needs.includes(oppPos as Pos)) continue;
+      if (opp.surplus[oppPos].length === 0) continue;
+
+      const target = opp.surplus[oppPos][0];
+      if (target.edge_score < 50) continue;
+
+      const bestPick = user.tradeablePicks[0];
+      if (!bestPick) continue;
+
+      const send: TradePackageAsset[] = [assetFromPick(bestPick)];
+      let sendVal = bestPick.edge_score;
+
+      const gap = target.edge_score - sendVal;
+      if (gap > 5) {
+        const secondPick = user.tradeablePicks[1];
+        if (secondPick && secondPick.edge_score + sendVal >= target.edge_score * 0.7) {
+          send.push(assetFromPick(secondPick));
+          sendVal += secondPick.edge_score;
+        } else {
+          for (const pos of POSITIONS) {
+            if (pos === oppPos) continue;
+            const depth = user.byPos[pos]?.filter(
+              (a) => a.edge_score >= 40 && a.edge_score <= gap + 5
+            );
+            if (depth && depth.length > 0) {
+              send.push(assetFromPlayer(depth[0]));
+              sendVal += depth[0].edge_score;
+              break;
+            }
+          }
+        }
+      }
+
+      const receive = [assetFromPlayer(target)];
+      const delta = totalEdge(receive) - totalEdge(send);
+      const f = fairness(delta);
+      if (f === "lopsided" && delta < -FAIRNESS_BAND) continue;
+
+      const isDupe = packages.some(
+        (p) =>
+          p.you_receive[0]?.label === target.full_name &&
+          p.type !== "picks_heavy"
+      );
+      if (isDupe && packages.length > 2) continue;
+
+      packages.push({
+        type: "picks_heavy",
+        label: "Picks + Depth",
+        you_send: send,
+        you_receive: receive,
+        send_total: roundTo(totalEdge(send), 1),
+        receive_total: roundTo(totalEdge(receive), 1),
+        delta: roundTo(delta, 1),
+        fairness: f,
+        why_you_do_it: `Acquire ${oppPos} starter using draft capital`,
+        why_they_accept: `Gets future picks. They're a ${opp.roster.archetype} who wants ${ARCHETYPE_WANTS[opp.roster.archetype] ?? "draft capital"}.`,
+        sweetener_hint:
+          delta < -5
+            ? "Consider upgrading the pick round or adding another asset"
+            : null,
+      });
+    }
+  }
+
+  const seen = new Set<string>();
+  const deduped: TradePackage[] = [];
+  for (const pkg of packages) {
+    const key = `${pkg.type}:${pkg.you_receive.map((a) => a.label).join(",")}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(pkg);
+  }
+
+  const typeOrder = { consolidation: 0, balanced: 1, picks_heavy: 2 };
+  deduped.sort((a, b) => {
+    const aDelta = a.delta;
+    const bDelta = b.delta;
+    return bDelta - aDelta || (typeOrder[a.type] ?? 9) - (typeOrder[b.type] ?? 9);
+  });
+
+  return deduped.slice(0, 3);
+}
+
+// Main
 
 export async function findTrades(
   username: string,
@@ -119,129 +404,41 @@ export async function findTrades(
   const league = allLeagues.find((l) => l.league_id === leagueId);
   if (!league || league.rosters.length < 2) return [];
 
+  const mode = league.mode;
   const medians = computeLeagueMedians(league.rosters);
-  const analyses = league.rosters.map((r) => analyzeRoster(r, medians));
+  const profiles = league.rosters.map((r) => buildProfile(r, medians));
 
-  const userAnalysis = analyses.find((a) => a.is_user);
-  if (!userAnalysis) return [];
+  const userProfile = profiles.find((p) => p.roster.is_user);
+  if (!userProfile) return [];
 
-  const opponents = analyses.filter((a) => !a.is_user);
+  const opponents = profiles.filter((p) => !p.roster.is_user);
+
+  const ranked = opponents
+    .map((opp) => {
+      const { score, reason } = scoreCompatibility(userProfile, opp);
+      return { opp, score, reason };
+    })
+    .filter((r) => r.score > 10)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 8);
+
   const suggestions: TradeSuggestion[] = [];
 
-  // ─── 1-for-1 balanced swaps ───
-  for (const opp of opponents) {
-    // Find positions where user has surplus and opponent has deficit, and vice versa
-    for (const userSurplusPos of POSITIONS) {
-      if (!userAnalysis.positions[userSurplusPos]?.surplus.length) continue;
+  for (const { opp, score, reason } of ranked) {
+    const packages = generatePackages(userProfile, opp, mode);
+    if (packages.length === 0) continue;
 
-      for (const oppSurplusPos of POSITIONS) {
-        if (userSurplusPos === oppSurplusPos) continue;
-        if (!opp.positions[oppSurplusPos]?.surplus.length) continue;
-
-        // Check mutual need: user needs oppSurplusPos, opp needs userSurplusPos
-        const userNeedsOppPos = userAnalysis.positions[oppSurplusPos]?.deficit;
-        const oppNeedsUserPos = opp.positions[userSurplusPos]?.deficit;
-
-        if (!userNeedsOppPos && !oppNeedsUserPos) continue;
-
-        // Pick best surplus asset from each side
-        const userGives = userAnalysis.positions[userSurplusPos].surplus[0];
-        const oppGives = opp.positions[oppSurplusPos].surplus[0];
-
-        if (!userGives || !oppGives) continue;
-        // Skip low-value assets
-        if (userGives.edge_score < 45 || oppGives.edge_score < 45) continue;
-
-        const delta = userGives.edge_score - oppGives.edge_score;
-        const fairness = tradeFairness(delta);
-        if (fairness === "lopsided") continue;
-
-        const mutualBenefit =
-          (userNeedsOppPos ? oppGives.edge_score : 0) +
-          (oppNeedsUserPos ? userGives.edge_score : 0);
-
-        suggestions.push({
-          team_a: {
-            roster_id: userAnalysis.roster_id,
-            display_name: userAnalysis.display_name,
-            gives: [toEvaluatedAsset(userGives)],
-            reason: userNeedsOppPos
-              ? `Fills ${oppSurplusPos} need, surplus at ${userSurplusPos}`
-              : `Trades ${userSurplusPos} depth for ${oppSurplusPos} upgrade`,
-          },
-          team_b: {
-            roster_id: opp.roster_id,
-            display_name: opp.display_name,
-            gives: [toEvaluatedAsset(oppGives)],
-            reason: oppNeedsUserPos
-              ? `Fills ${userSurplusPos} need, surplus at ${oppSurplusPos}`
-              : `Trades ${oppSurplusPos} depth for ${userSurplusPos} upgrade`,
-          },
-          mutual_benefit_score: mutualBenefit,
-          fairness,
-        });
-      }
-    }
+    suggestions.push({
+      partner: {
+        roster_id: opp.roster.roster_id,
+        display_name: opp.roster.display_name,
+        archetype: opp.roster.archetype,
+        compatibility_score: score,
+        compatibility_reason: reason,
+      },
+      packages,
+    });
   }
 
-  // ─── 2-for-1 consolidation trades ───
-  // User sends 2 lower-value assets to fill opponent needs, gets 1 high-value asset back
-  for (const opp of opponents) {
-    for (const oppSurplusPos of POSITIONS) {
-      if (!opp.positions[oppSurplusPos]?.surplus.length) continue;
-      if (!userAnalysis.positions[oppSurplusPos]?.deficit) continue;
-
-      const oppGives = opp.positions[oppSurplusPos].surplus[0];
-      if (!oppGives || oppGives.edge_score < 50) continue;
-
-      // Find 2 user surplus assets from different positions that opponent needs
-      const userSurplusAssets: CoreAsset[] = [];
-      const usedPositions = new Set<string>();
-
-      for (const pos of POSITIONS) {
-        if (pos === oppSurplusPos) continue;
-        if (!opp.positions[pos]?.deficit) continue;
-        const surplus = userAnalysis.positions[pos]?.surplus;
-        if (!surplus?.length) continue;
-
-        const asset = surplus[0];
-        if (asset.edge_score < 42) continue;
-        if (!usedPositions.has(pos)) {
-          userSurplusAssets.push(asset);
-          usedPositions.add(pos);
-        }
-        if (userSurplusAssets.length >= 2) break;
-      }
-
-      if (userSurplusAssets.length < 2) continue;
-
-      const userTotal = userSurplusAssets.reduce((s, a) => s + a.edge_score, 0);
-      const delta = userTotal - oppGives.edge_score;
-      // 2-for-1 should give slight overpay from sender side
-      if (Math.abs(delta) > 15) continue;
-
-      const mutualBenefit = oppGives.edge_score + userTotal * 0.5;
-
-      suggestions.push({
-        team_a: {
-          roster_id: userAnalysis.roster_id,
-          display_name: userAnalysis.display_name,
-          gives: userSurplusAssets.map(toEvaluatedAsset),
-          reason: `Consolidates depth to upgrade ${oppSurplusPos}`,
-        },
-        team_b: {
-          roster_id: opp.roster_id,
-          display_name: opp.display_name,
-          gives: [toEvaluatedAsset(oppGives)],
-          reason: `Gets ${[...usedPositions].join("+")} help, trades ${oppSurplusPos} surplus`,
-        },
-        mutual_benefit_score: mutualBenefit,
-        fairness: tradeFairness(delta),
-      });
-    }
-  }
-
-  // Sort by mutual benefit, return top 15
-  suggestions.sort((a, b) => b.mutual_benefit_score - a.mutual_benefit_score);
-  return suggestions.slice(0, 15);
+  return suggestions;
 }
