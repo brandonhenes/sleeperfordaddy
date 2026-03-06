@@ -14,6 +14,7 @@ import TradeFinder from "./pages/TradeFinder";
 import LeagueHistory from "./pages/LeagueHistory";
 import InjuryTracker from "./pages/InjuryTracker";
 import WaiverWire from "./pages/WaiverWire";
+import FreeAgents from "./pages/FreeAgents";
 import Settings from "./pages/Settings";
 import HowItWorks from "./pages/HowItWorks";
 import NotFound from "./pages/NotFound";
@@ -36,6 +37,7 @@ export default function App() {
       <Route path="/history/:username" component={LeagueHistory} />
       <Route path="/injuries/:username" component={InjuryTracker} />
       <Route path="/waivers/:username" component={WaiverWire} />
+      <Route path="/free-agents/:username" component={FreeAgents} />
       <Route path="/settings" component={Settings} />
       <Route path="/how-it-works" component={HowItWorks} />
       {/* Keep legacy route working */}

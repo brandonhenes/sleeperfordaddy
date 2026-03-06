@@ -150,17 +150,17 @@ function WaiverTable({ players, filter }: { players: WaiverPlayer[]; filter: Pos
   );
 }
 
-export default function WaiverWire() {
-  const { username } = useParams<{ username: string }>();
+export function WaiverContent() {
+  const params = useParams<{ username: string }>();
+  const storedUser = typeof window !== "undefined" ? localStorage.getItem("edge_username") ?? "" : "";
+  const username = params.username ?? storedUser;
   const { data: overview, isLoading: overviewLoading } = useOverview(username);
   const [selectedLeagueId, setSelectedLeagueId] = useState("");
   const [posFilter, setPosFilter] = useState<PosFilter>("ALL");
 
-  // Build league list from overview league_groups
   const leagues: { league_id: string; name: string }[] = [];
   if (overview?.league_groups) {
     for (const g of overview.league_groups) {
-      // Use the latest league in each group
       if (g.leagues.length > 0) {
         leagues.push({ league_id: g.leagues[g.leagues.length - 1], name: g.name });
       }
@@ -175,6 +175,59 @@ export default function WaiverWire() {
 
   const { data: players, isLoading: waiverLoading } = useWaiverWire(selectedLeagueId);
 
+  if (overviewLoading) {
+    return <div className="animate-pulse" style={{ ...cardStyle, height: 60, marginTop: 16 }} />;
+  }
+
+  if (leagues.length === 0) {
+    return (
+      <div style={{ ...cardStyle, padding: 40, marginTop: 16, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>
+        No leagues found. Sync your account first.
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <LeagueSelector leagues={leagues} selected={selectedLeagueId} onChange={setSelectedLeagueId} />
+
+      <div style={{ display: "flex", gap: 6, marginTop: 12 }}>
+        {(["ALL", "QB", "RB", "WR", "TE"] as PosFilter[]).map((pos) => (
+          <button
+            key={pos}
+            onClick={() => setPosFilter(pos)}
+            style={{
+              background: posFilter === pos ? "var(--amber)" : "var(--card)",
+              color: posFilter === pos ? "var(--dark-base)" : "var(--text-dim)",
+              border: `1px solid ${posFilter === pos ? "var(--amber)" : "var(--border)"}`,
+              borderRadius: 6,
+              padding: "6px 14px",
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            {pos}
+          </button>
+        ))}
+      </div>
+
+      <div style={{ marginTop: 12 }}>
+        {waiverLoading ? (
+          <div style={{ display: "grid", gap: 12 }}>
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="animate-pulse" style={{ ...cardStyle, height: 60 }} />
+            ))}
+          </div>
+        ) : (
+          <WaiverTable players={players ?? []} filter={posFilter} />
+        )}
+      </div>
+    </>
+  );
+}
+
+export default function WaiverWire() {
   return (
     <AppShell>
       <div style={{ padding: "28px 0 8px" }}>
@@ -183,52 +236,7 @@ export default function WaiverWire() {
           Free agents available in your leagues, sorted by Edge Score
         </p>
       </div>
-
-      {overviewLoading ? (
-        <div className="animate-pulse" style={{ ...cardStyle, height: 60, marginTop: 16 }} />
-      ) : leagues.length === 0 ? (
-        <div style={{ ...cardStyle, padding: 40, marginTop: 16, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>
-          No leagues found. Sync your account first.
-        </div>
-      ) : (
-        <>
-          <LeagueSelector leagues={leagues} selected={selectedLeagueId} onChange={setSelectedLeagueId} />
-
-          {/* Position filter */}
-          <div style={{ display: "flex", gap: 6, marginTop: 12 }}>
-            {(["ALL", "QB", "RB", "WR", "TE"] as PosFilter[]).map((pos) => (
-              <button
-                key={pos}
-                onClick={() => setPosFilter(pos)}
-                style={{
-                  background: posFilter === pos ? "var(--amber)" : "var(--card)",
-                  color: posFilter === pos ? "var(--dark-base)" : "var(--text-dim)",
-                  border: `1px solid ${posFilter === pos ? "var(--amber)" : "var(--border)"}`,
-                  borderRadius: 6,
-                  padding: "6px 14px",
-                  fontSize: 12,
-                  fontWeight: 600,
-                  cursor: "pointer",
-                }}
-              >
-                {pos}
-              </button>
-            ))}
-          </div>
-
-          <div style={{ marginTop: 12 }}>
-            {waiverLoading ? (
-              <div style={{ display: "grid", gap: 12 }}>
-                {[1, 2, 3].map((i) => (
-                  <div key={i} className="animate-pulse" style={{ ...cardStyle, height: 60 }} />
-                ))}
-              </div>
-            ) : (
-              <WaiverTable players={players ?? []} filter={posFilter} />
-            )}
-          </div>
-        </>
-      )}
+      <WaiverContent />
     </AppShell>
   );
 }

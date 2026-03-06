@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+﻿import { useState, useRef, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { avatarUrl } from "../lib/utils";
 import { useNotifications, type Notification } from "../hooks/use-notifications";
@@ -10,19 +10,15 @@ interface NavBarProps {
 
 const NAV_ITEMS = [
   { path: "dashboard", label: "Dashboard", icon: "⚡" },
+  { path: "power", label: "Power", icon: "📋" },
   { path: "portfolio", label: "Portfolio", icon: "📊" },
   { path: "market", label: "Market", icon: "📈" },
-  { path: "action", label: "Action", icon: "🎯" },
-  { path: "arbitrage", label: "Arbitrage", icon: "🔀" },
-  { path: "power", label: "Power", icon: "📋" },
-  { path: "signals", label: "Signals", icon: "📊" },
   { path: "trade-calculator", label: "Trade Calc", icon: "⚖️" },
   { path: "trade-finder", label: "Trade Finder", icon: "🔍" },
-  { path: "history", label: "History", icon: "📅" },
+  { path: "free-agents", label: "Free Agents", icon: "🔀" },
+  { path: "history", label: "History", icon: "🕒" },
   { path: "injuries", label: "Injuries", icon: "🏥" },
-  { path: "waivers", label: "Waivers", icon: "📋" },
   { path: "settings", label: "Settings", icon: "⚙️" },
-  { path: "how-it-works", label: "How It Works", icon: "?" },
 ];
 
 const sevColor: Record<string, string> = {
@@ -157,7 +153,7 @@ function NotificationBell({ username }: { username: string }) {
 export default function NavBar({ username, avatarId }: NavBarProps) {
   const [location] = useLocation();
 
-  const noUserPaths = ["market", "trade-calculator", "settings", "how-it-works"];
+  const noUserPaths = ["market", "trade-calculator", "settings"];
 
   function isActive(path: string): boolean {
     if (noUserPaths.includes(path)) return location.startsWith(`/${path}`);
@@ -245,6 +241,27 @@ export default function NavBar({ username, avatarId }: NavBarProps) {
           gap: 12,
         }}
       >
+        <Link href="/how-it-works">
+          <button
+            style={{
+              background: "none",
+              border: "1px solid var(--border)",
+              borderRadius: "50%",
+              width: 28,
+              height: 28,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "pointer",
+              fontSize: 14,
+              fontWeight: 700,
+              color: "var(--text-muted)",
+            }}
+            aria-label="How It Works"
+          >
+            ?
+          </button>
+        </Link>
         <NotificationBell username={username} />
         <span style={{ color: "var(--text-muted)", fontSize: 12 }}>
           {username}
