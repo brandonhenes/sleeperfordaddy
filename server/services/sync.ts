@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto";
+import { and, eq } from "drizzle-orm";
 import { SEASONS, SLEEPER_CONCURRENCY, TRANSACTION_ROUNDS } from "../../shared/constants.js";
 import { getUser } from "../sleeper/users.js";
 import { getUserLeagues, getLeagueUsers } from "../sleeper/leagues.js";
@@ -7,6 +8,8 @@ import { getLeagueMatchups } from "../sleeper/matchups.js";
 import { getLeagueTransactions } from "../sleeper/transactions.js";
 import { getNflState, getAllPlayers } from "../sleeper/players.js";
 import { clearSleeperCache } from "../sleeper/client.js";
+import { getDraftPicks, getLeagueDrafts, getTradedPicks } from "../sleeper/drafts.js";
+import { db } from "../db/connection.js";
 import {
   createSyncJob,
   updateSyncJob,
@@ -22,6 +25,7 @@ import { upsertRoster, replaceAllLeagueRosters } from "../db/queries/rosters.js"
 import { upsertTrade, upsertTradeAsset } from "../db/queries/trades.js";
 import { upsertH2H } from "../db/queries/h2h.js";
 import { bulkUpsertPlayers } from "../db/queries/players.js";
+import { league_draft_orders, league_traded_picks } from "../db/schema.js";
 import { buildLeagueGroups } from "./league-groups.js";
 import { seedInjuryBaselines } from "../db/seeds/injury-baselines.js";
 import { capturePlayerValueSnapshots } from "./value-snapshots.js";
@@ -319,6 +323,9 @@ async function processLeague(league: SleeperLeague, userId: string) {
     league_type: leagueType,
     group_id: null, // Will be set by league grouping service
     raw_json: JSON.stringify(league),
+    roster_positions: league.roster_positions ?? null,
+    draft_rounds: Number(league.settings?.draft_rounds) || 4,
+    scoring_settings: league.scoring_settings ?? null,
   });
 
   // Store user-league mapping
@@ -375,6 +382,35 @@ async function processLeague(league: SleeperLeague, userId: string) {
 
   // Single atomic replace: delete ALL league roster_players, then batch insert
   await replaceAllLeagueRosters(league.league_id, allPlayers);
+
+  // Store traded picks for read-time use
+  try {
+    const tradedPicks = await getTradedPicks(league.league_id);
+    await db
+      .delete(league_traded_picks)
+      .where(eq(league_traded_picks.league_id, league.league_id));
+    if (tradedPicks.length > 0) {
+      await db.insert(league_traded_picks).values(
+        tradedPicks.map((tp) => ({
+          league_id: league.league_id,
+          season: tp.season,
+          round: tp.round,
+          roster_id: tp.roster_id,
+          owner_id: tp.owner_id,
+          previous_owner_id: tp.previous_owner_id,
+        }))
+      );
+    }
+  } catch (err) {
+    console.error(`[sync] Error storing traded picks for ${league.league_id}:`, err);
+  }
+
+  // Resolve and store draft order for read-time use
+  try {
+    await syncDraftOrder(league.league_id, rosterList);
+  } catch (err) {
+    console.error(`[sync] Error resolving draft order for ${league.league_id}:`, err);
+  }
 
   // Fetch and store matchups (for H2H calculation)
   await processMatchups(league.league_id, userId, rosterList);
@@ -583,6 +619,88 @@ async function normalizeTradeAssets(
 }
 
 // ─── Helpers ───
+
+async function syncDraftOrder(leagueId: string, rosterList: SleeperRoster[]) {
+  const drafts = await getLeagueDrafts(leagueId);
+  const currentYear = String(new Date().getFullYear());
+
+  const currentYearDrafts = drafts
+    .filter((d) => d.season === currentYear && Number(d.settings?.rounds ?? 99) <= 8)
+    .sort((a, b) => Number(a.settings?.rounds ?? 99) - Number(b.settings?.rounds ?? 99));
+
+  const rookieDraft = currentYearDrafts.find((d) => !!d.slot_to_roster_id || !!d.draft_order)
+    ?? currentYearDrafts[0];
+
+  if (!rookieDraft) return;
+
+  let order: Map<number, number> | null = null;
+
+  if (rookieDraft.slot_to_roster_id) {
+    const byRoster = new Map<number, number>();
+    for (const [slotRaw, rosterRaw] of Object.entries(rookieDraft.slot_to_roster_id)) {
+      const slot = Number(slotRaw);
+      const rosterId = Number(rosterRaw);
+      if (Number.isFinite(slot) && Number.isFinite(rosterId)) {
+        byRoster.set(rosterId, slot);
+      }
+    }
+    if (byRoster.size > 0) order = byRoster;
+  }
+
+  if (!order && rookieDraft.draft_order) {
+    const ownerToRoster = new Map<string, number>();
+    for (const r of rosterList) {
+      if (r.owner_id) ownerToRoster.set(r.owner_id, r.roster_id);
+    }
+    const mapped = new Map<number, number>();
+    for (const [userId, posRaw] of Object.entries(rookieDraft.draft_order)) {
+      const rosterId = ownerToRoster.get(userId);
+      const pos = Number(posRaw);
+      if (rosterId != null && Number.isFinite(pos)) {
+        mapped.set(rosterId, pos);
+      }
+    }
+    if (mapped.size > 0) order = mapped;
+  }
+
+  if (!order) {
+    const picks = await getDraftPicks(rookieDraft.draft_id);
+    if (picks && picks.length > 0) {
+      const firstRound = picks
+        .filter((p) => Number(p.round) === 1)
+        .sort((a, b) => Number(a.pick_no) - Number(b.pick_no));
+      if (firstRound.length > 0) {
+        const byRoster = new Map<number, number>();
+        for (const p of firstRound) {
+          const rosterId = Number(p.roster_id);
+          const slot = Number(p.draft_slot);
+          if (Number.isFinite(rosterId) && Number.isFinite(slot) && !byRoster.has(rosterId)) {
+            byRoster.set(rosterId, slot);
+          }
+        }
+        if (byRoster.size > 0) order = byRoster;
+      }
+    }
+  }
+
+  if (!order || order.size === 0) return;
+
+  await db.delete(league_draft_orders).where(
+    and(
+      eq(league_draft_orders.league_id, leagueId),
+      eq(league_draft_orders.season, currentYear)
+    )
+  );
+
+  await db.insert(league_draft_orders).values(
+    [...order.entries()].map(([rosterId, position]) => ({
+      league_id: leagueId,
+      season: currentYear,
+      roster_id: rosterId,
+      draft_position: position,
+    }))
+  );
+}
 
 function dedupeLeagues(leagues: SleeperLeague[]): SleeperLeague[] {
   const seen = new Set<string>();
