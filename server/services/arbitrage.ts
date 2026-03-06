@@ -3,6 +3,10 @@ import { sql } from "drizzle-orm";
 import { getCompositeValues } from "./composite-values.js";
 import { getDynastyLeagueIdsForUserLatestSeason } from "./dynasty-leagues.js";
 
+const ARBITRAGE_TTL_MS = 30_000;
+const arbitrageCache = new Map<string, { data: ArbitrageGap[]; expires: number }>();
+const arbitrageInFlight = new Map<string, Promise<ArbitrageGap[]>>();
+
 // ─── Types ───
 
 export interface ArbitrageGap {
@@ -23,6 +27,15 @@ export interface ArbitrageGap {
 // ─── Main ───
 
 export async function getFreeAgentGaps(username: string): Promise<ArbitrageGap[]> {
+  const cacheKey = username.toLowerCase();
+  const now = Date.now();
+  const hit = arbitrageCache.get(cacheKey);
+  if (hit && hit.expires > now) return hit.data;
+
+  const pending = arbitrageInFlight.get(cacheKey);
+  if (pending) return pending;
+
+  const work = (async () => {
   const userRows = await db.execute(sql`
     SELECT user_id FROM users WHERE LOWER(username) = LOWER(${username}) LIMIT 1
   `);
@@ -164,4 +177,14 @@ export async function getFreeAgentGaps(username: string): Promise<ArbitrageGap[]
     })
     .filter((r) => r.edge_score > 0)
     .sort((a, b) => b.edge_score - a.edge_score);
+  })();
+
+  arbitrageInFlight.set(cacheKey, work);
+  try {
+    const data = await work;
+    arbitrageCache.set(cacheKey, { data, expires: Date.now() + ARBITRAGE_TTL_MS });
+    return data;
+  } finally {
+    arbitrageInFlight.delete(cacheKey);
+  }
 }

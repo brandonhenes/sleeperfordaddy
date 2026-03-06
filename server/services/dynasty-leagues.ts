@@ -44,13 +44,13 @@ async function fetchAndCacheLeagueType(leagueId: string): Promise<number | null>
 }
 
 async function resolveDynastyLeagueIds(
-  rows: Array<{ league_id: string; raw_json: string | null }>
+  rows: Array<{ league_id: string; raw_json: string | null; league_type: number | null }>
 ): Promise<string[]> {
   const dynasty: string[] = [];
   const unknown: string[] = [];
 
   for (const r of rows) {
-    const type = typeFromRawJson(r.raw_json);
+    const type = r.league_type ?? typeFromRawJson(r.raw_json);
     if (type == null) unknown.push(r.league_id);
     else if (isDynastyType(type)) dynasty.push(r.league_id);
   }
@@ -69,7 +69,7 @@ async function resolveDynastyLeagueIds(
 
 export async function getDynastyLeagueIdsForUserLatestSeason(userId: string): Promise<string[]> {
   const rows = await db.execute(sql`
-    SELECT l.league_id, l.raw_json
+    SELECT l.league_id, l.raw_json, l.league_type
     FROM user_leagues ul
     JOIN leagues l ON ul.league_id = l.league_id
     WHERE ul.user_id = ${userId}
@@ -80,17 +80,17 @@ export async function getDynastyLeagueIdsForUserLatestSeason(userId: string): Pr
         WHERE ul2.user_id = ${userId}
       )
   `);
-  return resolveDynastyLeagueIds(rows as unknown as Array<{ league_id: string; raw_json: string | null }>);
+  return resolveDynastyLeagueIds(rows as unknown as Array<{ league_id: string; raw_json: string | null; league_type: number | null }>);
 }
 
 export async function getDynastyLeagueIdsForUserAllSeasons(userId: string): Promise<string[]> {
   const rows = await db.execute(sql`
-    SELECT l.league_id, l.raw_json
+    SELECT l.league_id, l.raw_json, l.league_type
     FROM user_leagues ul
     JOIN leagues l ON ul.league_id = l.league_id
     WHERE ul.user_id = ${userId}
   `);
-  return resolveDynastyLeagueIds(rows as unknown as Array<{ league_id: string; raw_json: string | null }>);
+  return resolveDynastyLeagueIds(rows as unknown as Array<{ league_id: string; raw_json: string | null; league_type: number | null }>);
 }
 
 export function isDynastyLeagueFromSleeperSettings(

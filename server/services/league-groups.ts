@@ -136,9 +136,16 @@ export async function buildLeagueGroups(
     });
   }
 
-  // Update group_ids in the database
+  // Update only rows that actually changed to avoid write-on-read overhead.
+  const updates: Array<{ leagueId: string; groupId: string }> = [];
   for (const [leagueId, groupId] of leagueToGroup) {
-    await updateLeagueGroupId(leagueId, groupId);
+    const current = leagueMap.get(leagueId);
+    if (!current) continue;
+    if ((current.group_id ?? null) === groupId) continue;
+    updates.push({ leagueId, groupId });
+  }
+  if (updates.length > 0) {
+    await Promise.all(updates.map((u) => updateLeagueGroupId(u.leagueId, u.groupId)));
   }
 
   // Sort groups: active first, then by max_season desc, then name

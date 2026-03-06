@@ -3,6 +3,12 @@ import { sql } from "drizzle-orm";
 import { getDynastyLeagueIdsForUserLatestSeason } from "./dynasty-leagues.js";
 import { getCompositeValues, getGlobalScaleParams } from "./composite-values.js";
 
+const ACTION_TTL_MS = 30_000;
+const sellCache = new Map<string, { data: SellCandidate[]; expires: number }>();
+const sellInFlight = new Map<string, Promise<SellCandidate[]>>();
+const buyCache = new Map<string, { data: BuyOpportunity[]; expires: number }>();
+const buyInFlight = new Map<string, Promise<BuyOpportunity[]>>();
+
 // ─── Types ───
 
 export interface SellCandidate {
@@ -98,6 +104,15 @@ async function getUserExposure(username: string): Promise<{ totalLeagues: number
 export async function getSellCandidates(
   username: string
 ): Promise<SellCandidate[]> {
+  const cacheKey = username.toLowerCase();
+  const now = Date.now();
+  const hit = sellCache.get(cacheKey);
+  if (hit && hit.expires > now) return hit.data;
+
+  const pending = sellInFlight.get(cacheKey);
+  if (pending) return pending;
+
+  const work = (async () => {
   const { totalLeagues, rows } = await getUserExposure(username);
   if (totalLeagues === 0) return [];
   const compMap = await getCompositeValues(
@@ -137,6 +152,16 @@ export async function getSellCandidates(
     })
     .filter((r) => r.composite_tag != null || (r.trend_30day ?? 0) <= -3)
     .sort((a, b) => (a.trend_30day ?? 0) - (b.trend_30day ?? 0));
+  })();
+
+  sellInFlight.set(cacheKey, work);
+  try {
+    const data = await work;
+    sellCache.set(cacheKey, { data, expires: Date.now() + ACTION_TTL_MS });
+    return data;
+  } finally {
+    sellInFlight.delete(cacheKey);
+  }
 }
 
 /**
@@ -147,6 +172,15 @@ export async function getSellCandidates(
 export async function getBuyOpportunities(
   username: string
 ): Promise<BuyOpportunity[]> {
+  const cacheKey = username.toLowerCase();
+  const now = Date.now();
+  const hit = buyCache.get(cacheKey);
+  if (hit && hit.expires > now) return hit.data;
+
+  const pending = buyInFlight.get(cacheKey);
+  if (pending) return pending;
+
+  const work = (async () => {
   const { totalLeagues, rows: exposureRows } = await getUserExposure(username);
   const ownedMap = new Map(
     exposureRows.map((r) => [r.player_name.toLowerCase(), r.league_count])
@@ -200,4 +234,14 @@ export async function getBuyOpportunities(
       total_leagues: totalLeagues,
     }))
     .sort((a, b) => a.owned_leagues - b.owned_leagues || (b.edge_score ?? 0) - (a.edge_score ?? 0));
+  })();
+
+  buyInFlight.set(cacheKey, work);
+  try {
+    const data = await work;
+    buyCache.set(cacheKey, { data, expires: Date.now() + ACTION_TTL_MS });
+    return data;
+  } finally {
+    buyInFlight.delete(cacheKey);
+  }
 }

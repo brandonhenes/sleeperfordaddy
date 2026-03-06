@@ -3,6 +3,10 @@ import { sql } from "drizzle-orm";
 import { getPowerRankings, type LeaguePowerRanking } from "./power-rankings.js";
 import { getScoreMovers, type Mover } from "./snapshot-scores.js";
 
+const DASHBOARD_TTL_MS = 30_000;
+const dashboardCache = new Map<string, { data: DashboardData | null; expires: number }>();
+const dashboardInFlight = new Map<string, Promise<DashboardData | null>>();
+
 // ─── Types ───
 
 export interface SlotGradeInfo {
@@ -94,6 +98,15 @@ function emptyGrade(): SlotGradeInfo {
 // ─── Main ───
 
 export async function getDashboardData(username: string): Promise<DashboardData | null> {
+  const cacheKey = username.toLowerCase();
+  const now = Date.now();
+  const hit = dashboardCache.get(cacheKey);
+  if (hit && hit.expires > now) return hit.data;
+
+  const pending = dashboardInFlight.get(cacheKey);
+  if (pending) return pending;
+
+  const work = (async () => {
   const rankings = await getPowerRankings(username);
   if (rankings.length === 0) return null;
 
@@ -413,5 +426,15 @@ export async function getDashboardData(username: string): Promise<DashboardData 
     exposure: topExposure,
     archetype_actions: archetypeActions,
   };
+  })();
+
+  dashboardInFlight.set(cacheKey, work);
+  try {
+    const data = await work;
+    dashboardCache.set(cacheKey, { data, expires: Date.now() + DASHBOARD_TTL_MS });
+    return data;
+  } finally {
+    dashboardInFlight.delete(cacheKey);
+  }
 }
 

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { getOverview, getLeagueGroupsForUser } from "../services/overview.js";
+import { getOverviewWithGroups } from "../services/overview.js";
 
 const router = Router();
 
@@ -11,14 +11,11 @@ router.get("/api/overview", async (req, res) => {
       return res.status(400).json({ message: "username is required" });
     }
 
-    const overview = await getOverview(username);
-    if (!overview) {
+    const data = await getOverviewWithGroups(username);
+    if (!data) {
       return res.status(404).json({ message: "User not found in database. Try syncing first." });
     }
-
-    const groups = await getLeagueGroupsForUser(username);
-
-    res.json({ ...overview, league_groups: groups });
+    res.json({ ...data.overview, league_groups: data.league_groups });
   } catch (err) {
     console.error("[overview] Error:", err);
     res.status(500).json({ message: "Internal server error" });

@@ -4,6 +4,10 @@ import { getCompositeValues } from "./composite-values.js";
 import { getAgeCurveStatus } from "./age-curves.js";
 import { getDynastyLeagueIdsForUserLatestSeason } from "./dynasty-leagues.js";
 
+const PORTFOLIO_TTL_MS = 30_000;
+const portfolioCache = new Map<string, { data: PortfolioData | null; expires: number }>();
+const portfolioInFlight = new Map<string, Promise<PortfolioData | null>>();
+
 // ─── Types ───
 
 export interface PortfolioPlayer {
@@ -42,6 +46,15 @@ export interface PortfolioData {
 // ─── Main ───
 
 export async function getPortfolio(username: string): Promise<PortfolioData | null> {
+  const cacheKey = username.toLowerCase();
+  const now = Date.now();
+  const hit = portfolioCache.get(cacheKey);
+  if (hit && hit.expires > now) return hit.data;
+
+  const pending = portfolioInFlight.get(cacheKey);
+  if (pending) return pending;
+
+  const work = (async () => {
   // Resolve user_id
   const userRows = await db.execute(sql`
     SELECT user_id FROM users WHERE LOWER(username) = LOWER(${username}) LIMIT 1
@@ -145,4 +158,14 @@ export async function getPortfolio(username: string): Promise<PortfolioData | nu
       position_counts: positionCounts,
     },
   };
+  })();
+
+  portfolioInFlight.set(cacheKey, work);
+  try {
+    const data = await work;
+    portfolioCache.set(cacheKey, { data, expires: Date.now() + PORTFOLIO_TTL_MS });
+    return data;
+  } finally {
+    portfolioInFlight.delete(cacheKey);
+  }
 }
