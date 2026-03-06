@@ -19,6 +19,10 @@ export interface PortfolioPlayer {
   total_leagues: number;
   pct: number;
   age_zone: string | null;
+  ktc_vs_experts: number | null;
+  disagreement_direction: "sell_signal" | "buy_signal" | "neutral" | null;
+  action_needed: { type: "risk" | "dead_weight"; reason: string } | null;
+  portfolio_value: number;
 }
 
 export interface PortfolioStats {
@@ -27,6 +31,9 @@ export interface PortfolioStats {
   avg_edge_score: number;
   high_exposure_count: number;
   position_counts: { position: string; count: number; avg_score: number }[];
+  portfolio_value_total: number;
+  weighted_avg_age: number;
+  source_coverage_pct: number;
 }
 
 export interface PortfolioData {

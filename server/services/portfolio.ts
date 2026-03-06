@@ -39,6 +39,15 @@ export interface PortfolioPlayer {
   total_leagues: number;
   pct: number;
   age_zone: string | null;
+  // Source disagreement direction
+  ktc_vs_experts: number | null;
+  disagreement_direction: "sell_signal" | "buy_signal" | "neutral" | null;
+
+  // Action needed flag
+  action_needed: { type: "risk" | "dead_weight"; reason: string } | null;
+
+  // Portfolio weight
+  portfolio_value: number;
 }
 
 export interface PortfolioStats {
@@ -47,6 +56,9 @@ export interface PortfolioStats {
   avg_edge_score: number;
   high_exposure_count: number;
   position_counts: { position: string; count: number; avg_score: number }[];
+  portfolio_value_total: number;
+  weighted_avg_age: number;
+  source_coverage_pct: number;
 }
 
 export interface PortfolioData {
@@ -112,6 +124,49 @@ export async function getPortfolio(username: string): Promise<PortfolioData | nu
     const comp = compMap.get(pid);
     const leaguesOwned = leagueCountMap.get(pid) ?? 0;
     const ac = getAgeCurveStatus(info.position, info.age);
+    const expertScores = [comp?.fc_score, comp?.dp_score].filter(
+      (s): s is number => s != null,
+    );
+    const ktcScore = comp?.ktc_score ?? null;
+    let ktcVsExperts: number | null = null;
+    let disagreementDirection: "sell_signal" | "buy_signal" | "neutral" | null = null;
+
+    if (ktcScore != null && expertScores.length > 0) {
+      const expertAvg = expertScores.reduce((a, b) => a + b, 0) / expertScores.length;
+      ktcVsExperts = ktcScore - expertAvg;
+      if (ktcVsExperts >= 6) disagreementDirection = "sell_signal";
+      else if (ktcVsExperts <= -6) disagreementDirection = "buy_signal";
+      else disagreementDirection = "neutral";
+    }
+
+    const portfolioValue = (comp?.edge_score ?? 0) * leaguesOwned;
+    let actionNeeded: { type: "risk" | "dead_weight"; reason: string } | null = null;
+
+    const ageZone = ac.zone;
+    const isAging = ageZone === "Cliff" || ageZone === "Decline";
+    const isCrowdOvervalues = ktcVsExperts != null && ktcVsExperts >= 6;
+    const isExpertsStillHigh = (comp?.edge_score ?? 0) >= 75;
+    const isLowAgreement = (comp?.source_agreement ?? "high") === "low";
+    const isHighExposure = Math.round((leaguesOwned / totalLeagues) * 100) > 25;
+    const isDeadWeight = (comp?.edge_score ?? 0) < 50 && leaguesOwned >= 2;
+
+    if (isAging && isCrowdOvervalues && !isExpertsStillHigh) {
+      actionNeeded = {
+        type: "risk",
+        reason: `${ageZone} age curve, crowd overvalues by ${Math.round(ktcVsExperts!)}pts`,
+      };
+    } else if (isLowAgreement && isCrowdOvervalues && isHighExposure) {
+      actionNeeded = {
+        type: "risk",
+        reason: `Sources disagree, crowd overvalues, ${Math.round((leaguesOwned / totalLeagues) * 100)}% exposure`,
+      };
+    } else if (isDeadWeight) {
+      actionNeeded = {
+        type: "dead_weight",
+        reason: `Edge ${comp?.edge_score ?? 0} across ${leaguesOwned} leagues`,
+      };
+    }
+
     players.push({
       player_id: pid,
       full_name: info.full_name,
@@ -130,6 +185,10 @@ export async function getPortfolio(username: string): Promise<PortfolioData | nu
       total_leagues: totalLeagues,
       pct: Math.round((leaguesOwned / totalLeagues) * 100),
       age_zone: ac.zone !== "Unknown" ? ac.zone : null,
+      ktc_vs_experts: ktcVsExperts,
+      disagreement_direction: disagreementDirection,
+      action_needed: actionNeeded,
+      portfolio_value: portfolioValue,
     });
   }
 
@@ -159,6 +218,24 @@ export async function getPortfolio(username: string): Promise<PortfolioData | nu
       return { position: pos, count: e.count, avg_score: Math.round((e.total / e.count) * 10) / 10 };
     });
 
+  const portfolioValueTotal = players.reduce((s, p) => s + p.portfolio_value, 0);
+  const ageWeightedSum = players.reduce((s, p) => {
+    if (p.age == null || p.portfolio_value === 0) return s;
+    return s + p.age * p.portfolio_value;
+  }, 0);
+  const ageWeightTotal = players.reduce((s, p) => {
+    if (p.age == null || p.portfolio_value === 0) return s;
+    return s + p.portfolio_value;
+  }, 0);
+  const weightedAvgAge = ageWeightTotal > 0
+    ? Math.round((ageWeightedSum / ageWeightTotal) * 10) / 10
+    : 0;
+
+  const fullCoverage = players.filter((p) => p.sources_available >= 3).length;
+  const sourceCoveragePct = players.length > 0
+    ? Math.round((fullCoverage / players.length) * 100)
+    : 0;
+
   return {
     players,
     stats: {
@@ -167,6 +244,9 @@ export async function getPortfolio(username: string): Promise<PortfolioData | nu
       avg_edge_score: avgEdge,
       high_exposure_count: highExposure,
       position_counts: positionCounts,
+      portfolio_value_total: portfolioValueTotal,
+      weighted_avg_age: weightedAvgAge,
+      source_coverage_pct: sourceCoveragePct,
     },
   };
   })();
