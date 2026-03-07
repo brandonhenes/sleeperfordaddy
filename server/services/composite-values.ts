@@ -84,47 +84,50 @@ export async function getGlobalScaleParams(
   if (pending) return pending;
 
   const work = (async () => {
-    const rows = mode === "sf"
-    ? await db.execute(sql`
+    const [fcRows, marketRows] = await Promise.all([
+      db.execute(sql`
         SELECT
-          percentile_cont(0.05) WITHIN GROUP (ORDER BY fc.dynasty_value)
-            FILTER (WHERE fc.dynasty_value > 0)::real AS fc_floor,
-          max(fc.dynasty_value) FILTER (WHERE fc.dynasty_value > 0)::real AS fc_max,
-          percentile_cont(0.05) WITHIN GROUP (ORDER BY ktc.value_sf)
-            FILTER (WHERE ktc.value_sf > 0)::real AS ktc_floor,
-          max(ktc.value_sf) FILTER (WHERE ktc.value_sf > 0)::real AS ktc_max,
-          percentile_cont(0.05) WITHIN GROUP (ORDER BY dp.value_2qb)
-            FILTER (WHERE dp.value_2qb > 0)::real AS dp_floor,
-          max(dp.value_2qb) FILTER (WHERE dp.value_2qb > 0)::real AS dp_max
-        FROM players_master pm
-        LEFT JOIN fantasycalc_daily fc
-          ON fc.sleeper_id = pm.player_id
-          AND fc.snapshot_date = (SELECT MAX(snapshot_date) FROM fantasycalc_daily)
-        LEFT JOIN ktc_values ktc ON ktc.sleeper_id = pm.player_id
-        LEFT JOIN dynastyprocess_values dp ON dp.sleeper_id = pm.player_id
-        WHERE pm.position IN ('QB', 'RB', 'WR', 'TE')
-      `)
-    : await db.execute(sql`
-        SELECT
-          percentile_cont(0.05) WITHIN GROUP (ORDER BY fc.dynasty_value)
-            FILTER (WHERE fc.dynasty_value > 0)::real AS fc_floor,
-          max(fc.dynasty_value) FILTER (WHERE fc.dynasty_value > 0)::real AS fc_max,
-          percentile_cont(0.05) WITHIN GROUP (ORDER BY ktc.value_1qb)
-            FILTER (WHERE ktc.value_1qb > 0)::real AS ktc_floor,
-          max(ktc.value_1qb) FILTER (WHERE ktc.value_1qb > 0)::real AS ktc_max,
-          percentile_cont(0.05) WITHIN GROUP (ORDER BY dp.value_1qb)
-            FILTER (WHERE dp.value_1qb > 0)::real AS dp_floor,
-          max(dp.value_1qb) FILTER (WHERE dp.value_1qb > 0)::real AS dp_max
-        FROM players_master pm
-        LEFT JOIN fantasycalc_daily fc
-          ON fc.sleeper_id = pm.player_id
-          AND fc.snapshot_date = (SELECT MAX(snapshot_date) FROM fantasycalc_daily)
-        LEFT JOIN ktc_values ktc ON ktc.sleeper_id = pm.player_id
-        LEFT JOIN dynastyprocess_values dp ON dp.sleeper_id = pm.player_id
-        WHERE pm.position IN ('QB', 'RB', 'WR', 'TE')
-      `);
+          percentile_cont(0.05) WITHIN GROUP (ORDER BY dynasty_value)
+            FILTER (WHERE dynasty_value > 0)::real AS fc_floor,
+          max(dynasty_value) FILTER (WHERE dynasty_value > 0)::real AS fc_max
+        FROM fantasycalc_daily
+        WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM fantasycalc_daily)
+          AND is_pick = false
+      `),
+      mode === "sf"
+        ? db.execute(sql`
+            SELECT
+              percentile_cont(0.05) WITHIN GROUP (ORDER BY ktc.value_sf)
+                FILTER (WHERE ktc.value_sf > 0)::real AS ktc_floor,
+              max(ktc.value_sf) FILTER (WHERE ktc.value_sf > 0)::real AS ktc_max,
+              percentile_cont(0.05) WITHIN GROUP (ORDER BY dp.value_2qb)
+                FILTER (WHERE dp.value_2qb > 0)::real AS dp_floor,
+              max(dp.value_2qb) FILTER (WHERE dp.value_2qb > 0)::real AS dp_max
+            FROM players_master pm
+            LEFT JOIN ktc_values ktc ON ktc.sleeper_id = pm.player_id
+            LEFT JOIN dynastyprocess_values dp ON dp.sleeper_id = pm.player_id
+            WHERE pm.position IN ('QB', 'RB', 'WR', 'TE')
+          `)
+        : db.execute(sql`
+            SELECT
+              percentile_cont(0.05) WITHIN GROUP (ORDER BY ktc.value_1qb)
+                FILTER (WHERE ktc.value_1qb > 0)::real AS ktc_floor,
+              max(ktc.value_1qb) FILTER (WHERE ktc.value_1qb > 0)::real AS ktc_max,
+              percentile_cont(0.05) WITHIN GROUP (ORDER BY dp.value_1qb)
+                FILTER (WHERE dp.value_1qb > 0)::real AS dp_floor,
+              max(dp.value_1qb) FILTER (WHERE dp.value_1qb > 0)::real AS dp_max
+            FROM players_master pm
+            LEFT JOIN ktc_values ktc ON ktc.sleeper_id = pm.player_id
+            LEFT JOIN dynastyprocess_values dp ON dp.sleeper_id = pm.player_id
+            WHERE pm.position IN ('QB', 'RB', 'WR', 'TE')
+          `),
+    ]);
 
-    const r = (rows as unknown as {
+    const fc = (fcRows as unknown as {
+      fc_floor: number | null;
+      fc_max: number | null;
+    }[])[0];
+    const r = (marketRows as unknown as {
       fc_floor: number | null;
       fc_max: number | null;
       ktc_floor: number | null;
@@ -134,7 +137,7 @@ export async function getGlobalScaleParams(
     }[])[0];
 
     const value = {
-      fc: safeScale(r?.fc_floor ?? null, r?.fc_max ?? null),
+      fc: safeScale(fc?.fc_floor ?? null, fc?.fc_max ?? null),
       ktc: safeScale(r?.ktc_floor ?? null, r?.ktc_max ?? null),
       dp: safeScale(r?.dp_floor ?? null, r?.dp_max ?? null),
     };
@@ -256,6 +259,12 @@ async function computeCompositeRuntime(
   const inClause = sql.join(idFragments, sql`, `);
 
   const rows = await db.execute(sql`
+    WITH latest_fc AS (
+      SELECT player_name, sleeper_id, dynasty_value
+      FROM fantasycalc_daily
+      WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM fantasycalc_daily)
+        AND is_pick = false
+    )
     SELECT
       pm.player_id AS sleeper_id,
       fc.dynasty_value AS fc_value,
@@ -264,9 +273,35 @@ async function computeCompositeRuntime(
       dp.value_1qb AS dp_1qb,
       dp.value_2qb AS dp_2qb
     FROM players_master pm
-    LEFT JOIN fantasycalc_daily fc
-      ON fc.sleeper_id = pm.player_id
-      AND fc.snapshot_date = (SELECT MAX(snapshot_date) FROM fantasycalc_daily)
+    LEFT JOIN LATERAL (
+      SELECT lf.dynasty_value
+      FROM latest_fc lf
+      WHERE
+        lf.sleeper_id = pm.player_id
+        OR (
+          (lf.sleeper_id IS NULL OR lf.sleeper_id = '')
+          AND (
+            LOWER(REGEXP_REPLACE(lf.player_name, '\\s+(Jr\\.?|Sr\\.?|II|III|IV|V)$', '', 'i'))
+              = LOWER(REGEXP_REPLACE(pm.full_name, '\\s+(Jr\\.?|Sr\\.?|II|III|IV|V)$', '', 'i'))
+            OR EXISTS (
+              SELECT 1
+              FROM player_aliases pa
+              WHERE pa.player_id = pm.player_id
+                AND LOWER(REGEXP_REPLACE(pa.alias, '\\s+(Jr\\.?|Sr\\.?|II|III|IV|V)$', '', 'i'))
+                  = LOWER(REGEXP_REPLACE(lf.player_name, '\\s+(Jr\\.?|Sr\\.?|II|III|IV|V)$', '', 'i'))
+            )
+          )
+        )
+      ORDER BY
+        CASE
+          WHEN lf.sleeper_id = pm.player_id THEN 0
+          WHEN LOWER(REGEXP_REPLACE(lf.player_name, '\\s+(Jr\\.?|Sr\\.?|II|III|IV|V)$', '', 'i'))
+             = LOWER(REGEXP_REPLACE(pm.full_name, '\\s+(Jr\\.?|Sr\\.?|II|III|IV|V)$', '', 'i')) THEN 1
+          ELSE 2
+        END,
+        lf.dynasty_value DESC NULLS LAST
+      LIMIT 1
+    ) fc ON true
     LEFT JOIN ktc_values ktc ON ktc.sleeper_id = pm.player_id
     LEFT JOIN dynastyprocess_values dp ON dp.sleeper_id = pm.player_id
     WHERE pm.player_id IN (${inClause})
