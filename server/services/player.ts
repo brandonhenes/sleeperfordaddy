@@ -268,7 +268,6 @@ export async function getPlayerDetail(
         SELECT
           ta.trade_id,
           ta.roster_id,
-          ta.direction,
           ta.asset_type,
           ta.asset_key,
           CASE
@@ -282,11 +281,11 @@ export async function getPlayerDetail(
         LEFT JOIN players_master pm
           ON ta.asset_type = 'player' AND ta.asset_key = pm.player_id
         WHERE ta.trade_id IN (${sql.join(idFrags, sql`, `)})
+          AND ta.direction = 'gave'
       `);
       type AR = {
         trade_id: string;
         roster_id: number;
-        direction: string;
         asset_type: string;
         asset_key: string;
         label: string;
@@ -306,10 +305,9 @@ export async function getPlayerDetail(
         if (rid == null) continue;
         const entry = assetMap.get(a.trade_id) ?? { gave: [], received: [] };
         if (a.roster_id === rid) {
-          entry[a.direction === "received" ? "received" : "gave"].push(a.label);
+          entry.gave.push(a.label);
         } else {
-          // Other side's assets are the opposite direction from their perspective
-          entry[a.direction === "received" ? "gave" : "received"].push(a.label);
+          entry.received.push(a.label);
         }
         assetMap.set(a.trade_id, entry);
       }

@@ -20,6 +20,9 @@ interface ExposureTableProps {
 }
 
 export default function ExposureTable({ players }: ExposureTableProps) {
+  const username =
+    typeof window !== "undefined" ? localStorage.getItem("edge_username") ?? "" : "";
+
   if (players.length === 0) {
     return (
       <div
@@ -155,7 +158,7 @@ export default function ExposureTable({ players }: ExposureTableProps) {
           </div>
 
           <Link
-            href={`/trade-finder?mode=shop&player=${p.player_id}`}
+            href={`/trade-finder/${encodeURIComponent(username)}?mode=shop&player=${encodeURIComponent(p.player_id)}`}
             style={{
               display: "inline-flex",
               alignItems: "center",

@@ -461,7 +461,7 @@ export default function PlayerDetail() {
 
       {data.recent_trades && data.recent_trades.length > 0 && (
         <>
-          <SectionHeader icon="🔀" title="RECENT TRADES" subtitle="Completed trades across your leagues" />
+          <SectionHeader icon="🔀" title="RECENT TRADES" subtitle="Completed trades involving this player" />
           <TradeComps trades={data.recent_trades} />
         </>
       )}

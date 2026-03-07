@@ -18,7 +18,7 @@ export default function Portfolio() {
   const [posFilter, setPosFilter] = useState<string>("ALL");
   const [searchQuery, setSearchQuery] = useState("");
   const [ageCurveFilter, setAgeCurveFilter] = useState<string>("ALL");
-  const [exposureThreshold, setExposureThreshold] = useState(25);
+  const [exposureThreshold, setExposureThreshold] = useState(0);
 
   const filtered = useMemo(() => {
     if (!data) return [];
@@ -35,12 +35,16 @@ export default function Portfolio() {
       items = items.filter((p) => p.full_name.toLowerCase().includes(q));
     }
 
+    if (exposureThreshold > 0) {
+      items = items.filter((p) => p.pct >= exposureThreshold);
+    }
+
     if (sortBy === "edge") return [...items].sort((a, b) => b.edge_score - a.edge_score);
     if (sortBy === "name") return [...items].sort((a, b) => a.full_name.localeCompare(b.full_name));
     if (sortBy === "portfolio_value") return [...items].sort((a, b) => b.portfolio_value - a.portfolio_value);
     if (sortBy === "disagreement") return [...items].sort((a, b) => Math.abs(b.ktc_vs_experts ?? 0) - Math.abs(a.ktc_vs_experts ?? 0));
     return items;
-  }, [data, sortBy, posFilter, ageCurveFilter, searchQuery]);
+  }, [data, sortBy, posFilter, ageCurveFilter, searchQuery, exposureThreshold]);
 
   if (isLoading) return <AppShell><LoadingSkeleton /></AppShell>;
   if (error || !data) {
@@ -89,8 +93,8 @@ export default function Portfolio() {
           accent={stats.source_coverage_pct >= 70 ? "var(--green)" : stats.source_coverage_pct >= 50 ? "var(--amber)" : "var(--red)"}
         />
         <StatCard
-          label={`High Exposure (>${exposureThreshold}%)`}
-          value={data.players.filter((p) => p.pct > exposureThreshold).length}
+          label="High Exposure (>25%)"
+          value={data.players.filter((p) => p.pct > 25).length}
           accent="var(--red)"
         />
         <StatCard label="Leagues" value={stats.total_leagues} />
@@ -396,11 +400,11 @@ export default function Portfolio() {
 
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
-            Exposure alert: &gt;{exposureThreshold}%
+            Min exposure: {exposureThreshold}%
           </span>
           <input
             type="range"
-            min={10}
+            min={0}
             max={60}
             step={5}
             value={exposureThreshold}
