@@ -55,6 +55,7 @@ import { SYNC_STALE_MINUTES } from "../../shared/constants.js";
 const syncLocks = new Map<string, boolean>();
 const MIN_SYNC_INTERVAL = 30_000; // 30 second cooldown
 const lastSyncStart = new Map<string, number>();
+type SyncScope = "full" | "latest";
 
 // Player data cache timestamp
 let playersLastSynced = 0;
@@ -103,10 +104,11 @@ function isRunningJobStale(job: { status: string; updated_at: number }): boolean
  */
 export async function startSync(
   username: string,
-  options?: { force?: boolean }
+  options?: { force?: boolean; scope?: SyncScope }
 ): Promise<{ jobId: string; alreadyRunning: boolean }> {
   const key = username.toLowerCase();
   const force = options?.force === true;
+  const scope: SyncScope = options?.scope === "latest" ? "latest" : "full";
   const latest = await getLatestSyncJob(username);
 
   if (latest && isRunningJobStale(latest)) {
@@ -141,7 +143,7 @@ export async function startSync(
   lastSyncStart.set(key, Date.now());
 
   // Run sync in background (don't await)
-  runSync(jobId, username).catch((err) => {
+  runSync(jobId, username, scope).catch((err) => {
     console.error(`[sync] Fatal error for ${username}:`, err);
     updateSyncJob(jobId, {
       status: "failed",
@@ -157,7 +159,7 @@ export async function startSync(
 /**
  * The main sync pipeline.
  */
-async function runSync(jobId: string, username: string) {
+async function runSync(jobId: string, username: string, scope: SyncScope) {
   console.log(`[sync] Starting sync for ${username} (job ${jobId})`);
 
   // Step 1: Resolve user
@@ -187,16 +189,17 @@ async function runSync(jobId: string, username: string) {
   // Step 3: Fetch leagues across all seasons
   await updateSyncJob(jobId, {
     step: "fetching_leagues",
-    detail: `Seasons ${SEASONS[0]}-${currentSeason}`,
+    detail:
+      scope === "latest"
+        ? `Latest season sync (${currentSeason})`
+        : `Seasons ${SEASONS[0]}-${currentSeason}`,
   });
 
-  const allLeagues: SleeperLeague[] = [];
-  const seasonsToFetch = SEASONS.filter((s) => s <= currentSeason);
-
-  for (const season of seasonsToFetch) {
-    const seasonLeagues = await getUserLeagues(sleeperUser.user_id, season);
-    allLeagues.push(...seasonLeagues);
-  }
+  const allLeagues = await fetchLeaguesForScope(
+    sleeperUser.user_id,
+    currentSeason,
+    scope
+  );
 
   const uniqueLeagues = dedupeLeagues(allLeagues).filter((l) =>
     isDynastyLeagueFromSleeperSettings(l.settings)
@@ -236,6 +239,28 @@ async function runSync(jobId: string, username: string) {
       }
     }
   );
+
+  if (scope === "latest") {
+    clearSleeperCache();
+    clearDynastyLeagueCache(sleeperUser.user_id);
+    clearGlobalScaleCache();
+    clearPowerRankingsCache(username);
+    clearOverviewCache(username);
+    clearDashboardCache(username);
+    clearPortfolioCache(username);
+    clearActionCache(username);
+    clearArbitrageCache(username);
+
+    await updateSyncJob(jobId, {
+      status: "completed",
+      step: "done",
+      leagues_done: uniqueLeagues.length,
+      detail: `Synced ${uniqueLeagues.length} latest-season leagues`,
+    });
+
+    console.log(`[sync] Completed latest-season sync for ${username}`);
+    return;
+  }
 
   // Step 5: Sync player data (daily cache)
   if (Date.now() - playersLastSynced > PLAYER_CACHE_TTL) {
@@ -788,6 +813,37 @@ function dedupeLeagues(leagues: SleeperLeague[]): SleeperLeague[] {
     seen.add(l.league_id);
     return true;
   });
+}
+
+async function fetchLeaguesForScope(
+  userId: string,
+  currentSeason: number,
+  scope: SyncScope
+): Promise<SleeperLeague[]> {
+  if (scope === "full") {
+    const allLeagues: SleeperLeague[] = [];
+    const seasonsToFetch = SEASONS.filter((s) => s <= currentSeason);
+    for (const season of seasonsToFetch) {
+      const seasonLeagues = await getUserLeagues(userId, season);
+      allLeagues.push(...seasonLeagues);
+    }
+    return allLeagues;
+  }
+
+  const candidateSeasons = [currentSeason, currentSeason - 1, currentSeason - 2]
+    .filter((season, idx, arr) => season >= SEASONS[0] && arr.indexOf(season) === idx);
+
+  for (const season of candidateSeasons) {
+    const seasonLeagues = await getUserLeagues(userId, season);
+    const dynastyLeagues = seasonLeagues.filter((l) =>
+      isDynastyLeagueFromSleeperSettings(l.settings)
+    );
+    if (dynastyLeagues.length > 0) {
+      return dynastyLeagues;
+    }
+  }
+
+  return [];
 }
 
 async function runWithConcurrency<T>(

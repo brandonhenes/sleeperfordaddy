@@ -111,7 +111,7 @@ export default function FreshnessBar() {
               setSyncMessage("");
               setSyncing(true);
               startSync.mutate(
-                { username, force: true },
+                { username, force: true, scope: "latest" },
                 {
                   onError: (err) => {
                     setSyncing(false);

@@ -13,6 +13,7 @@ router.post("/api/sync", async (req, res) => {
     }
 
     const force = req.body.force === true;
+    const scope = req.body.scope === "latest" ? "latest" : "full";
 
     if (!force) {
       const { needsSync, syncJob } = await checkSyncStatus(username);
@@ -25,7 +26,10 @@ router.post("/api/sync", async (req, res) => {
       }
     }
 
-    const { jobId, alreadyRunning } = await startSync(username, { force });
+    const { jobId, alreadyRunning } = await startSync(username, {
+      force,
+      scope,
+    });
     res.json({
       job_id: jobId,
       status: alreadyRunning ? "running" : "running",

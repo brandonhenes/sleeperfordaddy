@@ -15,6 +15,7 @@ interface SyncResponse {
 interface StartSyncInput {
   username: string;
   force?: boolean;
+  scope?: "full" | "latest";
 }
 
 interface SyncStatus {
@@ -41,10 +42,14 @@ export function useStartSync() {
   const queryClient = useQueryClient();
 
   return useMutation<SyncResponse, Error, StartSyncInput>({
-    mutationFn: ({ username, force }: StartSyncInput) =>
+    mutationFn: ({ username, force, scope }: StartSyncInput) =>
       apiFetch("/api/sync", {
         method: "POST",
-        body: JSON.stringify({ username, force: force === true }),
+        body: JSON.stringify({
+          username,
+          force: force === true,
+          scope: scope === "latest" ? "latest" : "full",
+        }),
       }),
     onSuccess: (_data, variables) => {
       // Invalidate overview when sync starts so it refreshes
