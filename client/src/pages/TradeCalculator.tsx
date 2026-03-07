@@ -101,6 +101,40 @@ function packagePenalty(count: number): number {
   return count <= 1 ? 0 : (count - 1) * 1.5;
 }
 
+function buildTradeMessage(
+  result: TradeEvaluation,
+  sendLabels: string[],
+  receiveLabels: string[],
+  opponent: OpponentContext | null,
+  acceptance: AcceptanceResult | null
+): string {
+  const lines: string[] = [];
+  lines.push("Hey, would you consider:");
+  lines.push("");
+  lines.push("My:");
+  for (const label of sendLabels) lines.push(`  ${label}`);
+  lines.push("For your:");
+  for (const label of receiveLabels) lines.push(`  ${label}`);
+  lines.push("");
+
+  if (acceptance && acceptance.accept_reasons.length > 0) {
+    const compelling = acceptance.accept_reasons.filter(
+      (reason) => !reason.includes("Trade power") && !reason.includes("overpay")
+    );
+    if (compelling.length > 0) lines.push(`${compelling[0]}.`);
+  }
+
+  if (opponent) {
+    const sendPositions = result.sideA.assets
+      .map((asset) => asset.position)
+      .filter((position): position is string => position != null);
+    const matchedNeed = sendPositions.find((position) => opponent.needs.includes(position));
+    if (matchedNeed) lines.push(`This gets you ${matchedNeed} help you could use.`);
+  }
+
+  return lines.join("\n");
+}
+
 function EvalBar({
   result,
   acceptance,
@@ -517,6 +551,7 @@ export default function TradeCalculator() {
   const [receivePickSeason, setReceivePickSeason] = useState(PICK_YEARS[0]);
   const [receivePickRound, setReceivePickRound] = useState(1);
   const [receivePickTier, setReceivePickTier] = useState<PickTier>("mid");
+  const [copied, setCopied] = useState(false);
   const [isCompactLeagueLayout, setIsCompactLeagueLayout] = useState(() => (
     typeof window !== "undefined" ? window.innerWidth < 1180 : false
   ));
@@ -569,6 +604,12 @@ export default function TradeCalculator() {
     window.addEventListener("resize", syncLayout);
     return () => window.removeEventListener("resize", syncLayout);
   }, []);
+
+  useEffect(() => {
+    if (!copied) return undefined;
+    const timer = window.setTimeout(() => setCopied(false), 2000);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
 
   const evalMutation = useEvaluateTrade();
   const hasBothSides = sendAssets.length > 0 && receiveAssets.length > 0;
@@ -767,6 +808,61 @@ export default function TradeCalculator() {
             <EvalBar result={result} acceptance={liveAcceptance} hasBothSides={hasBothSides} isPending={evalMutation.isPending} />
             <TradePanel title="YOU GET" color="#22c55e" labels={receiveLabels} evaluated={result?.sideB.assets ?? null} onRemove={removeReceive} onClear={() => clearSide("receive")} />
             <AcceptanceBadge acceptance={liveAcceptance} opponent={activeOpponent} />
+            {result && selectedLeague && (
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <a
+                  href={`https://sleeper.app/leagues/${selectedLeague}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    padding: "10px 16px",
+                    borderRadius: 8,
+                    background: "rgba(55, 65, 81, 0.5)",
+                    border: "1px solid var(--border)",
+                    color: "var(--text)",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    textDecoration: "none",
+                    cursor: "pointer",
+                  }}
+                >
+                  Open in Sleeper
+                </a>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const msg = buildTradeMessage(
+                      result,
+                      result.sideA.assets.map((asset) => asset.label),
+                      result.sideB.assets.map((asset) => asset.label),
+                      activeOpponent,
+                      liveAcceptance
+                    );
+                    navigator.clipboard.writeText(msg);
+                    setCopied(true);
+                  }}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    padding: "10px 16px",
+                    borderRadius: 8,
+                    background: "rgba(245,158,11,0.15)",
+                    border: "1px solid rgba(245,158,11,0.3)",
+                    color: "var(--amber)",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                  }}
+                >
+                  {copied ? "Copied!" : "Copy Trade Message"}
+                </button>
+              </div>
+            )}
           </div>
           <div style={{ ...rosterPaneStyle, order: 3 }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}><div style={{ color: "#22c55e", fontSize: 12, fontWeight: 800 }}>THEIR ROSTER</div><div style={{ fontSize: 11, color: "var(--text-muted)" }}>{oppRoster?.display_name ?? "Select opponent"}</div></div>
