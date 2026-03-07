@@ -1,52 +1,119 @@
 import { useMovers, type Mover } from "../../hooks/use-market";
 import { posColor } from "../../lib/position-colors";
+import EdgeScoreBadge from "../EdgeScoreBadge";
 import { PlayerLink } from "../ui";
 
+function SourceDelta({
+  current,
+  previous,
+  color,
+}: {
+  current: number | null;
+  previous: number | null;
+  color: string;
+}) {
+  if (current == null) {
+    return (
+      <span style={{ fontSize: 10, color: "var(--text-muted)" }}>
+        {"\u2014"}
+      </span>
+    );
+  }
+
+  const delta = previous != null ? current - previous : null;
+
+  return (
+    <span className="font-mono" style={{ fontSize: 11 }}>
+      <span style={{ color }}>{current.toFixed(1)}</span>
+      {delta != null && Math.abs(delta) >= 0.1 && (
+        <span
+          style={{
+            color: delta > 0 ? "var(--green)" : "var(--red)",
+            marginLeft: 3,
+            fontSize: 10,
+          }}
+        >
+          {delta > 0 ? "+" : ""}
+          {delta.toFixed(1)}
+        </span>
+      )}
+    </span>
+  );
+}
+
 function MoverRow({ mover, type }: { mover: Mover; type: "riser" | "faller" }) {
-  const color = type === "riser" ? "var(--green)" : "var(--red)";
-  const arrow = type === "riser" ? "▲" : "▼";
+  const deltaColor = type === "riser" ? "var(--green)" : "var(--red)";
+  const arrow = type === "riser" ? "\u25B2" : "\u25BC";
 
   return (
     <div
       style={{
-        display: "flex",
+        display: "grid",
+        gridTemplateColumns: "40px 2fr 60px 60px 60px 70px",
         alignItems: "center",
-        justifyContent: "space-between",
-        padding: "10px 14px",
+        padding: "8px 14px",
         borderBottom: "1px solid var(--border)",
+        gap: 8,
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <EdgeScoreBadge score={mover.edge_score} size="sm" />
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          overflow: "hidden",
+        }}
+      >
         <span
           style={{
-            fontSize: 12,
+            fontSize: 11,
             fontWeight: 600,
             color: posColor(mover.position ?? ""),
+            flexShrink: 0,
           }}
         >
           {mover.position}
         </span>
-        <PlayerLink name={mover.player_name} />
+        <PlayerLink name={mover.player_name} style={{ fontSize: 13 }} />
         {mover.team && (
-          <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+          <span
+            style={{
+              fontSize: 10,
+              color: "var(--text-muted)",
+              flexShrink: 0,
+            }}
+          >
             {mover.team}
           </span>
         )}
       </div>
-      <div className="font-mono" style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <span style={{ fontSize: 12, color: "var(--amber)" }}>
-          {mover.dynasty_value.toLocaleString()}
-        </span>
-        {mover.ktc_value != null && (
-          <span style={{ fontSize: 11, color: "#3b82f6" }}>{mover.ktc_value.toLocaleString()}</span>
-        )}
-        {mover.fp_value != null && (
-          <span style={{ fontSize: 11, color: "#7c3aed" }}>{mover.fp_value.toLocaleString()}</span>
-        )}
-        <span style={{ fontSize: 13, fontWeight: 600, color, minWidth: 70, textAlign: "right" }}>
-          {arrow} {Math.abs(mover.delta).toLocaleString()}
-        </span>
-      </div>
+      <SourceDelta
+        current={mover.fc_score}
+        previous={mover.prev_fc_score}
+        color="var(--amber)"
+      />
+      <SourceDelta
+        current={mover.ktc_score}
+        previous={mover.prev_ktc_score}
+        color="#3b82f6"
+      />
+      <SourceDelta
+        current={mover.dp_score}
+        previous={mover.prev_dp_score}
+        color="#7c3aed"
+      />
+      <span
+        className="font-mono"
+        style={{
+          fontSize: 13,
+          fontWeight: 700,
+          color: deltaColor,
+          textAlign: "right",
+        }}
+      >
+        {arrow} {Math.abs(mover.edge_delta).toFixed(1)}
+      </span>
     </div>
   );
 }
@@ -85,13 +152,40 @@ function MoverColumn({
           overflow: "hidden",
         }}
       >
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "40px 2fr 60px 60px 60px 70px",
+            padding: "6px 14px",
+            borderBottom: "1px solid var(--border)",
+            gap: 8,
+            fontSize: 10,
+            fontWeight: 700,
+            color: "var(--text-muted)",
+            letterSpacing: 0.5,
+          }}
+        >
+          <span>EDGE</span>
+          <span>PLAYER</span>
+          <span>FC</span>
+          <span>KTC</span>
+          <span>DP</span>
+          <span style={{ textAlign: "right" }}>DELTA</span>
+        </div>
         {movers.length === 0 ? (
-          <div style={{ padding: 24, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>
+          <div
+            style={{
+              padding: 24,
+              textAlign: "center",
+              color: "var(--text-muted)",
+              fontSize: 13,
+            }}
+          >
             No movers
           </div>
         ) : (
-          movers.slice(0, 25).map((m, i) => (
-            <MoverRow key={`${m.player_name}-${i}`} mover={m} type={type} />
+          movers.slice(0, 25).map((m) => (
+            <MoverRow key={m.player_id} mover={m} type={type} />
           ))
         )}
       </div>
@@ -124,8 +218,18 @@ export default function ValueMoversTab() {
 
   return (
     <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-      <MoverColumn title="Risers" movers={risers} type="riser" color="var(--green)" />
-      <MoverColumn title="Fallers" movers={fallers} type="faller" color="var(--red)" />
+      <MoverColumn
+        title="Risers"
+        movers={risers}
+        type="riser"
+        color="var(--green)"
+      />
+      <MoverColumn
+        title="Fallers"
+        movers={fallers}
+        type="faller"
+        color="var(--red)"
+      />
     </div>
   );
 }

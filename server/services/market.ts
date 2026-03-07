@@ -53,13 +53,19 @@ export interface Prospect {
 }
 
 export interface Mover {
+  player_id: string;
   player_name: string;
   position: string | null;
   team: string | null;
-  dynasty_value: number;
-  delta: number;
-  ktc_value: number | null;
-  fp_value: number | null;
+  edge_score: number;
+  previous_edge: number;
+  edge_delta: number;
+  fc_score: number | null;
+  ktc_score: number | null;
+  dp_score: number | null;
+  prev_fc_score: number | null;
+  prev_ktc_score: number | null;
+  prev_dp_score: number | null;
 }
 
 export interface MoversData {
@@ -137,37 +143,54 @@ export async function getProspects(): Promise<Prospect[]> {
 }
 
 export async function getMovers(days: number = 7): Promise<MoversData> {
+  void days;
+
+  const dateRows = await db.execute(sql`
+    SELECT DISTINCT snapshot_date
+    FROM edge_score_history
+    ORDER BY snapshot_date DESC
+    LIMIT 2
+  `);
+  const dates = (dateRows as unknown as { snapshot_date: string }[]).map(
+    (r) => r.snapshot_date
+  );
+  if (dates.length < 2) return { risers: [], fallers: [] };
+
+  const [currentDate, previousDate] = dates;
+
   const rows = await db.execute(sql`
-    WITH today AS (
-      SELECT player_name, position, team, dynasty_value
-      FROM fantasycalc_daily
-      WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM fantasycalc_daily)
-        AND is_pick = false
-    ),
-    past AS (
-      SELECT player_name, dynasty_value
-      FROM fantasycalc_daily
-      WHERE snapshot_date = (
-        SELECT MAX(snapshot_date) FROM fantasycalc_daily
-      ) - CAST(${days} AS int) * INTERVAL '1 day'
-    )
-    SELECT t.player_name, t.position, t.team,
-           t.dynasty_value::int AS dynasty_value,
-           (t.dynasty_value - p.dynasty_value)::int AS delta,
-           ktc.value_sf::int AS ktc_value,
-           dp.value_2qb::int AS fp_value
-    FROM today t
-    JOIN past p ON t.player_name = p.player_name
-    LEFT JOIN ktc_values ktc ON LOWER(ktc.player_name) = LOWER(t.player_name)
-    LEFT JOIN dynastyprocess_values dp ON LOWER(dp.player_name) = LOWER(t.player_name)
-    WHERE ABS(t.dynasty_value - p.dynasty_value) > 50
-    ORDER BY (t.dynasty_value - p.dynasty_value) DESC
+    SELECT
+      h1.player_id,
+      pm.full_name AS player_name,
+      pm.position,
+      pm.team,
+      ROUND(h1.edge_score::numeric, 1)::real AS edge_score,
+      ROUND(h2.edge_score::numeric, 1)::real AS previous_edge,
+      ROUND((h1.edge_score - h2.edge_score)::numeric, 1)::real AS edge_delta,
+      ROUND(h1.fc_score::numeric, 1)::real AS fc_score,
+      ROUND(h1.ktc_score::numeric, 1)::real AS ktc_score,
+      ROUND(h1.fp_score::numeric, 1)::real AS dp_score,
+      ROUND(h2.fc_score::numeric, 1)::real AS prev_fc_score,
+      ROUND(h2.ktc_score::numeric, 1)::real AS prev_ktc_score,
+      ROUND(h2.fp_score::numeric, 1)::real AS prev_dp_score
+    FROM edge_score_history h1
+    JOIN edge_score_history h2
+      ON h1.player_id = h2.player_id
+      AND h2.snapshot_date = ${previousDate}
+    JOIN players_master pm ON h1.player_id = pm.player_id
+    WHERE h1.snapshot_date = ${currentDate}
+      AND pm.position IN ('QB', 'RB', 'WR', 'TE')
+      AND ABS(h1.edge_score - h2.edge_score) >= 1
+    ORDER BY (h1.edge_score - h2.edge_score) DESC
   `);
 
   const all = rows as unknown as Mover[];
   return {
-    risers: all.filter((r) => r.delta > 0),
-    fallers: all.filter((r) => r.delta < 0).reverse(),
+    risers: all.filter((r) => r.edge_delta > 0).slice(0, 25),
+    fallers: all
+      .filter((r) => r.edge_delta < 0)
+      .sort((a, b) => a.edge_delta - b.edge_delta)
+      .slice(0, 25),
   };
 }
 

@@ -3,8 +3,6 @@ import { useParams } from "wouter";
 import AppShell from "../components/AppShell";
 import FreshnessBar from "../components/FreshnessBar";
 import EdgeScoreBadge from "../components/EdgeScoreBadge";
-import RecommendationsTab from "../components/market/RecommendationsTab";
-import ProspectBoardTab from "../components/market/ProspectBoardTab";
 import ValueMoversTab from "../components/market/ValueMoversTab";
 import { posColor } from "../lib/position-colors";
 import {
@@ -12,11 +10,9 @@ import {
   type SignalType,
 } from "../hooks/use-market-signals";
 
-type Tab = "recs" | "prospects" | "movers" | "signals";
+type Tab = "movers" | "signals";
 
 const TABS: { key: Tab; label: string }[] = [
-  { key: "recs", label: "Buy / Sell / Hold" },
-  { key: "prospects", label: "Prospect Board" },
   { key: "movers", label: "Value Movers" },
   { key: "signals", label: "Signals" },
 ];
@@ -143,7 +139,7 @@ function SignalsTab({ username }: { username: string }) {
 }
 
 export default function Market() {
-  const [activeTab, setActiveTab] = useState<Tab>("recs");
+  const [activeTab, setActiveTab] = useState<Tab>("movers");
   const { username } = useParams<{ username: string }>();
   const storedUser = typeof window !== "undefined" ? localStorage.getItem("edge_username") ?? "" : "";
   const effectiveUser = username ?? storedUser;
@@ -197,8 +193,6 @@ export default function Market() {
       </div>
 
       {/* Tab content */}
-      {activeTab === "recs" && <RecommendationsTab />}
-      {activeTab === "prospects" && <ProspectBoardTab />}
       {activeTab === "movers" && <ValueMoversTab />}
       {activeTab === "signals" && <SignalsTab username={effectiveUser} />}
     </AppShell>

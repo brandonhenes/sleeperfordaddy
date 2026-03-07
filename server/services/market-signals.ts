@@ -9,6 +9,7 @@ const GAP_THRESHOLD = 8;         // minimum score gap for a signal
 const CONSENSUS_SPREAD = 4;      // max spread for consensus lock
 const MIN_EDGE_SCORE = 50;       // ignore deep stashes
 const MIN_SIGNAL_STRENGTH = 30;  // don't surface weak signals
+const d1 = (n: number) => Math.round(n * 10) / 10;
 
 // ─── Types ───
 
@@ -66,7 +67,7 @@ function detectSignal(
         signal: "SMART_MONEY_BUY",
         strength: Math.min(100, gap * 5),
         action: "BUY",
-        reason: `Real trade values ${gap} pts above crowd sentiment. Managers are paying more than the crowd thinks this player is worth. The crowd tends to catch up.`,
+        reason: `Real trade values ${d1(gap)} pts above crowd sentiment. Managers are paying more than the crowd thinks this player is worth. The crowd tends to catch up.`,
       };
     }
     if (gap <= -GAP_THRESHOLD) {
@@ -74,7 +75,7 @@ function detectSignal(
         signal: "HYPE_SELL",
         strength: Math.min(100, Math.abs(gap) * 5),
         action: "SELL",
-        reason: `Crowd hype is ${Math.abs(gap)} pts above actual trade values. People think this player is worth more than what managers are actually paying. Sell into the hype.`,
+        reason: `Crowd hype is ${d1(Math.abs(gap))} pts above actual trade values. People think this player is worth more than what managers are actually paying. Sell into the hype.`,
       };
     }
   }
@@ -87,7 +88,7 @@ function detectSignal(
         signal: "EXPERT_BUY",
         strength: Math.min(100, gap * 5),
         action: "BUY",
-        reason: `Top analysts rank this player ${gap} pts above the crowd. Expert consensus tends to predict future value better than crowd sentiment.`,
+        reason: `Top analysts rank this player ${d1(gap)} pts above the crowd. Expert consensus tends to predict future value better than crowd sentiment.`,
       };
     }
     if (gap <= -GAP_THRESHOLD) {
@@ -97,7 +98,7 @@ function detectSignal(
           signal: "EXPERT_FADE",
           strength: Math.min(100, Math.abs(gap) * 5),
           action: "SELL",
-          reason: `Top analysts are fading this player (${Math.abs(gap)} pts below crowd). Expert downgrades often precede value drops.`,
+          reason: `Top analysts are fading this player (${d1(Math.abs(gap))} pts below crowd). Expert downgrades often precede value drops.`,
         };
       }
     }
@@ -112,7 +113,7 @@ function detectSignal(
         signal: "CONSENSUS_LOCK",
         strength: Math.max(0, 100 - spread * 25),
         action: "HOLD",
-        reason: `All sources agree within ${spread} points. This player is fairly valued. Don't overpay in trades. Look for disagreement players instead.`,
+        reason: `All sources agree within ${d1(spread)} points. This player is fairly valued. Don't overpay in trades. Look for disagreement players instead.`,
       };
     }
   }

@@ -53,13 +53,19 @@ export interface Prospect {
 }
 
 export interface Mover {
+  player_id: string;
   player_name: string;
   position: string | null;
   team: string | null;
-  dynasty_value: number;
-  delta: number;
-  ktc_value: number | null;
-  fp_value: number | null;
+  edge_score: number;
+  previous_edge: number;
+  edge_delta: number;
+  fc_score: number | null;
+  ktc_score: number | null;
+  dp_score: number | null;
+  prev_fc_score: number | null;
+  prev_ktc_score: number | null;
+  prev_dp_score: number | null;
 }
 
 export interface MoversData {
