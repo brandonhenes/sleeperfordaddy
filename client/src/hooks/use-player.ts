@@ -56,6 +56,14 @@ export interface RecInfo {
   rec_date: string;
 }
 
+export interface TradeComp {
+  trade_id: string;
+  league_name: string;
+  date: string;
+  gave: string[];
+  received: string[];
+}
+
 export interface PlayerDetail {
   summary: PlayerSummary;
   valueHistory: ValuePoint[];
@@ -64,6 +72,7 @@ export interface PlayerDetail {
   mentions: Mention[];
   prospect: ProspectInfo | null;
   recommendation: RecInfo | null;
+  recent_trades: TradeComp[];
 }
 
 export function usePlayer(playerName: string | undefined, username: string) {

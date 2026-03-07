@@ -54,7 +54,7 @@ function SourceBar({ label, score, max }: { label: string; score: number | null;
         <div style={{ width: `${pct}%`, height: "100%", background: color, borderRadius: 4, transition: "width 0.3s" }} />
       </div>
       <span className="font-mono" style={{ width: 32, fontWeight: 700, textAlign: "right", color: score != null ? "var(--text)" : "var(--text-muted)" }}>
-        {score != null ? Math.round(score) : "N/A"}
+        {score != null ? score.toFixed(1) : "N/A"}
       </span>
     </div>
   );
@@ -86,7 +86,7 @@ function PlayerHeader({ summary }: { summary: PlayerSummary }) {
       {/* Edge Score + Source Breakdown */}
       <div style={{ display: "flex", gap: 20, marginTop: 16, flexWrap: "wrap", alignItems: "flex-start" }}>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
-          <EdgeScoreBadge score={Math.round(summary.edge_score)} size="md" />
+          <EdgeScoreBadge score={summary.edge_score} size="md" />
           <span style={{ fontSize: 10, fontWeight: 700, color: agreementColor(summary.source_agreement) }}>
             {summary.source_agreement === "high" ? "Sources Agree" : summary.source_agreement === "medium" ? "Mixed" : "Sources Disagree"}
           </span>
@@ -442,7 +442,7 @@ export default function PlayerDetail() {
                   fontSize: 13,
                 }}
               >
-                <EdgeScoreBadge score={Math.round(c.edge_score)} size="sm" />
+                <EdgeScoreBadge score={c.edge_score} size="sm" />
                 <PlayerLink name={c.player_name} style={{ flex: 1 }} />
                 <span style={{ color: posColor(c.position), fontWeight: 700, fontSize: 11 }}>{c.position}</span>
                 {c.team && <span style={{ color: "var(--text-muted)", fontSize: 11 }}>{c.team}</span>}

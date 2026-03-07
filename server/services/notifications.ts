@@ -28,7 +28,7 @@ export async function getNotifications(username: string): Promise<Notification[]
         id: `arb-${g.player_id}`,
         type: "arbitrage",
         title: "Arbitrage Opportunity",
-        message: `${g.full_name} (Edge ${Math.round(g.edge_score)}) is free in ${g.free_count} of your leagues`,
+        message: `${g.full_name} (Edge ${(Math.round(g.edge_score * 10) / 10).toFixed(1)}) is free in ${g.free_count} of your leagues`,
         player_name: g.full_name,
         position: g.position,
         severity: g.edge_score >= 80 ? "high" : "medium",

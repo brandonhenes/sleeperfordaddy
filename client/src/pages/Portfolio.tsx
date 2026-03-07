@@ -113,7 +113,7 @@ export default function Portfolio() {
             >
               <span style={{ fontWeight: 700, fontSize: 13, color: posColor(pc.position) }}>{pc.position}</span>
               <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{pc.count} players</span>
-              <EdgeScoreBadge score={Math.round(pc.avg_score)} />
+              <EdgeScoreBadge score={pc.avg_score} />
             </div>
           ))}
         </div>

@@ -23,7 +23,7 @@ export default function EdgeScoreBadge({ score, size = "sm" }: EdgeScoreBadgePro
         display: "inline-flex",
         alignItems: "center",
         justifyContent: "center",
-        minWidth: isSm ? 28 : 36,
+        minWidth: isSm ? 28 : 44,
         height: isSm ? 20 : 28,
         borderRadius: 5,
         fontSize: isSm ? 11 : 14,
@@ -33,7 +33,7 @@ export default function EdgeScoreBadge({ score, size = "sm" }: EdgeScoreBadgePro
         lineHeight: 1,
       }}
     >
-      {score === 0 ? "\u2014" : score}
+      {score === 0 ? "\u2014" : isSm ? Math.round(score) : score.toFixed(1)}
     </span>
   );
 }

@@ -55,7 +55,7 @@ function scoreValue(value: number, params: SourceParams): number {
   if (value <= 0) return 39;
   const logVal = Math.log(value);
   const raw = (logVal - params.logFloor) / (params.logMax - params.logFloor);
-  return Math.max(39, Math.min(99, Math.round(39 + raw * 60)));
+  return Math.max(39, Math.min(99, Math.round((39 + raw * 60) * 10) / 10));
 }
 
 // ─── Main ───
@@ -115,8 +115,8 @@ export function computeEdgeScores(
     if (sourcesUsed > 0) {
       const totalWeight = scored.reduce((s, e) => s + e.weight, 0);
       score = totalWeight > 0
-        ? Math.round(scored.reduce((s, e) => s + e.value * e.weight, 0) / totalWeight)
-        : Math.round(scored.reduce((s, e) => s + e.value, 0) / sourcesUsed);
+        ? Math.round((scored.reduce((s, e) => s + e.value * e.weight, 0) / totalWeight) * 10) / 10
+        : Math.round((scored.reduce((s, e) => s + e.value, 0) / sourcesUsed) * 10) / 10;
       score = Math.max(39, Math.min(99, score));
     }
 

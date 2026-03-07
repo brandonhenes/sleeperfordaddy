@@ -170,10 +170,10 @@ async function readFromDailySnapshot(
         fc_value,
         ktc_value,
         dp_value,
-        edge_score::int AS edge_score,
-        fc_score::int AS fc_score,
-        ktc_score::int AS ktc_score,
-        dp_score::int AS dp_score,
+        ROUND(edge_score::numeric, 1)::real AS edge_score,
+        ROUND(fc_score::numeric, 1)::real AS fc_score,
+        ROUND(ktc_score::numeric, 1)::real AS ktc_score,
+        ROUND(dp_score::numeric, 1)::real AS dp_score,
         sources_used::int AS sources_used,
         source_agreement
       FROM player_scores_daily

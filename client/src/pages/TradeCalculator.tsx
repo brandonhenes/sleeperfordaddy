@@ -89,7 +89,7 @@ function ScoreCell({ label, value }: { label: string; value: number | null }) {
   return (
     <span style={{ fontSize: 10, color: value != null ? "var(--text-dim)" : "var(--text-muted)" }}>
       <span style={{ fontWeight: 600 }}>{label}</span>{" "}
-      <span className="font-mono" style={{ fontWeight: 700 }}>{value != null ? Math.round(value) : "N/A"}</span>
+      <span className="font-mono" style={{ fontWeight: 700 }}>{value != null ? value.toFixed(1) : "N/A"}</span>
     </span>
   );
 }
@@ -112,7 +112,7 @@ function AssetRow({ asset }: { asset: EvaluatedAsset }) {
         flexWrap: "wrap",
       }}
     >
-      <EdgeScoreBadge score={Math.round(asset.edge_score)} size="sm" />
+      <EdgeScoreBadge score={asset.edge_score} size="sm" />
       <span style={{ flex: 1, fontWeight: 500, minWidth: 100 }}>{asset.label}</span>
       <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
         <ScoreCell label="FC" value={asset.fc_score} />
@@ -141,7 +141,7 @@ function AssetRow({ asset }: { asset: EvaluatedAsset }) {
             paddingLeft: 36,
           }}
         >
-          {Math.round(asset.league_adjusted_score)} in this league ({adjustedDiff > 0 ? "+" : ""}
+          {asset.league_adjusted_score.toFixed(1)} in this league ({adjustedDiff > 0 ? "+" : ""}
           {adjustedDiff.toFixed(1)})
           {asset.scoring_delta_ppg != null ? ` · ${asset.scoring_delta_ppg > 0 ? "+" : ""}${asset.scoring_delta_ppg.toFixed(2)} ppg` : ""}
         </span>

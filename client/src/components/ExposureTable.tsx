@@ -115,9 +115,9 @@ export default function ExposureTable({ players }: ExposureTableProps) {
           <EdgeScoreBadge score={p.edge_score} />
 
           <div className="font-mono" style={{ display: "flex", gap: 6, fontSize: 11 }}>
-            {p.fc_score != null && <span style={{ color: "var(--amber)" }}>{p.fc_score}</span>}
-            {p.ktc_score != null && <span style={{ color: "#3b82f6" }}>{p.ktc_score}</span>}
-            {p.fp_score != null && <span style={{ color: "#7c3aed" }}>{p.fp_score}</span>}
+            {p.fc_score != null && <span style={{ color: "var(--amber)" }}>{p.fc_score.toFixed(1)}</span>}
+            {p.ktc_score != null && <span style={{ color: "#3b82f6" }}>{p.ktc_score.toFixed(1)}</span>}
+            {p.fp_score != null && <span style={{ color: "#7c3aed" }}>{p.fp_score.toFixed(1)}</span>}
             {p.sources_available === 0 && <span style={{ color: "var(--text-dim)" }}>{"\u2014"}</span>}
           </div>
 

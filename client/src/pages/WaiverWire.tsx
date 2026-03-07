@@ -112,13 +112,13 @@ function WaiverTable({ players, filter }: { players: WaiverPlayer[]; filter: Pos
                 <EdgeScoreBadge score={p.edge_score} />
               </td>
               <td style={{ padding: "10px 12px", color: "var(--text-dim)" }}>
-                {p.fc_score != null ? Math.round(p.fc_score) : "-"}
+                {p.fc_score != null ? p.fc_score.toFixed(1) : "-"}
               </td>
               <td style={{ padding: "10px 12px", color: "var(--text-dim)" }}>
-                {p.ktc_score != null ? Math.round(p.ktc_score) : "-"}
+                {p.ktc_score != null ? p.ktc_score.toFixed(1) : "-"}
               </td>
               <td style={{ padding: "10px 12px", color: "var(--text-dim)" }}>
-                {p.dp_score != null ? Math.round(p.dp_score) : "-"}
+                {p.dp_score != null ? p.dp_score.toFixed(1) : "-"}
               </td>
               <td style={{ padding: "10px 12px" }}>
                 <span

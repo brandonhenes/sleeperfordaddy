@@ -260,7 +260,7 @@ function RosterRow({ roster, rank }: { roster: RosterRanking; rank: number }) {
         <span className="font-mono" style={{ width: 24, fontSize: 12, color: "var(--text-muted)" }}>
           #{rank}
         </span>
-        <EdgeScoreBadge score={Math.round(roster.avg_starter_score)} size="md" />
+        <EdgeScoreBadge score={roster.avg_starter_score} size="md" />
         <span style={{ flex: 1, textAlign: "left", fontWeight: roster.is_user ? 700 : 500, fontSize: 13 }}>
           {roster.display_name}
         </span>
@@ -322,7 +322,7 @@ function LeagueCard({ league }: { league: LeaguePowerRanking }) {
             )}
           </span>
         </div>
-        {userRoster && <EdgeScoreBadge score={Math.round(userRoster.avg_starter_score)} size="md" />}
+        {userRoster && <EdgeScoreBadge score={userRoster.avg_starter_score} size="md" />}
         {userRoster && <ArchetypeBadge archetype={userRoster.archetype} />}
         {userRoster && (
           <div style={{ display: "flex", gap: 8, marginLeft: 8 }}>

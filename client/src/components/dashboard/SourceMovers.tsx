@@ -11,10 +11,10 @@ function MoverRow({ m, direction }: { m: SourceMover; direction: "up" | "down" }
       <PlayerLink name={m.full_name} style={{ fontSize: 13 }} />
       <span style={{ fontSize: 11, fontWeight: 600, color: posColor(m.position) }}>{m.position}</span>
       <span className="font-mono" style={{ fontSize: 12, color: "var(--text-muted)" }}>
-        {m.previous_score} {arrow} {m.current_score}
+        {m.previous_score.toFixed(1)} {arrow} {m.current_score.toFixed(1)}
       </span>
       <span className="font-mono" style={{ fontSize: 12, fontWeight: 700, color: changeColor, minWidth: 36, textAlign: "right" }}>
-        ({sign}{m.change})
+        ({sign}{m.change.toFixed(1)})
       </span>
       <span style={{ fontSize: 11, color: "var(--text-dim)", whiteSpace: "nowrap" }}>
         {m.leagues_owned}L

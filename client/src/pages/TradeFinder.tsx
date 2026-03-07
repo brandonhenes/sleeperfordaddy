@@ -71,7 +71,7 @@ function AssetRow({ asset }: { asset: TradePackageAsset }) {
           }}
         >
           {adjustedDiff > 0 ? "+" : ""}
-          {Math.round(adjustedDiff)} in this league
+          {adjustedDiff.toFixed(1)} in this league
         </span>
       )}
     </div>
@@ -84,13 +84,13 @@ function PackageView({ pkg }: { pkg: TradePackage }) {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
         <div>
           <div style={{ fontSize: 11, fontWeight: 700, color: "#ef4444", letterSpacing: 0.5, marginBottom: 8, borderBottom: "2px solid #ef4444", paddingBottom: 4 }}>
-            YOU SEND ({pkg.send_total.toFixed(0)} edge)
+            YOU SEND ({pkg.send_total.toFixed(1)} edge)
           </div>
           {pkg.you_send.map((asset, i) => <AssetRow key={`send-${i}-${asset.label}`} asset={asset} />)}
         </div>
         <div>
           <div style={{ fontSize: 11, fontWeight: 700, color: "#22c55e", letterSpacing: 0.5, marginBottom: 8, borderBottom: "2px solid #22c55e", paddingBottom: 4 }}>
-            YOU RECEIVE ({pkg.receive_total.toFixed(0)} edge)
+            YOU RECEIVE ({pkg.receive_total.toFixed(1)} edge)
           </div>
           {pkg.you_receive.map((asset, i) => <AssetRow key={`receive-${i}-${asset.label}`} asset={asset} />)}
         </div>
@@ -253,7 +253,7 @@ function AcquisitionCard({ opportunity }: { opportunity: AcquisitionOpportunity 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
                 <div>
                   <div style={{ fontSize: 11, fontWeight: 700, color: "#ef4444", letterSpacing: 0.5, marginBottom: 6, borderBottom: "2px solid #ef4444", paddingBottom: 4 }}>
-                    YOU SEND ({offer.send_total.toFixed(0)})
+                    YOU SEND ({offer.send_total.toFixed(1)})
                   </div>
                   {offer.you_send.map((a, i) => (
                     <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 0", borderBottom: "1px solid var(--border)", fontSize: 12 }}>
@@ -265,7 +265,7 @@ function AcquisitionCard({ opportunity }: { opportunity: AcquisitionOpportunity 
                 </div>
                 <div>
                   <div style={{ fontSize: 11, fontWeight: 700, color: "#22c55e", letterSpacing: 0.5, marginBottom: 6, borderBottom: "2px solid #22c55e", paddingBottom: 4 }}>
-                    YOU GET ({offer.receive_total.toFixed(0)})
+                    YOU GET ({offer.receive_total.toFixed(1)})
                   </div>
                   {offer.you_receive.map((a, i) => (
                     <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 0", borderBottom: "1px solid var(--border)", fontSize: 12 }}>
@@ -418,7 +418,7 @@ function ShopOpportunityCard({ opp }: { opp: ShopOpportunity }) {
           {opp.fairness === "fair" ? "Fair" : opp.fairness === "slight_edge" ? "Slight Edge" : "Lopsided"} Trade
         </span>
         <span style={{ color: "var(--text-muted)" }}>
-          Delta: {opp.delta > 0 ? "+" : ""}{opp.delta.toFixed(0)} edge
+          Delta: {opp.delta > 0 ? "+" : ""}{opp.delta.toFixed(1)} edge
         </span>
       </div>
     </div>

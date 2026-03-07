@@ -68,9 +68,9 @@ function SignalCard({ sig }: { sig: MarketSignal }) {
           <StrengthBar value={sig.signal_strength} />
         </div>
         <div className="font-mono" style={{ fontSize: 10, color: "var(--text-dim)", display: "flex", gap: 12 }}>
-          {sig.fc_score != null && <span>FC: {sig.fc_score}</span>}
-          {sig.ktc_score != null && <span>KTC: {sig.ktc_score}</span>}
-          {sig.fp_score != null && <span>FP: {sig.fp_score}</span>}
+          {sig.fc_score != null && <span>FC: {sig.fc_score.toFixed(1)}</span>}
+          {sig.ktc_score != null && <span>KTC: {sig.ktc_score.toFixed(1)}</span>}
+          {sig.fp_score != null && <span>FP: {sig.fp_score.toFixed(1)}</span>}
         </div>
       </div>
       <div style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.5 }}>

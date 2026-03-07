@@ -45,7 +45,7 @@ function SellRow({ player: p }: { player: SellCandidate }) {
         className="font-mono"
         style={{ fontSize: 13, color: "var(--amber)", minWidth: 60, textAlign: "right" }}
       >
-        {p.edge_score ?? "-"}
+        {p.edge_score != null ? p.edge_score.toFixed(1) : "-"}
       </span>
       <span style={{ minWidth: 80, textAlign: "right" }}>
         <TrendArrow value={p.trend_30day} />
@@ -129,7 +129,7 @@ function BuyCard({ opp: o }: { opp: BuyOpportunity }) {
             className="font-mono"
             style={{ fontSize: 14, fontWeight: 600, color: "var(--amber)" }}
           >
-            {o.edge_score}
+            {o.edge_score.toFixed(1)}
           </span>
         )}
         <span style={{ fontSize: 12, color: "var(--text-muted)" }}>

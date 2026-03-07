@@ -19,18 +19,18 @@ export default function EmpireOverview({ empire }: { empire: DashboardData["empi
         <StatCard label="Leagues" value={empire.total_leagues} />
         <StatCard
           label="Avg Starter Score"
-          value={empire.avg_starter_score}
+          value={empire.avg_starter_score.toFixed(1)}
           accent={empire.avg_starter_score >= 80 ? "var(--green)" : empire.avg_starter_score >= 70 ? "var(--amber)" : "var(--red)"}
         />
         <StatCard
           label="Strongest"
-          value={empire.strongest_league.avg_score}
+          value={empire.strongest_league.avg_score.toFixed(1)}
           sub={empire.strongest_league.name}
           accent="var(--green)"
         />
         <StatCard
           label="Weakest"
-          value={empire.weakest_league.avg_score}
+          value={empire.weakest_league.avg_score.toFixed(1)}
           sub={empire.weakest_league.name}
           accent="var(--red)"
         />

@@ -106,6 +106,10 @@ function emptyGrade(): SlotGradeInfo {
   return { avg_score: 0, grade: "hole" };
 }
 
+function d1(n: number): number {
+  return Math.round(n * 10) / 10;
+}
+
 // ─── Main ───
 
 export async function getDashboardData(username: string): Promise<DashboardData | null> {
@@ -345,7 +349,7 @@ export async function getDashboardData(username: string): Promise<DashboardData 
       player_name: best.full_name,
       position: best.position,
       edge_score: best.edge_score,
-      signal: `Crowd values at ${best.ktc_score}, experts at ${Math.round(((best.fc_score ?? 0) + (best.dp_score ?? 0)) / [best.fc_score, best.dp_score].filter((s) => s != null).length)}. Sell into the hype.`,
+      signal: `Crowd values at ${d1(best.ktc_score ?? 0)}, experts at ${d1(((best.fc_score ?? 0) + (best.dp_score ?? 0)) / [best.fc_score, best.dp_score].filter((s) => s != null).length)}. Sell into the hype.`,
       leagues: best.league_names.length > 1
         ? [`${best.leagues_owned} leagues`]
         : [best.league_names[0]],
@@ -371,7 +375,7 @@ export async function getDashboardData(username: string): Promise<DashboardData 
       player_name: best.full_name,
       position: best.position,
       edge_score: best.edge_score,
-      signal: `Experts at ${Math.round(((best.fc_score ?? 0) + (best.dp_score ?? 0)) / [best.fc_score, best.dp_score].filter((s) => s != null).length)}, crowd only at ${best.ktc_score}. Market hasn't caught up.`,
+      signal: `Experts at ${d1(((best.fc_score ?? 0) + (best.dp_score ?? 0)) / [best.fc_score, best.dp_score].filter((s) => s != null).length)}, crowd only at ${d1(best.ktc_score ?? 0)}. Market hasn't caught up.`,
       leagues: best.leagues_owned < totalLeagues
         ? [`${best.leagues_owned}/${totalLeagues} leagues`]
         : [`All ${totalLeagues} leagues`],
@@ -423,7 +427,7 @@ export async function getDashboardData(username: string): Promise<DashboardData 
       player_name: alert.full_name,
       position: alert.position,
       edge_score: alert.edge_score,
-      signal: `Owned in ${alert.leagues_owned}/${totalLeagues} leagues with ${spread}pt source spread. Diversify risk.`,
+      signal: `Owned in ${alert.leagues_owned}/${totalLeagues} leagues with ${d1(spread)}pt source spread. Diversify risk.`,
       leagues: [`${alert.leagues_owned} leagues`],
     });
   }
