@@ -1,6 +1,8 @@
 import { Router } from "express";
 import { evaluateTrade, searchTradeAssets } from "../services/trade-calculator.js";
 import { parseWeights } from "../lib/parse-weights.js";
+import { buildLeagueBehaviors, type OpponentContext } from "../services/manager-behavior.js";
+import { getPowerRankings } from "../services/power-rankings.js";
 import type { TradeAssetInput } from "../../shared/types.js";
 
 const router = Router();
@@ -35,6 +37,74 @@ router.post("/api/trade/evaluate", async (req, res) => {
     res.json(data);
   } catch (err) {
     console.error("[trade-calculator] Error:", err);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+/** GET /api/trade/opponent-context/:username/:leagueId */
+router.get("/api/trade/opponent-context/:username/:leagueId", async (req, res) => {
+  try {
+    const { username, leagueId } = req.params;
+    if (!username || !leagueId) return res.status(400).json({ message: "username and leagueId required" });
+
+    const allLeagues = await getPowerRankings(username);
+    const league = allLeagues.find((l) => l.league_id === leagueId);
+    if (!league) return res.status(404).json({ message: "League not found" });
+
+    const behaviors = await buildLeagueBehaviors(leagueId);
+    const POSITIONS = ["QB", "RB", "WR", "TE"];
+    const MIN_STARTERS: Record<string, number> = { QB: 1, RB: 2, WR: 2, TE: 1 };
+
+    const medians: Record<string, number> = {};
+    for (const pos of POSITIONS) {
+      const scores: number[] = [];
+      for (const r of league.rosters) {
+        const top = r.core_assets
+          .filter((a) => a.position === pos)
+          .sort((a, b) => b.edge_score - a.edge_score)
+          .slice(0, (MIN_STARTERS[pos] ?? 1) + 1);
+        scores.push(...top.map((a) => a.edge_score));
+      }
+      scores.sort((a, b) => a - b);
+      const mid = Math.floor(scores.length / 2);
+      medians[pos] = scores.length > 0
+        ? (scores.length % 2 !== 0 ? scores[mid] : ((scores[mid - 1] ?? 0) + (scores[mid] ?? 0)) / 2)
+        : 0;
+    }
+
+    const opponents: OpponentContext[] = [];
+    for (const r of league.rosters) {
+      if (r.is_user) continue;
+
+      const needs: string[] = [];
+      const surplus: string[] = [];
+      const topByPos: Record<string, string> = {};
+
+      for (const pos of POSITIONS) {
+        const posPlayers = r.core_assets
+          .filter((a) => a.position === pos)
+          .sort((a, b) => b.edge_score - a.edge_score);
+        if (posPlayers[0]) topByPos[pos] = posPlayers[0].player_id;
+        const aboveMedian = posPlayers.filter((p) => p.edge_score > (medians[pos] ?? 60));
+        if (aboveMedian.length < (MIN_STARTERS[pos] ?? 1)) needs.push(pos);
+        if (aboveMedian.length > (MIN_STARTERS[pos] ?? 1) + 1) surplus.push(pos);
+      }
+
+      opponents.push({
+        roster_id: r.roster_id,
+        display_name: r.display_name,
+        team_name: null,
+        archetype: r.archetype,
+        needs,
+        surplus,
+        top_player_ids_by_pos: topByPos,
+        behavior: behaviors.get(r.roster_id) ?? null,
+      });
+    }
+
+    res.json({ league_id: leagueId, opponents });
+  } catch (err) {
+    console.error("[opponent-context] Error:", err);
     res.status(500).json({ message: "Internal server error" });
   }
 });

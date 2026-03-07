@@ -295,6 +295,10 @@ export interface TradeSuggestion {
     archetype: string;
     compatibility_score: number;
     compatibility_reason: string;
+    bias_flags: string[];
+    preferred_structure: string;
+    total_trades: number;
+    recent_trades: number;
   };
   packages: TradePackage[];
 }
@@ -317,6 +321,12 @@ export interface TradePackage {
   why_you_do_it: string;
   why_they_accept: string;
   sweetener_hint: string | null;
+  acceptance: {
+    probability: number;
+    label: "Likely" | "Possible" | "Unlikely" | "Hard";
+    accept_reasons: string[];
+    reject_reasons: string[];
+  } | null;
 }
 
 export interface TradePackageAsset {

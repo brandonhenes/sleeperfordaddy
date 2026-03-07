@@ -37,6 +37,13 @@ function fairnessLabel(fairness: string): string {
   return "LOPSIDED";
 }
 
+function acceptanceColor(label: "Likely" | "Possible" | "Unlikely" | "Hard"): string {
+  if (label === "Likely") return "var(--green)";
+  if (label === "Possible") return "var(--amber)";
+  if (label === "Unlikely") return "#f97316";
+  return "var(--red)";
+}
+
 function AssetRow({ asset }: { asset: TradePackageAsset }) {
   const adjustedDiff =
     asset.league_adjusted_score != null ? asset.league_adjusted_score - asset.edge_score : 0;
@@ -125,6 +132,35 @@ function PackageView({ pkg }: { pkg: TradePackage }) {
         <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 600 }}>({fairnessLabel(pkg.fairness)})</span>
       </div>
 
+      {pkg.acceptance && (
+        <div style={{ marginTop: 10, background: "var(--dark-base)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 12px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)", letterSpacing: 0.5 }}>
+              ACCEPTANCE SIGNAL
+            </div>
+            <span style={{ background: acceptanceColor(pkg.acceptance.label), color: pkg.acceptance.label === "Possible" ? "var(--dark-base)" : "#fff", borderRadius: 6, padding: "3px 9px", fontSize: 11, fontWeight: 800 }}>
+              {pkg.acceptance.label} ({Math.round(pkg.acceptance.probability)}%)
+            </span>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <div>
+              {pkg.acceptance.accept_reasons.slice(0, 2).map((r, i) => (
+                <div key={`acc-${i}`} style={{ fontSize: 11, color: "var(--green)", lineHeight: 1.5 }}>
+                  • {r}
+                </div>
+              ))}
+            </div>
+            <div>
+              {pkg.acceptance.reject_reasons.slice(0, 2).map((r, i) => (
+                <div key={`rej-${i}`} style={{ fontSize: 11, color: "var(--red)", lineHeight: 1.5 }}>
+                  • {r}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12, fontSize: 12 }}>
         <div style={{ background: "var(--dark-base)", borderRadius: 8, padding: "10px 14px" }}>
           <div style={{ fontSize: 10, fontWeight: 700, color: "var(--amber)", marginBottom: 4, letterSpacing: 0.5 }}>WHY YOU DO IT</div>
@@ -176,7 +212,17 @@ function PartnerCard({ suggestion }: { suggestion: TradeSuggestion }) {
         <div style={{ flex: 1, textAlign: "left" }}>
           <div style={{ fontSize: 15, fontWeight: 700 }}>{partner.display_name}</div>
           <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
-            {partner.archetype} | {packages.length} package{packages.length !== 1 ? "s" : ""}
+            {partner.archetype} | {packages.length} package{packages.length !== 1 ? "s" : ""} | {partner.recent_trades}/{partner.total_trades} recent trades
+          </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4 }}>
+            <span style={{ fontSize: 10, color: "var(--text-dim)", border: "1px solid var(--border)", borderRadius: 999, padding: "1px 7px" }}>
+              {partner.preferred_structure}
+            </span>
+            {(partner.bias_flags ?? []).slice(0, 3).map((flag) => (
+              <span key={flag} style={{ fontSize: 10, color: "var(--text-dim)", border: "1px solid var(--border)", borderRadius: 999, padding: "1px 7px" }}>
+                {flag}
+              </span>
+            ))}
           </div>
         </div>
         {pkg?.trade_type && (

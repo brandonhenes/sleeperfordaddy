@@ -21,6 +21,12 @@ import {
   type LeagueScoringSettings,
 } from "./scoring-adjustment.js";
 import { evaluateTradeValue } from "./trade-value.js";
+import {
+  buildLeagueBehaviors,
+  buildAcceptReason,
+  estimateAcceptance,
+  type ManagerBehavior,
+} from "./manager-behavior.js";
 
 // Constants
 
@@ -49,6 +55,8 @@ interface RosterProfile {
   surplus: Record<Pos, CoreAsset[]>;
   needUrgency: Record<Pos, number>;
   tradeablePicks: ScoredPick[];
+  topPlayerIdsByPos: Record<Pos, string>;
+  behavior?: ManagerBehavior;
 }
 
 // Helpers
@@ -175,6 +183,69 @@ function scorePackage(
   };
 }
 
+function normalizeLabel(label: string): string {
+  return label.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function resolvePlayerIdByLabel(
+  asset: TradePackageAsset,
+  roster: RosterProfile
+): string | null {
+  if (asset.asset_type !== "player") return null;
+  const target = normalizeLabel(asset.label);
+  const found = roster.roster.core_assets.find(
+    (p) =>
+      normalizeLabel(p.full_name) === target &&
+      (!asset.position || p.position === asset.position)
+  );
+  return found?.player_id ?? null;
+}
+
+function applyAcceptanceAndBehavior(
+  packages: TradePackage[],
+  user: RosterProfile,
+  opp: RosterProfile
+): TradePackage[] {
+  return packages
+    .filter((pkg) => {
+      if (opp.behavior?.preferred_structure === "1-for-1") {
+        return pkg.you_send.length === 1 && pkg.you_receive.length === 1;
+      }
+      return true;
+    })
+    .map((pkg) => {
+      const sendAssets = pkg.you_send.map((a) => ({
+        player_id: resolvePlayerIdByLabel(a, user),
+        position: a.position,
+        label: a.label,
+      }));
+      const receiveAssets = pkg.you_receive.map((a) => ({
+        player_id: resolvePlayerIdByLabel(a, opp),
+        position: a.position,
+        label: a.label,
+      }));
+
+      const acceptance = estimateAcceptance({
+        fairness: pkg.fairness,
+        delta: -pkg.delta,
+        sendAssets,
+        receiveAssets,
+        opponent: {
+          archetype: opp.roster.archetype,
+          needs: opp.needs,
+          top_player_ids_by_pos: opp.topPlayerIdsByPos,
+          behavior: opp.behavior ?? null,
+        },
+      });
+
+      return {
+        ...pkg,
+        acceptance,
+        why_they_accept: buildAcceptReason(acceptance, pkg.why_they_accept),
+      };
+    });
+}
+
 // Profile Building
 
 function computeLeagueMedians(rosters: RosterRanking[]): Record<Pos, number> {
@@ -208,6 +279,13 @@ function buildProfile(
     byPos[pos].sort((a, b) => b.edge_score - a.edge_score);
   }
 
+  const topPlayerIdsByPos: Record<Pos, string> = {
+    QB: byPos.QB[0]?.player_id ?? "",
+    RB: byPos.RB[0]?.player_id ?? "",
+    WR: byPos.WR[0]?.player_id ?? "",
+    TE: byPos.TE[0]?.player_id ?? "",
+  };
+
   const needs: Pos[] = [];
   const surplus: Record<Pos, CoreAsset[]> = { QB: [], RB: [], WR: [], TE: [] };
   const needUrgency: Record<Pos, number> = { QB: 0, RB: 0, WR: 0, TE: 0 };
@@ -233,7 +311,15 @@ function buildProfile(
     .filter((p) => p.edge_score > 0)
     .sort((a, b) => b.edge_score - a.edge_score);
 
-  return { roster, byPos, needs, surplus, needUrgency, tradeablePicks };
+  return {
+    roster,
+    byPos,
+    needs,
+    surplus,
+    needUrgency,
+    tradeablePicks,
+    topPlayerIdsByPos,
+  };
 }
 
 // Compatibility Scoring
@@ -339,6 +425,7 @@ function generatePackages(
         sweetener_hint: Math.abs(scored.deltaEdge) > 3 && Math.abs(scored.deltaEdge) <= 10
           ? `Add a late-round pick to ${scored.deltaEdge > 0 ? "sweeten for them" : "balance for you"}`
           : null,
+        acceptance: null,
       });
     }
   }
@@ -400,6 +487,7 @@ function generatePackages(
         : scored.deltaEdge > 8
           ? "You're overpaying slightly. Try removing the weaker piece."
           : null,
+      acceptance: null,
     });
   }
 
@@ -449,6 +537,7 @@ function generatePackages(
           why_you_do_it: `${userPos} surplus plus draft capital lands a real ${oppPos} upgrade`,
           why_they_accept: `Gets ${userPos} help plus a future pick for their ${oppPos} surplus.`,
           sweetener_hint: scored.deltaEdge < -5 ? "Try downgrading the pick tier if the cost feels steep." : null,
+          acceptance: null,
         });
         break;
       }
@@ -521,6 +610,7 @@ function generatePackages(
         sweetener_hint: scored.deltaEdge < -5
           ? "Consider upgrading the pick round or adding another asset"
           : null,
+        acceptance: null,
       });
     }
   }
@@ -574,6 +664,10 @@ export async function findTrades(
   const mode = league.mode;
   const medians = computeLeagueMedians(league.rosters);
   const profiles = league.rosters.map((r) => buildProfile(r, medians));
+  const behaviors = await buildLeagueBehaviors(leagueId);
+  for (const profile of profiles) {
+    profile.behavior = behaviors.get(profile.roster.roster_id);
+  }
 
   const userProfile = profiles.find((p) => p.roster.is_user);
   if (!userProfile) return [];
@@ -592,7 +686,8 @@ export async function findTrades(
   const suggestions: TradeSuggestion[] = [];
 
   for (const { opp, score, reason } of ranked) {
-    const packages = generatePackages(userProfile, opp, mode, leagueScoring, usageMap, hasCustomScoring);
+    const basePackages = generatePackages(userProfile, opp, mode, leagueScoring, usageMap, hasCustomScoring);
+    const packages = applyAcceptanceAndBehavior(basePackages, userProfile, opp);
     if (packages.length === 0) continue;
 
     suggestions.push({
@@ -602,6 +697,10 @@ export async function findTrades(
         archetype: opp.roster.archetype,
         compatibility_score: score,
         compatibility_reason: reason,
+        bias_flags: opp.behavior?.bias_flags ?? [],
+        preferred_structure: opp.behavior?.preferred_structure ?? "mixed",
+        total_trades: opp.behavior?.total_trades ?? 0,
+        recent_trades: opp.behavior?.recent_trades ?? 0,
       },
       packages,
     });

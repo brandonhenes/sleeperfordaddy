@@ -1,15 +1,23 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import AppShell from "../components/AppShell";
 import EdgeScoreBadge from "../components/EdgeScoreBadge";
-import ShareButton from "../components/ShareButton";
+import FreshnessBar from "../components/FreshnessBar";
+import { PlayerLink } from "../components/ui";
 import { posColor } from "../lib/position-colors";
 import { useEvaluateTrade } from "../hooks/use-trade-calculator";
-import { usePowerRankings } from "../hooks/use-power-rankings";
+import {
+  usePowerRankings,
+  type CoreAsset,
+  type RosterRanking,
+  type ScoredPick,
+} from "../hooks/use-power-rankings";
 import { apiFetch } from "../lib/api";
-import type { TradeAssetInput, EvaluatedAsset, TradeEvaluation } from "../../../shared/types";
+import { computeAcceptance, type AcceptanceResult } from "../lib/acceptance";
+import type { EvaluatedAsset, TradeAssetInput, TradeEvaluation } from "../../../shared/types";
 
-type Side = "A" | "B";
+type Side = "send" | "receive";
+type PickerSide = "send" | "receive";
 
 interface SearchAsset {
   type: "player";
@@ -19,604 +27,490 @@ interface SearchAsset {
   team: string | null;
 }
 
+interface OpponentBehavior {
+  total_trades: number;
+  recent_trades: number;
+  preferred_structure: string;
+  is_active: boolean;
+  last_trade_days_ago: number | null;
+  bias_flags: string[];
+  top_acquired_positions: string[];
+}
+
+interface OpponentContext {
+  roster_id: number;
+  display_name: string;
+  team_name: string | null;
+  archetype: string;
+  needs: string[];
+  surplus: string[];
+  top_player_ids_by_pos: Record<string, string>;
+  behavior: OpponentBehavior | null;
+}
+
+interface OpponentContextResponse {
+  league_id: string;
+  opponents: OpponentContext[];
+}
+
+const POSITIONS = ["QB", "RB", "WR", "TE"] as const;
 const YEAR = new Date().getFullYear();
 const PICK_YEARS = [String(YEAR), String(YEAR + 1), String(YEAR + 2)];
 
-// ─── Helpers ───
-
-function fairnessColor(fairness: TradeEvaluation["fairness"]): string {
-  if (fairness === "fair") return "#22c55e";
-  if (fairness === "slight_edge") return "#f59e0b";
-  return "#ef4444";
+function assetKey(a: TradeAssetInput): string {
+  return a.type === "player"
+    ? `p:${a.player_id}`
+    : `k:${a.pick_season}|${a.pick_round}|${a.pick_tier ?? "mid"}`;
 }
 
-function fairnessLabel(fairness: TradeEvaluation["fairness"]): string {
-  if (fairness === "fair") return "FAIR";
-  if (fairness === "slight_edge") return "SLIGHT EDGE";
+function pickToAsset(pick: ScoredPick): TradeAssetInput {
+  return { type: "pick", pick_season: pick.season, pick_round: pick.round, pick_tier: pick.tier };
+}
+
+function pickDisplay(pick: ScoredPick): string {
+  if (pick.season === String(YEAR) && pick.pick_slot != null) {
+    return `${pick.round}.${String(pick.pick_slot).padStart(2, "0")}`;
+  }
+  return pick.label;
+}
+
+function fairnessColor(f: TradeEvaluation["fairness"]): string {
+  if (f === "fair") return "var(--green)";
+  if (f === "slight_edge") return "var(--amber)";
+  return "var(--red)";
+}
+
+function fairnessLabel(f: TradeEvaluation["fairness"]): string {
+  if (f === "fair") return "FAIR";
+  if (f === "slight_edge") return "SLIGHT EDGE";
   return "LOPSIDED";
 }
 
-function agreementColor(agr: "high" | "medium" | "low"): string {
-  if (agr === "high") return "#22c55e";
-  if (agr === "medium") return "#f59e0b";
-  return "#ef4444";
+function acceptanceColor(label: AcceptanceResult["label"]): string {
+  if (label === "Likely") return "var(--green)";
+  if (label === "Possible") return "var(--amber)";
+  if (label === "Unlikely") return "#f97316";
+  return "var(--red)";
 }
 
-function agreementLabel(agr: "high" | "medium" | "low"): string {
-  if (agr === "high") return "Agree";
-  if (agr === "medium") return "Mixed";
-  return "Disagree";
+function packagePenalty(count: number): number {
+  return count <= 1 ? 0 : (count - 1) * 1.5;
 }
 
-function sourceOutlier(a: EvaluatedAsset): string | null {
-  const scores = [
-    { name: "FC", v: a.fc_score },
-    { name: "KTC", v: a.ktc_score },
-    { name: "FP", v: a.dp_score },
-  ].filter((s) => s.v != null) as { name: string; v: number }[];
-  if (scores.length < 2) return null;
-  const avg = scores.reduce((s, x) => s + x.v, 0) / scores.length;
-  let maxDev = 0;
-  let outlier = "";
-  for (const s of scores) {
-    const dev = Math.abs(s.v - avg);
-    if (dev > maxDev) { maxDev = dev; outlier = s.name; }
+function EvalBar({
+  result,
+  acceptance,
+  hasBothSides,
+  isPending,
+}: {
+  result: TradeEvaluation | undefined;
+  acceptance: AcceptanceResult | null;
+  hasBothSides: boolean;
+  isPending: boolean;
+}) {
+  if (!hasBothSides) {
+    return <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: 12, color: "var(--text-muted)", fontSize: 13 }}>Click players below to build a trade.</div>;
   }
-  if (maxDev < 8) return null;
-  const o = scores.find((s) => s.name === outlier);
-  if (!o) return null;
-  return `${outlier} ${o.v > avg ? "higher" : "lower"}`;
-}
+  if (!result && isPending) {
+    return <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: 12, color: "var(--amber)", fontSize: 13 }}><span className="animate-pulse">Evaluating trade...</span></div>;
+  }
+  if (!result) return null;
 
-function pickLabel(a: TradeAssetInput): string {
-  const tier = (a.pick_tier ?? "mid").charAt(0).toUpperCase() + (a.pick_tier ?? "mid").slice(1);
-  const rnd = a.pick_round === 1 ? "1st" : a.pick_round === 2 ? "2nd" : a.pick_round === 3 ? "3rd" : `R${a.pick_round}`;
-  return `${a.pick_season} ${tier} ${rnd}`;
-}
+  const sendTotal = result.sideA.total_edge;
+  const receiveTotal = result.sideB.total_edge;
+  const total = Math.max(1, sendTotal + receiveTotal);
+  const sendPct = (sendTotal / total) * 100;
+  const yourDelta = receiveTotal - sendTotal;
 
-function buildShareText(result: TradeEvaluation): string {
-  const lines = [`[The Edge] Trade Eval`];
-  lines.push(`Side A (${result.sideA.total_trade_power.toFixed(1)} TP, ${result.sideA.total_edge.toFixed(1)} edge): ${result.sideA.assets.map((a) => a.label).join(", ")}`);
-  lines.push(`Side B (${result.sideB.total_trade_power.toFixed(1)} TP, ${result.sideB.total_edge.toFixed(1)} edge): ${result.sideB.assets.map((a) => a.label).join(", ")}`);
-  const winner = result.delta > 0 ? "A" : result.delta < 0 ? "B" : "Even";
-  lines.push(`${winner} wins by ${Math.abs(result.delta).toFixed(1)} TP. Fairness: ${result.fairness}`);
-  return lines.join("\n");
-}
-
-// ─── Inline score display ───
-
-function ScoreCell({ label, value }: { label: string; value: number | null }) {
   return (
-    <span style={{ fontSize: 10, color: value != null ? "var(--text-dim)" : "var(--text-muted)" }}>
-      <span style={{ fontWeight: 600 }}>{label}</span>{" "}
-      <span className="font-mono" style={{ fontWeight: 700 }}>{value != null ? value.toFixed(1) : "N/A"}</span>
-    </span>
-  );
-}
-
-// ─── Asset Row (in result) ───
-
-function AssetRow({ asset }: { asset: EvaluatedAsset }) {
-  const outlier = sourceOutlier(asset);
-  const adjustedDiff =
-    asset.league_adjusted_score != null ? asset.league_adjusted_score - asset.edge_score : 0;
-  return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-        padding: "8px 10px",
-        borderBottom: "1px solid var(--border)",
-        fontSize: 12,
-        flexWrap: "wrap",
-      }}
-    >
-      <EdgeScoreBadge score={asset.edge_score} size="sm" />
-      {asset.trade_power > 0 && (
-        <span className="font-mono" style={{ fontSize: 10, color: "var(--text-muted)" }}>
-          TP:{asset.trade_power.toFixed(1)}
-        </span>
-      )}
-      <span style={{ flex: 1, fontWeight: 500, minWidth: 100 }}>{asset.label}</span>
-      <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-        <ScoreCell label="FC" value={asset.fc_score} />
-        <ScoreCell label="KTC" value={asset.ktc_score} />
-        <ScoreCell label="FP" value={asset.dp_score} />
-        <span
-          style={{
-            fontSize: 9,
-            fontWeight: 700,
-            color: agreementColor(asset.source_agreement),
-            padding: "2px 6px",
-            borderRadius: 4,
-            border: `1px solid ${agreementColor(asset.source_agreement)}`,
-          }}
-        >
-          {agreementLabel(asset.source_agreement)}
-        </span>
+    <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <span style={{ background: fairnessColor(result.fairness), color: result.fairness === "fair" ? "var(--dark-base)" : "#fff", borderRadius: 6, padding: "4px 10px", fontSize: 11, fontWeight: 800 }}>
+            {fairnessLabel(result.fairness)}
+          </span>
+          <span style={{ fontSize: 12, fontWeight: 700, color: yourDelta >= 0 ? "var(--green)" : "var(--red)" }}>
+            {yourDelta >= 0 ? "You gain" : "You overpay"} {Math.abs(yourDelta).toFixed(1)}
+          </span>
+        </div>
+        {acceptance && (
+          <span style={{ background: acceptanceColor(acceptance.label), color: acceptance.label === "Possible" ? "var(--dark-base)" : "#fff", borderRadius: 6, padding: "4px 10px", fontSize: 11, fontWeight: 800 }}>
+            {acceptance.label} ({Math.round(acceptance.probability)}%)
+          </span>
+        )}
       </div>
-      {asset.league_adjusted_score != null && Math.abs(adjustedDiff) >= 1 && (
-        <span
-          style={{
-            fontSize: 10,
-            color: adjustedDiff > 0 ? "var(--green)" : "var(--red)",
-            fontWeight: 600,
-            width: "100%",
-            paddingLeft: 36,
-          }}
-        >
-          {asset.league_adjusted_score.toFixed(1)} in this league ({adjustedDiff > 0 ? "+" : ""}
-          {adjustedDiff.toFixed(1)})
-          {asset.scoring_delta_ppg != null ? ` · ${asset.scoring_delta_ppg > 0 ? "+" : ""}${asset.scoring_delta_ppg.toFixed(2)} ppg` : ""}
-        </span>
-      )}
-      {outlier && (
-        <span style={{ fontSize: 10, color: "var(--text-muted)", fontStyle: "italic", width: "100%", paddingLeft: 36 }}>
-          {outlier}
-        </span>
-      )}
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--text-dim)", marginBottom: 4 }}>
+        <span>You Send {sendTotal.toFixed(1)}</span>
+        <span>You Get {receiveTotal.toFixed(1)}</span>
+      </div>
+      <div style={{ display: "flex", height: 10, borderRadius: 6, overflow: "hidden", background: "var(--dark-base)" }}>
+        <div style={{ width: `${sendPct}%`, background: "#ef4444" }} />
+        <div style={{ flex: 1, background: "#22c55e" }} />
+      </div>
     </div>
   );
 }
 
-// ─── Delta bar ───
-
-function DeltaBar({ delta, totalA, totalB }: { delta: number; totalA: number; totalB: number }) {
-  const total = totalA + totalB;
-  if (total === 0) return null;
-  const pctA = (totalA / total) * 100;
+function AcceptanceBadge({
+  acceptance,
+  opponent,
+}: {
+  acceptance: AcceptanceResult | null;
+  opponent: OpponentContext | null;
+}) {
+  if (!opponent) return null;
+  if (!acceptance) {
+    return <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: 12, color: "var(--text-muted)", fontSize: 12 }}>Select assets on both sides to see acceptance analysis for {opponent.display_name}.</div>;
+  }
   return (
-    <div style={{ marginTop: 12 }}>
-      <div style={{ display: "flex", fontSize: 11, fontWeight: 700, marginBottom: 4 }}>
-        <span style={{ flex: 1 }}>Side A: {totalA.toFixed(1)} TP</span>
-        <span style={{ textAlign: "right" }}>Side B: {totalB.toFixed(1)} TP</span>
+    <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+        <div style={{ fontSize: 12, fontWeight: 700 }}>Acceptance vs {opponent.display_name}</div>
+        <span style={{ background: acceptanceColor(acceptance.label), color: acceptance.label === "Possible" ? "var(--dark-base)" : "#fff", borderRadius: 6, padding: "3px 9px", fontSize: 11, fontWeight: 800 }}>
+          {acceptance.label} ({Math.round(acceptance.probability)}%)
+        </span>
       </div>
-      <div style={{ display: "flex", height: 10, borderRadius: 5, overflow: "hidden" }}>
-        <div style={{ width: `${pctA}%`, background: "#3b82f6", transition: "width 0.3s" }} />
-        <div style={{ flex: 1, background: "#8b5cf6" }} />
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 800, color: "var(--green)", marginBottom: 4 }}>ACCEPT SIGNALS</div>
+          {acceptance.accept_reasons.length === 0 && <div style={{ fontSize: 12, color: "var(--text-muted)" }}>No strong acceptance signals yet.</div>}
+          {acceptance.accept_reasons.map((r, i) => <div key={`a-${i}`} style={{ fontSize: 12, color: "var(--text-dim)", lineHeight: 1.4 }}>• {r}</div>)}
+        </div>
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 800, color: "var(--red)", marginBottom: 4 }}>REJECT SIGNALS</div>
+          {acceptance.reject_reasons.length === 0 && <div style={{ fontSize: 12, color: "var(--text-muted)" }}>No major resistance flags.</div>}
+          {acceptance.reject_reasons.map((r, i) => <div key={`r-${i}`} style={{ fontSize: 12, color: "var(--text-dim)", lineHeight: 1.4 }}>• {r}</div>)}
+        </div>
       </div>
-      {delta !== 0 && (
-        <div style={{ textAlign: "center", fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
-          {delta > 0 ? "Side A" : "Side B"} wins by {Math.abs(delta).toFixed(1)} trade power
+      {opponent.behavior?.bias_flags?.length ? (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+          {opponent.behavior.bias_flags.map((f) => (
+            <span key={f} style={{ fontSize: 10, border: "1px solid var(--border)", borderRadius: 999, padding: "2px 8px", color: "var(--text-dim)" }}>{f}</span>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function TradePanel({
+  title,
+  color,
+  labels,
+  evaluated,
+  onRemove,
+  onClear,
+}: {
+  title: string;
+  color: string;
+  labels: string[];
+  evaluated: EvaluatedAsset[] | null;
+  onRemove: (idx: number) => void;
+  onClear: () => void;
+}) {
+  const totalEdge = evaluated?.reduce((s, a) => s + a.edge_score, 0) ?? 0;
+  const penalty = packagePenalty(labels.length);
+  const totalTp = Math.max(0, totalEdge - penalty);
+
+  return (
+    <div style={{ background: "var(--card)", border: `1px solid ${color}`, borderRadius: 10, padding: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+        <div style={{ color, fontSize: 12, fontWeight: 800 }}>{title}</div>
+        <button onClick={onClear} disabled={labels.length === 0} style={{ border: "1px solid var(--border)", background: "var(--dark-base)", color: "var(--text-dim)", borderRadius: 6, padding: "3px 8px", fontSize: 11, cursor: labels.length ? "pointer" : "not-allowed", fontFamily: "inherit" }}>Clear All</button>
+      </div>
+      {!labels.length && <div style={{ color: "var(--text-muted)", fontSize: 12 }}>No assets selected.</div>}
+      {labels.map((label, idx) => {
+        const asset = evaluated?.[idx];
+        return (
+          <div key={`${label}-${idx}`} style={{ display: "flex", alignItems: "center", gap: 8, borderBottom: "1px solid var(--border)", padding: "7px 0" }}>
+            {asset ? <EdgeScoreBadge score={Math.round(asset.edge_score)} size="sm" /> : <span style={{ width: 32 }} />}
+            <span style={{ flex: 1, fontSize: 12 }}>{asset?.label ?? label}</span>
+            {asset && <span className="font-mono" style={{ fontSize: 11, color: "var(--text-dim)" }}>TP {Math.round(asset.edge_score)}</span>}
+            <button onClick={() => onRemove(idx)} style={{ border: "1px solid var(--border)", background: "transparent", color: "var(--red)", borderRadius: 6, padding: "2px 8px", fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>X</button>
+          </div>
+        );
+      })}
+      {!!labels.length && (
+        <div style={{ marginTop: 8, fontSize: 11, color: "var(--text-dim)", display: "flex", gap: 14, flexWrap: "wrap" }}>
+          <span>Total Edge: <strong style={{ color: "var(--text)" }}>{totalEdge.toFixed(1)}</strong></span>
+          <span>Package Penalty: <strong style={{ color: "var(--text)" }}>{penalty.toFixed(1)}</strong></span>
+          <span>Trade Power: <strong style={{ color: "var(--text)" }}>{totalTp.toFixed(1)}</strong></span>
         </div>
       )}
     </div>
   );
 }
 
-// ─── Side panel asset display ───
-
-function SideAsset({
-  asset,
-  label,
-  onRemove,
+function RosterGrid({
+  roster,
+  usedPlayerIds,
+  usedPickKeys,
+  onPlayerClick,
+  onPickClick,
 }: {
-  asset: TradeAssetInput;
-  label: string;
-  onRemove: () => void;
+  roster: RosterRanking | null;
+  usedPlayerIds: Set<string>;
+  usedPickKeys: Set<string>;
+  onPlayerClick: (p: CoreAsset) => void;
+  onPickClick: (p: ScoredPick) => void;
 }) {
+  if (!roster) return <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: 14, color: "var(--text-muted)", fontSize: 12 }}>Select opponent to load roster.</div>;
+
+  const starterIds = new Set((roster.lineup?.starters ?? []).map((p) => p.player_id));
+  const picks = [...(roster.draft_picks ?? [])].sort((a, b) => b.edge_score - a.edge_score);
+
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-        padding: "6px 0",
-        borderBottom: "1px solid var(--border)",
-        fontSize: 13,
-      }}
-    >
-      {asset.type === "player" ? (
-        <span style={{ fontWeight: 500, flex: 1 }}>{label}</span>
-      ) : (
-        <>
-          <span style={{ color: "#06b6d4", fontWeight: 700, fontSize: 10 }}>PICK</span>
-          <span style={{ fontWeight: 500, flex: 1 }}>{pickLabel(asset)}</span>
-        </>
-      )}
-      <button
-        onClick={onRemove}
-        style={{
-          background: "transparent",
-          color: "#ef4444",
-          border: "1px solid #ef4444",
-          borderRadius: 6,
-          padding: "2px 8px",
-          fontSize: 11,
-          cursor: "pointer",
-          fontFamily: "inherit",
-        }}
-      >
-        X
-      </button>
+    <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
+      {POSITIONS.map((pos) => {
+        const players = roster.core_assets
+          .filter((p) => p.position === pos)
+          .sort((a, b) => {
+            const as = starterIds.has(a.player_id) ? 1 : 0;
+            const bs = starterIds.has(b.player_id) ? 1 : 0;
+            if (as !== bs) return bs - as;
+            return b.edge_score - a.edge_score;
+          });
+        if (!players.length) return null;
+        return (
+          <div key={`${roster.roster_id}-${pos}`}>
+            <div style={{ background: "var(--dark-base)", color: posColor(pos), fontSize: 11, fontWeight: 800, padding: "8px 12px" }}>{pos}</div>
+            {players.map((p) => {
+              const used = usedPlayerIds.has(p.player_id);
+              return (
+                <button key={p.player_id} onClick={() => onPlayerClick(p)} style={{ width: "100%", border: "none", borderTop: "1px solid var(--border)", background: used ? "rgba(148,163,184,0.14)" : "transparent", color: "var(--text)", display: "flex", gap: 8, alignItems: "center", padding: "7px 12px", textAlign: "left", cursor: "pointer", fontFamily: "inherit", opacity: used ? 0.65 : 1 }}>
+                  <span style={{ fontSize: 9, width: 38, color: starterIds.has(p.player_id) ? "var(--green)" : "var(--text-muted)", fontWeight: 700 }}>{starterIds.has(p.player_id) ? "START" : "BENCH"}</span>
+                  <PlayerLink name={p.full_name} style={{ flex: 1, fontSize: 12 }} />
+                  {p.age != null && <span style={{ color: "var(--text-muted)", fontSize: 10 }}>Age {p.age}</span>}
+                  <EdgeScoreBadge score={Math.round(p.edge_score)} size="sm" />
+                  {used && <span style={{ color: "var(--amber)", fontSize: 9, fontWeight: 700 }}>REMOVE</span>}
+                </button>
+              );
+            })}
+          </div>
+        );
+      })}
+      <div>
+        <div style={{ background: "var(--dark-base)", color: "#06b6d4", fontSize: 11, fontWeight: 800, padding: "8px 12px" }}>PICKS</div>
+        {!picks.length && <div style={{ padding: "8px 12px", color: "var(--text-muted)", fontSize: 12 }}>No picks available.</div>}
+        {picks.map((pick, idx) => {
+          const used = usedPickKeys.has(assetKey(pickToAsset(pick)));
+          return (
+            <button key={`${pick.season}-${pick.round}-${pick.tier}-${idx}`} onClick={() => onPickClick(pick)} style={{ width: "100%", border: "none", borderTop: "1px solid var(--border)", background: used ? "rgba(148,163,184,0.14)" : "transparent", color: "var(--text)", display: "flex", gap: 8, alignItems: "center", padding: "7px 12px", textAlign: "left", cursor: "pointer", fontFamily: "inherit", opacity: used ? 0.65 : 1 }}>
+              <span style={{ fontSize: 9, width: 28, color: "#06b6d4", fontWeight: 700 }}>PICK</span>
+              <span style={{ flex: 1, fontSize: 12 }}>{pickDisplay(pick)}</span>
+              <EdgeScoreBadge score={Math.round(pick.edge_score)} size="sm" />
+              {used && <span style={{ color: "var(--amber)", fontSize: 9, fontWeight: 700 }}>REMOVE</span>}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
 
-// ─── Page ───
-
 export default function TradeCalculator() {
-  const [mode, setMode] = useState<"sf" | "1qb">("sf");
   const [selectedLeague, setSelectedLeague] = useState("");
-  const [sideA, setSideA] = useState<TradeAssetInput[]>([]);
-  const [sideB, setSideB] = useState<TradeAssetInput[]>([]);
-  const [labelsA, setLabelsA] = useState<string[]>([]);
-  const [labelsB, setLabelsB] = useState<string[]>([]);
+  const [selectedOpponent, setSelectedOpponent] = useState<number | null>(null);
+  const [sendAssets, setSendAssets] = useState<TradeAssetInput[]>([]);
+  const [receiveAssets, setReceiveAssets] = useState<TradeAssetInput[]>([]);
+  const [sendLabels, setSendLabels] = useState<string[]>([]);
+  const [receiveLabels, setReceiveLabels] = useState<string[]>([]);
   const [search, setSearch] = useState("");
-  const [activeSide, setActiveSide] = useState<Side>("A");
-
+  const [searchSide, setSearchSide] = useState<PickerSide>("send");
   const [pickSeason, setPickSeason] = useState(PICK_YEARS[0]);
   const [pickRound, setPickRound] = useState(1);
   const [pickTier, setPickTier] = useState<"early" | "mid" | "late">("mid");
 
-  const evalMutation = useEvaluateTrade();
   const storedUsername = typeof window !== "undefined" ? localStorage.getItem("edge_username") ?? "" : "";
   const { data: leagues = [] } = usePowerRankings(storedUsername);
+  const selectedLeagueData = leagues.find((l) => l.league_id === selectedLeague);
+  const userRoster = selectedLeagueData?.rosters.find((r) => r.is_user) ?? null;
+  const oppRoster = selectedLeagueData?.rosters.find((r) => r.roster_id === selectedOpponent) ?? null;
+
+  const { data: opponentData } = useQuery<OpponentContextResponse>({
+    queryKey: ["opponent-context", storedUsername, selectedLeague],
+    queryFn: () => apiFetch(`/api/trade/opponent-context/${encodeURIComponent(storedUsername)}/${encodeURIComponent(selectedLeague)}`),
+    enabled: !!storedUsername && !!selectedLeague,
+    staleTime: 5 * 60 * 1000,
+  });
+  const opponents = opponentData?.opponents ?? [];
+  const activeOpponent = opponents.find((o) => o.roster_id === selectedOpponent) ?? null;
 
   const { data: searchResults = [], isLoading: searchLoading } = useQuery<SearchAsset[]>({
-    queryKey: ["trade-asset-search", search],
-    enabled: search.trim().length >= 2,
-    queryFn: () =>
-      apiFetch(`/api/trade/assets?q=${encodeURIComponent(search.trim())}&limit=12`),
+    queryKey: ["trade-calc-search", search],
+    queryFn: () => apiFetch(`/api/trade/assets?q=${encodeURIComponent(search.trim())}&limit=12`),
+    enabled: !selectedLeague && search.trim().length >= 2,
   });
 
-  const hasBothSides = sideA.length > 0 && sideB.length > 0;
-  const orderedResults = useMemo(
-    () =>
-      searchResults.filter(
-        (r) =>
-          !sideA.some((a) => a.player_id === r.player_id) &&
-          !sideB.some((a) => a.player_id === r.player_id)
-      ),
-    [searchResults, sideA, sideB]
-  );
+  useEffect(() => {
+    setSelectedOpponent(null);
+    setSendAssets([]);
+    setReceiveAssets([]);
+    setSendLabels([]);
+    setReceiveLabels([]);
+  }, [selectedLeague]);
 
-  function addPlayer(player: SearchAsset) {
-    const next: TradeAssetInput = { type: "player", player_id: player.player_id };
-    if (activeSide === "A") {
-      setSideA((prev) => [...prev, next]);
-      setLabelsA((prev) => [...prev, player.label]);
-    } else {
-      setSideB((prev) => [...prev, next]);
-      setLabelsB((prev) => [...prev, player.label]);
+  useEffect(() => {
+    if (opponents.length > 0 && !selectedOpponent) {
+      const best = [...opponents].sort((a, b) => (b.behavior?.recent_trades ?? 0) - (a.behavior?.recent_trades ?? 0) || b.needs.length - a.needs.length)[0];
+      if (best) setSelectedOpponent(best.roster_id);
     }
-  }
+  }, [opponents, selectedOpponent]);
 
-  function addPick() {
-    const next: TradeAssetInput = {
-      type: "pick",
-      pick_season: pickSeason,
-      pick_round: pickRound,
-      pick_tier: pickTier,
-    };
-    if (activeSide === "A") {
-      setSideA((prev) => [...prev, next]);
-      setLabelsA((prev) => [...prev, pickLabel(next)]);
-    } else {
-      setSideB((prev) => [...prev, next]);
-      setLabelsB((prev) => [...prev, pickLabel(next)]);
+  const evalMutation = useEvaluateTrade();
+  const hasBothSides = sendAssets.length > 0 && receiveAssets.length > 0;
+
+  useEffect(() => {
+    if (!hasBothSides) {
+      evalMutation.reset();
+      return;
     }
-  }
-
-  function removeAsset(side: Side, idx: number) {
-    if (side === "A") {
-      setSideA((prev) => prev.filter((_, i) => i !== idx));
-      setLabelsA((prev) => prev.filter((_, i) => i !== idx));
-    } else {
-      setSideB((prev) => prev.filter((_, i) => i !== idx));
-      setLabelsB((prev) => prev.filter((_, i) => i !== idx));
-    }
-  }
-
-  function evaluate() {
-    if (!hasBothSides) return;
-    evalMutation.mutate({ sideA, sideB, mode, leagueId: selectedLeague || undefined });
-  }
+    const mode = selectedLeagueData?.mode ?? "sf";
+    const timer = setTimeout(() => {
+      evalMutation.mutate({ sideA: sendAssets, sideB: receiveAssets, mode, leagueId: selectedLeague || undefined });
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [sendAssets, receiveAssets, selectedLeague, selectedLeagueData?.mode]);
 
   const result = evalMutation.data;
+  const liveAcceptance = useMemo(() => {
+    if (!result || !activeOpponent) return null;
+    return computeAcceptance({
+      fairness: result.fairness,
+      delta: result.delta,
+      sendAssets: result.sideA.assets,
+      receiveAssets: result.sideB.assets,
+      opponent: activeOpponent,
+    });
+  }, [result, activeOpponent]);
 
-  const selectStyle = {
-    background: "var(--card)",
-    color: "var(--text)",
-    border: "1px solid var(--border)",
-    borderRadius: 8,
-    padding: "8px 10px",
-    fontSize: 13,
-    fontFamily: "inherit",
-  };
+  const sendPlayerIds = useMemo(() => new Set(sendAssets.filter((a): a is TradeAssetInput & { type: "player"; player_id: string } => a.type === "player" && !!a.player_id).map((a) => a.player_id)), [sendAssets]);
+  const receivePlayerIds = useMemo(() => new Set(receiveAssets.filter((a): a is TradeAssetInput & { type: "player"; player_id: string } => a.type === "player" && !!a.player_id).map((a) => a.player_id)), [receiveAssets]);
+  const sendPickKeys = useMemo(() => new Set(sendAssets.filter((a) => a.type === "pick").map((a) => assetKey(a))), [sendAssets]);
+  const receivePickKeys = useMemo(() => new Set(receiveAssets.filter((a) => a.type === "pick").map((a) => assetKey(a))), [receiveAssets]);
 
-  const sideBtnBase: React.CSSProperties = {
-    padding: "8px 20px",
-    border: "none",
-    borderRadius: 8,
-    fontSize: 13,
-    fontWeight: 700,
-    cursor: "pointer",
-    fontFamily: "inherit",
-  };
+  function removeSend(idx: number) {
+    setSendAssets((p) => p.filter((_, i) => i !== idx));
+    setSendLabels((p) => p.filter((_, i) => i !== idx));
+  }
+  function removeReceive(idx: number) {
+    setReceiveAssets((p) => p.filter((_, i) => i !== idx));
+    setReceiveLabels((p) => p.filter((_, i) => i !== idx));
+  }
+  function clearSide(side: Side) {
+    if (side === "send") {
+      setSendAssets([]);
+      setSendLabels([]);
+    } else {
+      setReceiveAssets([]);
+      setReceiveLabels([]);
+    }
+  }
+  function toggleAsset(side: Side, a: TradeAssetInput, label: string) {
+    const key = assetKey(a);
+    if (side === "send") {
+      const idx = sendAssets.findIndex((x) => assetKey(x) === key);
+      if (idx >= 0) return removeSend(idx);
+      if (receiveAssets.some((x) => assetKey(x) === key)) return;
+      setSendAssets((p) => [...p, a]);
+      setSendLabels((p) => [...p, label]);
+      return;
+    }
+    const idx = receiveAssets.findIndex((x) => assetKey(x) === key);
+    if (idx >= 0) return removeReceive(idx);
+    if (sendAssets.some((x) => assetKey(x) === key)) return;
+    setReceiveAssets((p) => [...p, a]);
+    setReceiveLabels((p) => [...p, label]);
+  }
+  function addFromRoster(player: CoreAsset, side: Side) {
+    toggleAsset(side, { type: "player", player_id: player.player_id }, `${player.full_name} (${player.position})`);
+  }
+  function addPick(pick: ScoredPick, side: Side) {
+    toggleAsset(side, pickToAsset(pick), pickDisplay(pick));
+  }
+  function addVacuumPick() {
+    const roundLabel = pickRound === 1 ? "1st" : pickRound === 2 ? "2nd" : pickRound === 3 ? "3rd" : `R${pickRound}`;
+    const tierLabel = `${pickTier.charAt(0).toUpperCase()}${pickTier.slice(1)}`;
+    toggleAsset(searchSide, { type: "pick", pick_season: pickSeason, pick_round: pickRound, pick_tier: pickTier }, `${pickSeason} ${tierLabel} ${roundLabel}`);
+  }
 
   return (
     <AppShell>
-      {/* Header */}
       <div style={{ padding: "28px 0 8px" }}>
         <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>Trade Calculator</h1>
-        <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 4 }}>
-          Multi-source dynasty trade evaluator with FC + KTC + FP breakdown
-        </p>
+        <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 4 }}>Click your roster and your opponent roster. Evaluation and acceptance update live.</p>
+        <FreshnessBar />
       </div>
 
-      {/* Mode selector */}
-      <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 8 }}>
-        <label style={{ fontSize: 12, color: "var(--text-muted)" }}>League</label>
-        <select value={selectedLeague} onChange={(e) => setSelectedLeague(e.target.value)} style={selectStyle}>
-          <option value="">No league context</option>
-          {leagues.map((l) => (
-            <option key={l.league_id} value={l.league_id}>
-              {l.league_name} ({l.mode.toUpperCase()}{l.scoring_label ? ` · ${l.scoring_label}` : ""})
-            </option>
-          ))}
-        </select>
-        <label style={{ fontSize: 12, color: "var(--text-muted)" }}>Mode</label>
-        <select value={mode} onChange={(e) => setMode(e.target.value as "sf" | "1qb")} style={selectStyle}>
-          <option value="sf">Superflex</option>
-          <option value="1qb">1QB</option>
-        </select>
-      </div>
-
-      {/* Side toggle + Search */}
-      <div style={{ marginTop: 16, background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: 16 }}>
-        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-          <span style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: "32px" }}>Add to:</span>
-          <button
-            onClick={() => setActiveSide("A")}
-            style={{
-              ...sideBtnBase,
-              background: activeSide === "A" ? "#3b82f6" : "var(--dark-base)",
-              color: activeSide === "A" ? "#fff" : "var(--text-muted)",
-            }}
-          >
-            Side A
-          </button>
-          <button
-            onClick={() => setActiveSide("B")}
-            style={{
-              ...sideBtnBase,
-              background: activeSide === "B" ? "#8b5cf6" : "var(--dark-base)",
-              color: activeSide === "B" ? "#fff" : "var(--text-muted)",
-            }}
-          >
-            Side B
-          </button>
-        </div>
-
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search player name..."
-          style={{
-            width: "100%",
-            background: "var(--dark-base)",
-            color: "var(--text)",
-            border: "1px solid var(--border)",
-            borderRadius: 8,
-            padding: "10px 12px",
-            fontSize: 14,
-            fontFamily: "inherit",
-            boxSizing: "border-box",
-          }}
-        />
-
-        <div style={{ marginTop: 8, display: "grid", gap: 4, maxHeight: 240, overflowY: "auto" }}>
-          {searchLoading && <div style={{ fontSize: 12, color: "var(--text-muted)", padding: 4 }}>Searching...</div>}
-          {!searchLoading && search.trim().length >= 2 && orderedResults.length === 0 && (
-            <div style={{ fontSize: 12, color: "var(--text-muted)", padding: 4 }}>No results</div>
-          )}
-          {orderedResults.map((r) => (
-            <button
-              key={r.player_id}
-              onClick={() => addPlayer(r)}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                border: "1px solid var(--border)",
-                borderRadius: 8,
-                padding: "8px 10px",
-                background: "none",
-                color: "var(--text)",
-                cursor: "pointer",
-                fontFamily: "inherit",
-                fontSize: 13,
-                textAlign: "left",
-                width: "100%",
-              }}
-            >
-              <span
-                style={{
-                  color: posColor(r.position),
-                  fontWeight: 700,
-                  fontSize: 11,
-                  width: 24,
-                }}
-              >
-                {r.position}
-              </span>
-              <span style={{ flex: 1 }}>{r.label}</span>
-              <span
-                style={{
-                  fontSize: 10,
-                  fontWeight: 700,
-                  color: activeSide === "A" ? "#3b82f6" : "#8b5cf6",
-                }}
-              >
-                + {activeSide}
-              </span>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Add Pick */}
-      <div style={{ marginTop: 12, background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: 16 }}>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-          <span style={{ fontSize: 12, color: "var(--text-muted)" }}>Add Pick:</span>
-          <select value={pickSeason} onChange={(e) => setPickSeason(e.target.value)} style={selectStyle}>
-            {PICK_YEARS.map((y) => <option key={y} value={y}>{y}</option>)}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 12px" }}>
+          <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6, fontWeight: 700 }}>LEAGUE</div>
+          <select value={selectedLeague} onChange={(e) => setSelectedLeague(e.target.value)} style={{ width: "100%", background: "var(--dark-base)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text)", padding: "8px 10px", fontFamily: "inherit", fontSize: 13 }}>
+            <option value="">No league selected (vacuum mode)</option>
+            {leagues.map((l) => <option key={l.league_id} value={l.league_id}>{l.league_name} ({l.mode.toUpperCase()}{l.scoring_label ? ` · ${l.scoring_label}` : ""})</option>)}
           </select>
-          <select value={pickRound} onChange={(e) => setPickRound(Number(e.target.value))} style={selectStyle}>
-            {[1, 2, 3, 4].map((r) => <option key={r} value={r}>Round {r}</option>)}
+        </div>
+        <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 12px" }}>
+          <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6, fontWeight: 700 }}>OPPONENT</div>
+          <select value={selectedOpponent ?? ""} onChange={(e) => setSelectedOpponent(e.target.value ? Number(e.target.value) : null)} disabled={!selectedLeague || opponents.length === 0} style={{ width: "100%", background: "var(--dark-base)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text)", padding: "8px 10px", fontFamily: "inherit", fontSize: 13, opacity: !selectedLeague ? 0.6 : 1 }}>
+            <option value="">{selectedLeague ? "Select opponent..." : "Select a league first"}</option>
+            {opponents.map((o) => <option key={o.roster_id} value={o.roster_id}>{o.display_name}{o.team_name ? ` (${o.team_name})` : ""} | {o.archetype}</option>)}
           </select>
-          <select value={pickTier} onChange={(e) => setPickTier(e.target.value as "early" | "mid" | "late")} style={selectStyle}>
-            <option value="early">Early</option>
-            <option value="mid">Mid</option>
-            <option value="late">Late</option>
-          </select>
-          <button
-            onClick={addPick}
-            style={{
-              ...sideBtnBase,
-              background: activeSide === "A" ? "#3b82f6" : "#8b5cf6",
-              color: "#fff",
-            }}
-          >
-            Add Pick to {activeSide}
-          </button>
         </div>
       </div>
 
-      {/* Side panels */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 16 }}>
-        {/* Side A */}
-        <div style={{ background: "var(--card)", border: "2px solid #3b82f6", borderRadius: 10, padding: 16 }}>
-          <h2 style={{ fontSize: 14, fontWeight: 700, margin: "0 0 8px", color: "#3b82f6" }}>
-            Side A Gives ({sideA.length})
-          </h2>
-          {sideA.length === 0 && (
-            <div style={{ fontSize: 13, color: "var(--text-muted)", padding: "12px 0" }}>
-              No assets yet - search above to add players
-            </div>
-          )}
-          {sideA.map((a, i) => (
-            <SideAsset key={`a-${i}`} asset={a} label={labelsA[i] ?? ""} onRemove={() => removeAsset("A", i)} />
-          ))}
-        </div>
-
-        {/* Side B */}
-        <div style={{ background: "var(--card)", border: "2px solid #8b5cf6", borderRadius: 10, padding: 16 }}>
-          <h2 style={{ fontSize: 14, fontWeight: 700, margin: "0 0 8px", color: "#8b5cf6" }}>
-            Side B Gives ({sideB.length})
-          </h2>
-          {sideB.length === 0 && (
-            <div style={{ fontSize: 13, color: "var(--text-muted)", padding: "12px 0" }}>
-              No assets yet - search above to add players
-            </div>
-          )}
-          {sideB.map((a, i) => (
-            <SideAsset key={`b-${i}`} asset={a} label={labelsB[i] ?? ""} onRemove={() => removeAsset("B", i)} />
-          ))}
-        </div>
+      <div style={{ marginTop: 10 }}>
+        <EvalBar result={result} acceptance={liveAcceptance} hasBothSides={hasBothSides} isPending={evalMutation.isPending} />
       </div>
 
-      {/* Evaluate button */}
-      <div style={{ marginTop: 16 }}>
-        <button
-          disabled={!hasBothSides || evalMutation.isPending}
-          onClick={evaluate}
-          style={{
-            width: "100%",
-            background: hasBothSides ? "var(--amber)" : "var(--border)",
-            color: hasBothSides ? "var(--dark-base)" : "var(--text-muted)",
-            border: "none",
-            borderRadius: 10,
-            padding: "14px",
-            fontWeight: 700,
-            fontSize: 15,
-            cursor: hasBothSides ? "pointer" : "not-allowed",
-            fontFamily: "inherit",
-          }}
-        >
-          {evalMutation.isPending ? "Evaluating..." : "Evaluate Trade"}
-        </button>
-      </div>
-
-      {/* Result */}
-      <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: 20, marginTop: 16 }}>
-        {!result && (
-          <div style={{ textAlign: "center", color: "var(--text-muted)", fontSize: 13, padding: "20px 0" }}>
-            Add assets to both sides, then evaluate.
+      {!selectedLeague && (
+        <div style={{ marginTop: 12, background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: 12 }}>
+          <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+            <button onClick={() => setSearchSide("send")} style={{ background: searchSide === "send" ? "#ef4444" : "var(--dark-base)", color: searchSide === "send" ? "#fff" : "var(--text-muted)", border: "1px solid var(--border)", borderRadius: 7, padding: "6px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>Add to You Send</button>
+            <button onClick={() => setSearchSide("receive")} style={{ background: searchSide === "receive" ? "#22c55e" : "var(--dark-base)", color: searchSide === "receive" ? "#fff" : "var(--text-muted)", border: "1px solid var(--border)", borderRadius: 7, padding: "6px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>Add to You Get</button>
           </div>
-        )}
-        {result && (
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search for player..." style={{ width: "100%", boxSizing: "border-box", background: "var(--dark-base)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text)", padding: "9px 12px", fontFamily: "inherit", fontSize: 13 }} />
+          <div style={{ marginTop: 8, display: "grid", gap: 4, maxHeight: 220, overflowY: "auto" }}>
+            {searchLoading && <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Searching...</div>}
+            {!searchLoading && search.trim().length >= 2 && !searchResults.length && <div style={{ fontSize: 12, color: "var(--text-muted)" }}>No results.</div>}
+            {searchResults.map((p) => (
+              <button key={p.player_id} onClick={() => toggleAsset(searchSide, { type: "player", player_id: p.player_id }, p.label)} style={{ width: "100%", border: "1px solid var(--border)", borderRadius: 8, background: "transparent", color: "var(--text)", display: "flex", gap: 8, alignItems: "center", padding: "7px 10px", textAlign: "left", cursor: "pointer", fontFamily: "inherit" }}>
+                <span style={{ fontSize: 10, fontWeight: 800, width: 22, color: posColor(p.position) }}>{p.position}</span>
+                <span style={{ flex: 1, fontSize: 12 }}>{p.label}</span>
+                <span style={{ fontSize: 10, color: "var(--text-muted)" }}>+ {searchSide === "send" ? "SEND" : "GET"}</span>
+              </button>
+            ))}
+          </div>
+          <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 700 }}>Add Pick:</span>
+            <select value={pickSeason} onChange={(e) => setPickSeason(e.target.value)} style={{ background: "var(--dark-base)", border: "1px solid var(--border)", borderRadius: 7, color: "var(--text)", padding: "6px 8px", fontSize: 12, fontFamily: "inherit" }}>{PICK_YEARS.map((y) => <option key={y} value={y}>{y}</option>)}</select>
+            <select value={pickRound} onChange={(e) => setPickRound(Number(e.target.value))} style={{ background: "var(--dark-base)", border: "1px solid var(--border)", borderRadius: 7, color: "var(--text)", padding: "6px 8px", fontSize: 12, fontFamily: "inherit" }}>{[1, 2, 3, 4].map((r) => <option key={r} value={r}>Round {r}</option>)}</select>
+            <select value={pickTier} onChange={(e) => setPickTier(e.target.value as "early" | "mid" | "late")} style={{ background: "var(--dark-base)", border: "1px solid var(--border)", borderRadius: 7, color: "var(--text)", padding: "6px 8px", fontSize: 12, fontFamily: "inherit" }}><option value="early">Early</option><option value="mid">Mid</option><option value="late">Late</option></select>
+            <button onClick={addVacuumPick} style={{ background: searchSide === "send" ? "#ef4444" : "#22c55e", border: "none", borderRadius: 7, color: "#fff", padding: "6px 10px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>+ {searchSide === "send" ? "Send Pick" : "Get Pick"}</button>
+          </div>
+        </div>
+      )}
+
+      {selectedLeague && (
+        <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           <div>
-            {/* Fairness header */}
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 10 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <span
-                  style={{
-                    background: fairnessColor(result.fairness),
-                    color: result.fairness === "fair" ? "#000" : "#fff",
-                    padding: "6px 14px",
-                    borderRadius: 8,
-                    fontWeight: 800,
-                    fontSize: 14,
-                  }}
-                >
-                  {fairnessLabel(result.fairness)}
-                </span>
-                {result.delta !== 0 && (
-                  <span style={{ fontSize: 13, color: "var(--text-dim)" }}>
-                    {result.delta > 0 ? "Side A" : "Side B"} wins by{" "}
-                    <strong style={{ color: "var(--text)" }}>{Math.abs(result.delta).toFixed(1)}</strong> trade power
-                    {result.delta_edge !== 0 && (
-                      <span style={{ color: "var(--text-muted)", marginLeft: 6 }}>
-                        (raw edge: {result.delta_edge > 0 ? "+" : ""}{result.delta_edge.toFixed(1)})
-                      </span>
-                    )}
-                  </span>
-                )}
-              </div>
-              <ShareButton textSummary={buildShareText(result)} />
-            </div>
-
-            {/* Delta bar */}
-            <DeltaBar delta={result.delta} totalA={result.sideA.total_trade_power} totalB={result.sideB.total_trade_power} />
-
-            {/* Per-side asset breakdown */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 20 }}>
-              <div>
-                <div style={{ fontSize: 12, fontWeight: 700, color: "#3b82f6", marginBottom: 6 }}>
-                  SIDE A - {result.sideA.total_trade_power.toFixed(1)} TP (edge: {result.sideA.total_edge.toFixed(1)})
-                  {result.sideA.package_penalty_pct > 0 && (
-                    <span style={{ color: "var(--red)", fontWeight: 400, fontSize: 10, marginLeft: 4 }}>
-                      ({result.sideA.package_penalty_pct}% pkg penalty)
-                    </span>
-                  )}
-                </div>
-                <div style={{ border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden" }}>
-                  {result.sideA.assets.map((a, i) => (
-                    <AssetRow key={`ra-${i}`} asset={a} />
-                  ))}
-                </div>
-              </div>
-              <div>
-                <div style={{ fontSize: 12, fontWeight: 700, color: "#8b5cf6", marginBottom: 6 }}>
-                  SIDE B - {result.sideB.total_trade_power.toFixed(1)} TP (edge: {result.sideB.total_edge.toFixed(1)})
-                  {result.sideB.package_penalty_pct > 0 && (
-                    <span style={{ color: "var(--red)", fontWeight: 400, fontSize: 10, marginLeft: 4 }}>
-                      ({result.sideB.package_penalty_pct}% pkg penalty)
-                    </span>
-                  )}
-                </div>
-                <div style={{ border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden" }}>
-                  {result.sideB.assets.map((a, i) => (
-                    <AssetRow key={`rb-${i}`} asset={a} />
-                  ))}
-                </div>
-              </div>
-            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}><div style={{ color: "#ef4444", fontSize: 12, fontWeight: 800 }}>YOUR ROSTER</div><div style={{ fontSize: 11, color: "var(--text-muted)" }}>{userRoster?.display_name ?? "-"}</div></div>
+            <RosterGrid roster={userRoster} usedPlayerIds={sendPlayerIds} usedPickKeys={sendPickKeys} onPlayerClick={(p) => addFromRoster(p, "send")} onPickClick={(p) => addPick(p, "send")} />
           </div>
-        )}
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}><div style={{ color: "#22c55e", fontSize: 12, fontWeight: 800 }}>THEIR ROSTER</div><div style={{ fontSize: 11, color: "var(--text-muted)" }}>{oppRoster?.display_name ?? "Select opponent"}</div></div>
+            <RosterGrid roster={oppRoster} usedPlayerIds={receivePlayerIds} usedPickKeys={receivePickKeys} onPlayerClick={(p) => addFromRoster(p, "receive")} onPickClick={(p) => addPick(p, "receive")} />
+          </div>
+        </div>
+      )}
+
+      <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <TradePanel title="YOU SEND" color="#ef4444" labels={sendLabels} evaluated={result?.sideA.assets ?? null} onRemove={removeSend} onClear={() => clearSide("send")} />
+        <TradePanel title="YOU GET" color="#22c55e" labels={receiveLabels} evaluated={result?.sideB.assets ?? null} onRemove={removeReceive} onClear={() => clearSide("receive")} />
+      </div>
+
+      <div style={{ marginTop: 12 }}>
+        <AcceptanceBadge acceptance={liveAcceptance} opponent={activeOpponent} />
       </div>
     </AppShell>
   );
