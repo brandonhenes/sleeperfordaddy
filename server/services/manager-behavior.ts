@@ -207,15 +207,22 @@ export function estimateAcceptance(params: {
   if (fairness === "fair") {
     prob += 15;
     accept.push("Trade power is balanced");
-  } else if (fairness === "slight_edge" && delta > 0) {
-    prob += 8;
-    accept.push("Slight overpay in their favor");
-  } else if (fairness === "slight_edge" && delta <= 0) {
-    prob -= 10;
-    reject.push("You are getting the better end");
+  } else if (fairness === "slight_edge") {
+    if (delta > 0) {
+      prob += 20;
+      accept.push("You're slightly overpaying. They get the better end.");
+    } else {
+      prob -= 8;
+      reject.push("They're giving up slightly more value");
+    }
   } else if (fairness === "lopsided") {
-    prob -= 30;
-    reject.push("Significantly unbalanced");
+    if (delta > 0) {
+      prob += 30;
+      accept.push("Massive overpay in their favor. They'll take this immediately.");
+    } else {
+      prob -= 35;
+      reject.push("Significantly underpaying. They won't consider this.");
+    }
   }
 
   const sendPositions = sendAssets.map((a) => a.position).filter((x): x is string => !!x);

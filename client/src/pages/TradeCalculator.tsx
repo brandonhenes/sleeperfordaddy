@@ -3,7 +3,6 @@ import { useQuery } from "@tanstack/react-query";
 import AppShell from "../components/AppShell";
 import EdgeScoreBadge from "../components/EdgeScoreBadge";
 import FreshnessBar from "../components/FreshnessBar";
-import { PlayerLink } from "../components/ui";
 import { posColor } from "../lib/position-colors";
 import { useEvaluateTrade } from "../hooks/use-trade-calculator";
 import {
@@ -68,8 +67,8 @@ function pickToAsset(pick: ScoredPick): TradeAssetInput {
 }
 
 function pickDisplay(pick: ScoredPick): string {
-  if (pick.season === String(YEAR) && pick.pick_slot != null) {
-    return `${pick.round}.${String(pick.pick_slot).padStart(2, "0")}`;
+  if (pick.pick_slot != null) {
+    return `${pick.season} ${pick.round}.${String(pick.pick_slot).padStart(2, "0")}`;
   }
   return pick.label;
 }
@@ -216,7 +215,7 @@ function TradePanel({
     <div style={{ background: "var(--card)", border: `1px solid ${color}`, borderRadius: 10, padding: 12 }}>
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
         <div style={{ color, fontSize: 12, fontWeight: 800 }}>{title}</div>
-        <button onClick={onClear} disabled={labels.length === 0} style={{ border: "1px solid var(--border)", background: "var(--dark-base)", color: "var(--text-dim)", borderRadius: 6, padding: "3px 8px", fontSize: 11, cursor: labels.length ? "pointer" : "not-allowed", fontFamily: "inherit" }}>Clear All</button>
+        <button type="button" onClick={onClear} disabled={labels.length === 0} style={{ border: "1px solid var(--border)", background: "var(--dark-base)", color: "var(--text-dim)", borderRadius: 6, padding: "3px 8px", fontSize: 11, cursor: labels.length ? "pointer" : "not-allowed", fontFamily: "inherit" }}>Clear All</button>
       </div>
       {!labels.length && <div style={{ color: "var(--text-muted)", fontSize: 12 }}>No assets selected.</div>}
       {labels.map((label, idx) => {
@@ -225,8 +224,8 @@ function TradePanel({
           <div key={`${label}-${idx}`} style={{ display: "flex", alignItems: "center", gap: 8, borderBottom: "1px solid var(--border)", padding: "7px 0" }}>
             {asset ? <EdgeScoreBadge score={Math.round(asset.edge_score)} size="sm" /> : <span style={{ width: 32 }} />}
             <span style={{ flex: 1, fontSize: 12 }}>{asset?.label ?? label}</span>
-            {asset && <span className="font-mono" style={{ fontSize: 11, color: "var(--text-dim)" }}>TP {Math.round(asset.edge_score)}</span>}
-            <button onClick={() => onRemove(idx)} style={{ border: "1px solid var(--border)", background: "transparent", color: "var(--red)", borderRadius: 6, padding: "2px 8px", fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>X</button>
+            {asset && <span className="font-mono" style={{ fontSize: 11, color: "var(--text-dim)" }}>TP {Math.round(asset.trade_power)}</span>}
+            <button type="button" onClick={() => onRemove(idx)} style={{ border: "1px solid var(--border)", background: "transparent", color: "var(--red)", borderRadius: 6, padding: "2px 8px", fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>X</button>
           </div>
         );
       })}
@@ -237,6 +236,123 @@ function TradePanel({
           <span>Trade Power: <strong style={{ color: "var(--text)" }}>{totalTp.toFixed(1)}</strong></span>
         </div>
       )}
+    </div>
+  );
+}
+
+function PlayerRow({
+  player,
+  isStarter,
+  isUsed,
+  onClick,
+}: {
+  player: CoreAsset;
+  isStarter: boolean;
+  isUsed: boolean;
+  onClick: () => void;
+}) {
+  const [isHovered, setIsHovered] = useState(false);
+  const background = isUsed
+    ? "rgba(148,163,184,0.14)"
+    : isHovered
+      ? "rgba(245,158,11,0.08)"
+      : "transparent";
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+      style={{
+        width: "100%",
+        border: "none",
+        borderTop: "1px solid var(--border)",
+        background,
+        color: "var(--text)",
+        display: "flex",
+        gap: 8,
+        alignItems: "center",
+        padding: "7px 12px",
+        textAlign: "left",
+        cursor: "pointer",
+        fontFamily: "inherit",
+        opacity: isUsed ? 0.65 : 1,
+        transition: "background 0.1s ease",
+      }}
+    >
+      <span style={{ fontSize: 9, width: 38, color: isStarter ? "var(--green)" : "var(--text-muted)", fontWeight: 700 }}>
+        {isStarter ? "START" : "BENCH"}
+      </span>
+      <span style={{ flex: 1, fontSize: 12, fontWeight: 500 }}>{player.full_name}</span>
+      {player.age != null && <span style={{ color: "var(--text-muted)", fontSize: 10 }}>Age {player.age}</span>}
+      <EdgeScoreBadge score={Math.round(player.edge_score)} size="sm" />
+      {isUsed && <span style={{ color: "var(--amber)", fontSize: 9, fontWeight: 700 }}>REMOVE</span>}
+    </button>
+  );
+}
+
+function PositionGroup({
+  position,
+  players,
+  starterIds,
+  usedPlayerIds,
+  onPlayerClick,
+}: {
+  position: string;
+  players: CoreAsset[];
+  starterIds: Set<string>;
+  usedPlayerIds: Set<string>;
+  onPlayerClick: (player: CoreAsset) => void;
+}) {
+  const [showBench, setShowBench] = useState(false);
+  const starters = players.filter((player) => starterIds.has(player.player_id));
+  const bench = players.filter((player) => !starterIds.has(player.player_id));
+
+  return (
+    <div>
+      <div style={{ background: "var(--dark-base)", color: posColor(position), fontSize: 11, fontWeight: 800, padding: "8px 12px" }}>
+        {position}
+      </div>
+      {starters.map((player) => (
+        <PlayerRow
+          key={player.player_id}
+          player={player}
+          isStarter
+          isUsed={usedPlayerIds.has(player.player_id)}
+          onClick={() => onPlayerClick(player)}
+        />
+      ))}
+      {bench.length > 0 && (
+        <button
+          type="button"
+          onClick={() => setShowBench((current) => !current)}
+          style={{
+            width: "100%",
+            border: "none",
+            borderTop: "1px solid var(--border)",
+            background: "transparent",
+            color: "var(--text-muted)",
+            padding: "6px 12px",
+            textAlign: "center",
+            cursor: "pointer",
+            fontFamily: "inherit",
+            fontSize: 10,
+            fontWeight: 700,
+          }}
+        >
+          {showBench ? "Hide" : "Show"} {bench.length} bench
+        </button>
+      )}
+      {showBench && bench.map((player) => (
+        <PlayerRow
+          key={player.player_id}
+          player={player}
+          isStarter={false}
+          isUsed={usedPlayerIds.has(player.player_id)}
+          onClick={() => onPlayerClick(player)}
+        />
+      ))}
     </div>
   );
 }
@@ -257,7 +373,9 @@ function RosterGrid({
   if (!roster) return <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: 14, color: "var(--text-muted)", fontSize: 12 }}>Select opponent to load roster.</div>;
 
   const starterIds = new Set((roster.lineup?.starters ?? []).map((p) => p.player_id));
-  const picks = [...(roster.draft_picks ?? [])].sort((a, b) => b.edge_score - a.edge_score);
+  const picks = [...(roster.draft_picks ?? [])]
+    .filter((pick) => pick.edge_score > 0)
+    .sort((a, b) => b.edge_score - a.edge_score);
 
   return (
     <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
@@ -272,21 +390,14 @@ function RosterGrid({
           });
         if (!players.length) return null;
         return (
-          <div key={`${roster.roster_id}-${pos}`}>
-            <div style={{ background: "var(--dark-base)", color: posColor(pos), fontSize: 11, fontWeight: 800, padding: "8px 12px" }}>{pos}</div>
-            {players.map((p) => {
-              const used = usedPlayerIds.has(p.player_id);
-              return (
-                <button key={p.player_id} onClick={() => onPlayerClick(p)} style={{ width: "100%", border: "none", borderTop: "1px solid var(--border)", background: used ? "rgba(148,163,184,0.14)" : "transparent", color: "var(--text)", display: "flex", gap: 8, alignItems: "center", padding: "7px 12px", textAlign: "left", cursor: "pointer", fontFamily: "inherit", opacity: used ? 0.65 : 1 }}>
-                  <span style={{ fontSize: 9, width: 38, color: starterIds.has(p.player_id) ? "var(--green)" : "var(--text-muted)", fontWeight: 700 }}>{starterIds.has(p.player_id) ? "START" : "BENCH"}</span>
-                  <PlayerLink name={p.full_name} style={{ flex: 1, fontSize: 12 }} />
-                  {p.age != null && <span style={{ color: "var(--text-muted)", fontSize: 10 }}>Age {p.age}</span>}
-                  <EdgeScoreBadge score={Math.round(p.edge_score)} size="sm" />
-                  {used && <span style={{ color: "var(--amber)", fontSize: 9, fontWeight: 700 }}>REMOVE</span>}
-                </button>
-              );
-            })}
-          </div>
+          <PositionGroup
+            key={`${roster.roster_id}-${pos}`}
+            position={pos}
+            players={players}
+            starterIds={starterIds}
+            usedPlayerIds={usedPlayerIds}
+            onPlayerClick={onPlayerClick}
+          />
         );
       })}
       <div>
@@ -295,7 +406,7 @@ function RosterGrid({
         {picks.map((pick, idx) => {
           const used = usedPickKeys.has(assetKey(pickToAsset(pick)));
           return (
-            <button key={`${pick.season}-${pick.round}-${pick.tier}-${idx}`} onClick={() => onPickClick(pick)} style={{ width: "100%", border: "none", borderTop: "1px solid var(--border)", background: used ? "rgba(148,163,184,0.14)" : "transparent", color: "var(--text)", display: "flex", gap: 8, alignItems: "center", padding: "7px 12px", textAlign: "left", cursor: "pointer", fontFamily: "inherit", opacity: used ? 0.65 : 1 }}>
+            <button type="button" key={`${pick.season}-${pick.round}-${pick.original_owner_id}-${idx}`} onClick={() => onPickClick(pick)} style={{ width: "100%", border: "none", borderTop: "1px solid var(--border)", background: used ? "rgba(148,163,184,0.14)" : "transparent", color: "var(--text)", display: "flex", gap: 8, alignItems: "center", padding: "7px 12px", textAlign: "left", cursor: "pointer", fontFamily: "inherit", opacity: used ? 0.65 : 1 }}>
               <span style={{ fontSize: 9, width: 28, color: "#06b6d4", fontWeight: 700 }}>PICK</span>
               <span style={{ flex: 1, fontSize: 12 }}>{pickDisplay(pick)}</span>
               <EdgeScoreBadge score={Math.round(pick.edge_score)} size="sm" />
@@ -320,6 +431,9 @@ export default function TradeCalculator() {
   const [pickSeason, setPickSeason] = useState(PICK_YEARS[0]);
   const [pickRound, setPickRound] = useState(1);
   const [pickTier, setPickTier] = useState<"early" | "mid" | "late">("mid");
+  const [isCompactLeagueLayout, setIsCompactLeagueLayout] = useState(() => (
+    typeof window !== "undefined" ? window.innerWidth < 1180 : false
+  ));
 
   const storedUsername = typeof window !== "undefined" ? localStorage.getItem("edge_username") ?? "" : "";
   const { data: leagues = [] } = usePowerRankings(storedUsername);
@@ -356,6 +470,14 @@ export default function TradeCalculator() {
       if (best) setSelectedOpponent(best.roster_id);
     }
   }, [opponents, selectedOpponent]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const syncLayout = () => setIsCompactLeagueLayout(window.innerWidth < 1180);
+    syncLayout();
+    window.addEventListener("resize", syncLayout);
+    return () => window.removeEventListener("resize", syncLayout);
+  }, []);
 
   const evalMutation = useEvaluateTrade();
   const hasBothSides = sendAssets.length > 0 && receiveAssets.length > 0;
@@ -434,6 +556,21 @@ export default function TradeCalculator() {
     toggleAsset(searchSide, { type: "pick", pick_season: pickSeason, pick_round: pickRound, pick_tier: pickTier }, `${pickSeason} ${tierLabel} ${roundLabel}`);
   }
 
+  const leagueColumns = isCompactLeagueLayout ? "1fr" : "minmax(0, 1fr) 320px minmax(0, 1fr)";
+  const rosterPaneStyle = {
+    maxHeight: isCompactLeagueLayout ? "none" : "70vh",
+    overflowY: isCompactLeagueLayout ? "visible" : "auto",
+  } as const;
+  const centerPaneStyle = {
+    position: isCompactLeagueLayout ? "static" : "sticky",
+    top: isCompactLeagueLayout ? undefined : 80,
+    maxHeight: isCompactLeagueLayout ? "none" : "85vh",
+    overflowY: isCompactLeagueLayout ? "visible" : "auto",
+    display: "grid",
+    gap: 12,
+    alignSelf: "start",
+  } as const;
+
   return (
     <AppShell>
       <div style={{ padding: "28px 0 8px" }}>
@@ -459,22 +596,24 @@ export default function TradeCalculator() {
         </div>
       </div>
 
-      <div style={{ marginTop: 10 }}>
-        <EvalBar result={result} acceptance={liveAcceptance} hasBothSides={hasBothSides} isPending={evalMutation.isPending} />
-      </div>
+      {!selectedLeague && (
+        <div style={{ marginTop: 10 }}>
+          <EvalBar result={result} acceptance={liveAcceptance} hasBothSides={hasBothSides} isPending={evalMutation.isPending} />
+        </div>
+      )}
 
       {!selectedLeague && (
         <div style={{ marginTop: 12, background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: 12 }}>
           <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-            <button onClick={() => setSearchSide("send")} style={{ background: searchSide === "send" ? "#ef4444" : "var(--dark-base)", color: searchSide === "send" ? "#fff" : "var(--text-muted)", border: "1px solid var(--border)", borderRadius: 7, padding: "6px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>Add to You Send</button>
-            <button onClick={() => setSearchSide("receive")} style={{ background: searchSide === "receive" ? "#22c55e" : "var(--dark-base)", color: searchSide === "receive" ? "#fff" : "var(--text-muted)", border: "1px solid var(--border)", borderRadius: 7, padding: "6px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>Add to You Get</button>
+            <button type="button" onClick={() => setSearchSide("send")} style={{ background: searchSide === "send" ? "#ef4444" : "var(--dark-base)", color: searchSide === "send" ? "#fff" : "var(--text-muted)", border: "1px solid var(--border)", borderRadius: 7, padding: "6px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>Add to You Send</button>
+            <button type="button" onClick={() => setSearchSide("receive")} style={{ background: searchSide === "receive" ? "#22c55e" : "var(--dark-base)", color: searchSide === "receive" ? "#fff" : "var(--text-muted)", border: "1px solid var(--border)", borderRadius: 7, padding: "6px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>Add to You Get</button>
           </div>
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search for player..." style={{ width: "100%", boxSizing: "border-box", background: "var(--dark-base)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text)", padding: "9px 12px", fontFamily: "inherit", fontSize: 13 }} />
           <div style={{ marginTop: 8, display: "grid", gap: 4, maxHeight: 220, overflowY: "auto" }}>
             {searchLoading && <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Searching...</div>}
             {!searchLoading && search.trim().length >= 2 && !searchResults.length && <div style={{ fontSize: 12, color: "var(--text-muted)" }}>No results.</div>}
             {searchResults.map((p) => (
-              <button key={p.player_id} onClick={() => toggleAsset(searchSide, { type: "player", player_id: p.player_id }, p.label)} style={{ width: "100%", border: "1px solid var(--border)", borderRadius: 8, background: "transparent", color: "var(--text)", display: "flex", gap: 8, alignItems: "center", padding: "7px 10px", textAlign: "left", cursor: "pointer", fontFamily: "inherit" }}>
+              <button type="button" key={p.player_id} onClick={() => toggleAsset(searchSide, { type: "player", player_id: p.player_id }, p.label)} style={{ width: "100%", border: "1px solid var(--border)", borderRadius: 8, background: "transparent", color: "var(--text)", display: "flex", gap: 8, alignItems: "center", padding: "7px 10px", textAlign: "left", cursor: "pointer", fontFamily: "inherit" }}>
                 <span style={{ fontSize: 10, fontWeight: 800, width: 22, color: posColor(p.position) }}>{p.position}</span>
                 <span style={{ flex: 1, fontSize: 12 }}>{p.label}</span>
                 <span style={{ fontSize: 10, color: "var(--text-muted)" }}>+ {searchSide === "send" ? "SEND" : "GET"}</span>
@@ -486,32 +625,36 @@ export default function TradeCalculator() {
             <select value={pickSeason} onChange={(e) => setPickSeason(e.target.value)} style={{ background: "var(--dark-base)", border: "1px solid var(--border)", borderRadius: 7, color: "var(--text)", padding: "6px 8px", fontSize: 12, fontFamily: "inherit" }}>{PICK_YEARS.map((y) => <option key={y} value={y}>{y}</option>)}</select>
             <select value={pickRound} onChange={(e) => setPickRound(Number(e.target.value))} style={{ background: "var(--dark-base)", border: "1px solid var(--border)", borderRadius: 7, color: "var(--text)", padding: "6px 8px", fontSize: 12, fontFamily: "inherit" }}>{[1, 2, 3, 4].map((r) => <option key={r} value={r}>Round {r}</option>)}</select>
             <select value={pickTier} onChange={(e) => setPickTier(e.target.value as "early" | "mid" | "late")} style={{ background: "var(--dark-base)", border: "1px solid var(--border)", borderRadius: 7, color: "var(--text)", padding: "6px 8px", fontSize: 12, fontFamily: "inherit" }}><option value="early">Early</option><option value="mid">Mid</option><option value="late">Late</option></select>
-            <button onClick={addVacuumPick} style={{ background: searchSide === "send" ? "#ef4444" : "#22c55e", border: "none", borderRadius: 7, color: "#fff", padding: "6px 10px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>+ {searchSide === "send" ? "Send Pick" : "Get Pick"}</button>
+            <button type="button" onClick={addVacuumPick} style={{ background: searchSide === "send" ? "#ef4444" : "#22c55e", border: "none", borderRadius: 7, color: "#fff", padding: "6px 10px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>+ {searchSide === "send" ? "Send Pick" : "Get Pick"}</button>
           </div>
         </div>
       )}
 
       {selectedLeague && (
-        <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          <div>
+        <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: leagueColumns, gap: 12, alignItems: "start" }}>
+          <div style={{ ...rosterPaneStyle, order: isCompactLeagueLayout ? 2 : 1 }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}><div style={{ color: "#ef4444", fontSize: 12, fontWeight: 800 }}>YOUR ROSTER</div><div style={{ fontSize: 11, color: "var(--text-muted)" }}>{userRoster?.display_name ?? "-"}</div></div>
             <RosterGrid roster={userRoster} usedPlayerIds={sendPlayerIds} usedPickKeys={sendPickKeys} onPlayerClick={(p) => addFromRoster(p, "send")} onPickClick={(p) => addPick(p, "send")} />
           </div>
-          <div>
+          <div style={{ ...centerPaneStyle, order: isCompactLeagueLayout ? 1 : 2 }}>
+            <TradePanel title="YOU SEND" color="#ef4444" labels={sendLabels} evaluated={result?.sideA.assets ?? null} onRemove={removeSend} onClear={() => clearSide("send")} />
+            <EvalBar result={result} acceptance={liveAcceptance} hasBothSides={hasBothSides} isPending={evalMutation.isPending} />
+            <TradePanel title="YOU GET" color="#22c55e" labels={receiveLabels} evaluated={result?.sideB.assets ?? null} onRemove={removeReceive} onClear={() => clearSide("receive")} />
+            <AcceptanceBadge acceptance={liveAcceptance} opponent={activeOpponent} />
+          </div>
+          <div style={{ ...rosterPaneStyle, order: 3 }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}><div style={{ color: "#22c55e", fontSize: 12, fontWeight: 800 }}>THEIR ROSTER</div><div style={{ fontSize: 11, color: "var(--text-muted)" }}>{oppRoster?.display_name ?? "Select opponent"}</div></div>
             <RosterGrid roster={oppRoster} usedPlayerIds={receivePlayerIds} usedPickKeys={receivePickKeys} onPlayerClick={(p) => addFromRoster(p, "receive")} onPickClick={(p) => addPick(p, "receive")} />
           </div>
         </div>
       )}
 
-      <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-        <TradePanel title="YOU SEND" color="#ef4444" labels={sendLabels} evaluated={result?.sideA.assets ?? null} onRemove={removeSend} onClear={() => clearSide("send")} />
-        <TradePanel title="YOU GET" color="#22c55e" labels={receiveLabels} evaluated={result?.sideB.assets ?? null} onRemove={removeReceive} onClear={() => clearSide("receive")} />
-      </div>
-
-      <div style={{ marginTop: 12 }}>
-        <AcceptanceBadge acceptance={liveAcceptance} opponent={activeOpponent} />
-      </div>
+      {!selectedLeague && (
+        <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <TradePanel title="YOU SEND" color="#ef4444" labels={sendLabels} evaluated={result?.sideA.assets ?? null} onRemove={removeSend} onClear={() => clearSide("send")} />
+          <TradePanel title="YOU GET" color="#22c55e" labels={receiveLabels} evaluated={result?.sideB.assets ?? null} onRemove={removeReceive} onClear={() => clearSide("receive")} />
+        </div>
+      )}
     </AppShell>
   );
 }
