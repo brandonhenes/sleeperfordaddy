@@ -70,6 +70,42 @@ function addUnique(list: string[], value: string) {
   if (!list.includes(value)) list.push(value);
 }
 
+function applyQualityAdjustments(
+  probability: number,
+  accept: string[],
+  reject: string[],
+  sendEdges: number[],
+  receiveEdges: number[],
+): number {
+  const bestSend = sendEdges.length ? Math.max(...sendEdges) : 0;
+  const bestReceive = receiveEdges.length ? Math.max(...receiveEdges) : 0;
+
+  if (bestReceive > 0 && bestSend > 0) {
+    const qualityGap = bestReceive - bestSend;
+    if (qualityGap >= 20) {
+      probability -= 20;
+      reject.push(`Your best asset (${bestSend.toFixed(0)}) is far below theirs (${bestReceive.toFixed(0)}). Feels like a lowball.`);
+    } else if (qualityGap >= 10) {
+      probability -= 8;
+      reject.push("Quality gap between top assets on each side");
+    } else if (qualityGap <= -10) {
+      probability += 10;
+      accept.push("Your top asset outclasses what you're asking for");
+    }
+  }
+
+  const lowQualityCount = sendEdges.filter((edge) => edge < 55).length;
+  if (lowQualityCount >= 2) {
+    probability -= 12;
+    reject.push(`Sending ${lowQualityCount} low-value assets. Nobody wants roster cloggers.`);
+  } else if (lowQualityCount === 1 && sendEdges.length > 1) {
+    probability -= 5;
+    reject.push("Includes a low-value throw-in that adds roster bloat");
+  }
+
+  return probability;
+}
+
 export async function buildLeagueBehaviors(
   leagueId: string
 ): Promise<Map<number, ManagerBehavior>> {
@@ -189,6 +225,8 @@ export function estimateAcceptance(params: {
   delta: number;
   sendAssets: { player_id?: string | null; position?: string | null; label?: string }[];
   receiveAssets: { player_id?: string | null; position?: string | null; label?: string }[];
+  sendEdges: number[];
+  receiveEdges: number[];
   opponent: {
     archetype: string;
     needs: string[];
@@ -196,7 +234,7 @@ export function estimateAcceptance(params: {
     behavior: ManagerBehavior | null;
   } | null;
 }): AcceptanceAnalysis | null {
-  const { fairness, delta, sendAssets, receiveAssets, opponent } = params;
+  const { fairness, delta, sendAssets, receiveAssets, sendEdges, receiveEdges, opponent } = params;
   if (!opponent || sendAssets.length === 0 || receiveAssets.length === 0) return null;
 
   let prob = 50;
@@ -272,6 +310,8 @@ export function estimateAcceptance(params: {
     prob -= 10;
     reject.push("No trade history");
   }
+
+  prob = applyQualityAdjustments(prob, accept, reject, sendEdges, receiveEdges);
 
   if (opponent.archetype === "Rebuilder" || opponent.archetype === "Productive Struggle") {
     accept.push("Rebuild archetype can move producers for long-term value");

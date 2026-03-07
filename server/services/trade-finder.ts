@@ -230,6 +230,8 @@ function applyAcceptanceAndBehavior(
         delta: -pkg.delta,
         sendAssets,
         receiveAssets,
+        sendEdges: pkg.you_send.map((asset) => asset.edge_score),
+        receiveEdges: pkg.you_receive.map((asset) => asset.edge_score),
         opponent: {
           archetype: opp.roster.archetype,
           needs: opp.needs,

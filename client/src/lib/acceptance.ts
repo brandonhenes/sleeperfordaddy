@@ -5,11 +5,68 @@ export interface AcceptanceResult {
   reject_reasons: string[];
 }
 
+interface AcceptanceAssetInput {
+  player_id?: string | null;
+  position?: string | null;
+  edge_score?: number | null;
+  age?: number | null;
+  age_curve_zone?: string | null;
+}
+
+function applyQualityAdjustments(
+  probability: number,
+  accept: string[],
+  reject: string[],
+  sendAssets: AcceptanceAssetInput[],
+  receiveAssets: AcceptanceAssetInput[],
+): number {
+  const sendEdges = sendAssets.map((asset) => asset.edge_score ?? 0).filter((edge) => edge > 0);
+  const receiveEdges = receiveAssets.map((asset) => asset.edge_score ?? 0).filter((edge) => edge > 0);
+  const bestSend = sendEdges.length ? Math.max(...sendEdges) : 0;
+  const bestReceive = receiveEdges.length ? Math.max(...receiveEdges) : 0;
+
+  if (bestReceive > 0 && bestSend > 0) {
+    const qualityGap = bestReceive - bestSend;
+    if (qualityGap >= 20) {
+      probability -= 20;
+      reject.push(`Your best asset (${bestSend.toFixed(0)}) is far below theirs (${bestReceive.toFixed(0)}). Feels like a lowball.`);
+    } else if (qualityGap >= 10) {
+      probability -= 8;
+      reject.push("Quality gap between top assets on each side");
+    } else if (qualityGap <= -10) {
+      probability += 10;
+      accept.push("Your top asset outclasses what you're asking for");
+    }
+  }
+
+  const lowQualityCount = sendEdges.filter((edge) => edge < 55).length;
+  if (lowQualityCount >= 2) {
+    probability -= 12;
+    reject.push(`Sending ${lowQualityCount} low-value assets. Nobody wants roster cloggers.`);
+  } else if (lowQualityCount === 1 && sendEdges.length > 1) {
+    probability -= 5;
+    reject.push("Includes a low-value throw-in that adds roster bloat");
+  }
+
+  const receiveYoungStar = receiveAssets.some((asset) => {
+    const edge = asset.edge_score ?? 0;
+    const age = asset.age ?? 30;
+    const zone = asset.age_curve_zone ?? "Unknown";
+    return edge >= 80 && age <= 25 && (zone === "Ascent" || zone === "Prime");
+  });
+  if (receiveYoungStar) {
+    probability -= 8;
+    reject.push("Young ascending star. Owners are emotionally attached.");
+  }
+
+  return probability;
+}
+
 export function computeAcceptance(params: {
   fairness: "fair" | "slight_edge" | "lopsided";
   delta: number;
-  sendAssets: { player_id?: string | null; position?: string | null }[];
-  receiveAssets: { player_id?: string | null; position?: string | null }[];
+  sendAssets: AcceptanceAssetInput[];
+  receiveAssets: AcceptanceAssetInput[];
   opponent: {
     archetype: string;
     needs: string[];
@@ -82,6 +139,8 @@ export function computeAcceptance(params: {
   } else if (!behavior || behavior.total_trades === 0) {
     prob -= 10; reject.push("No trade history. Hard to engage.");
   }
+
+  prob = applyQualityAdjustments(prob, accept, reject, sendAssets, receiveAssets);
 
   if (opponent.archetype === "Rebuilder" || opponent.archetype === "Productive Struggle") {
     accept.push("Rebuilders move proven assets for future value");
