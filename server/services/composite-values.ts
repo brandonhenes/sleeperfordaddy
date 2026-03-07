@@ -323,6 +323,13 @@ export async function getCompositeValues(
 ): Promise<Map<string, CompositeValue>> {
   if (playerIds.length === 0) return new Map();
 
+  // Always compute fresh to ensure all sources are used.
+  // The daily snapshot may contain stale data from before the FC pipeline fix.
+  // TODO: Re-enable snapshot reads after a fresh snapshot is generated with full source coverage.
+  // To re-enable: uncomment the snapshot block below and remove the direct return.
+  return computeCompositeRuntime(playerIds, mode, weights);
+
+  /*
   // When custom weights are provided, skip snapshots and compute fresh
   if (weights) {
     return computeCompositeRuntime(playerIds, mode, weights);
@@ -342,4 +349,5 @@ export async function getCompositeValues(
     final.set(id, val);
   }
   return final;
+  */
 }
