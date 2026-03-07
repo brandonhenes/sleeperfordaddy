@@ -17,7 +17,7 @@ export default function Profile() {
   // Auto-trigger sync when visiting a profile
   useEffect(() => {
     if (username && !startSync.isPending) {
-      startSync.mutate(username);
+      startSync.mutate({ username });
       setSyncing(true);
     }
   }, [username]); // eslint-disable-line react-hooks/exhaustive-deps

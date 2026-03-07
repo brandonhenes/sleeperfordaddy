@@ -12,6 +12,11 @@ interface SyncResponse {
   message?: string;
 }
 
+interface StartSyncInput {
+  username: string;
+  force?: boolean;
+}
+
 interface SyncStatus {
   job_id?: string;
   status: string;
@@ -35,15 +40,15 @@ export function useOverview(username: string | undefined) {
 export function useStartSync() {
   const queryClient = useQueryClient();
 
-  return useMutation<SyncResponse, Error, string>({
-    mutationFn: (username: string) =>
+  return useMutation<SyncResponse, Error, StartSyncInput>({
+    mutationFn: ({ username, force }: StartSyncInput) =>
       apiFetch("/api/sync", {
         method: "POST",
-        body: JSON.stringify({ username }),
+        body: JSON.stringify({ username, force: force === true }),
       }),
-    onSuccess: (_data, username) => {
+    onSuccess: (_data, variables) => {
       // Invalidate overview when sync starts so it refreshes
-      queryClient.invalidateQueries({ queryKey: ["overview", username] });
+      queryClient.invalidateQueries({ queryKey: ["overview", variables.username] });
     },
   });
 }

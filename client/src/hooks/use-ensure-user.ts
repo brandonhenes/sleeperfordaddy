@@ -65,7 +65,7 @@ export function useEnsureUser(username: string | undefined): EnsureUserResult {
       // User data doesn't exist — kick off sync
       syncTriggered.current = true;
       setPhase("syncing");
-      sync.mutate(username, {
+      sync.mutate({ username }, {
         onError: (err) => {
           setPhase("error");
           setErrorMsg(err.message);
