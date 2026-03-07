@@ -411,7 +411,9 @@ async function processLeague(league: SleeperLeague, userId: string) {
   const allPlayers: { owner_id: string; player_id: string }[] = [];
 
   for (const roster of rosterList) {
-    if (!roster.owner_id) continue; // Skip orphan rosters
+    // Use roster_id as fallback owner for orphan rosters so their players
+    // still exist in roster_players for league-level queries like waivers.
+    const effectiveOwnerId = roster.owner_id || `orphan_${roster.roster_id}`;
 
     const fpts =
       (roster.settings.fpts ?? 0) +
@@ -422,7 +424,7 @@ async function processLeague(league: SleeperLeague, userId: string) {
 
     await upsertRoster({
       league_id: league.league_id,
-      owner_id: roster.owner_id,
+      owner_id: effectiveOwnerId,
       roster_id: roster.roster_id,
       wins: roster.settings.wins ?? 0,
       losses: roster.settings.losses ?? 0,
@@ -433,7 +435,7 @@ async function processLeague(league: SleeperLeague, userId: string) {
 
     // Collect players for batch insert
     for (const pid of roster.players ?? []) {
-      allPlayers.push({ owner_id: roster.owner_id, player_id: pid });
+      allPlayers.push({ owner_id: effectiveOwnerId, player_id: pid });
     }
   }
 

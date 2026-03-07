@@ -19,6 +19,11 @@ export interface WaiverPlayer {
   hidden_gem: boolean;
 }
 
+export interface WaiverWireResult {
+  players: WaiverPlayer[];
+  warning: string | null;
+}
+
 function scoreAgreement(scores: (number | null)[]): "high" | "medium" | "low" {
   const v = scores.filter((s): s is number => s != null);
   if (v.length <= 1) return "high";
@@ -26,7 +31,7 @@ function scoreAgreement(scores: (number | null)[]): "high" | "medium" | "low" {
   return spread < 5 ? "high" : spread <= 12 ? "medium" : "low";
 }
 
-export async function getWaiverWire(leagueId: string, weights?: SourceWeights): Promise<WaiverPlayer[]> {
+export async function getWaiverWire(leagueId: string, weights?: SourceWeights): Promise<WaiverWireResult> {
   // Get all player IDs rostered in this league
   const rosteredRows = await db.execute(sql`
     SELECT DISTINCT rp.player_id
@@ -36,6 +41,14 @@ export async function getWaiverWire(leagueId: string, weights?: SourceWeights): 
   const rosteredIds = new Set(
     (rosteredRows as unknown as { player_id: string }[]).map((r) => r.player_id)
   );
+
+  if (rosteredIds.size < 50) {
+    console.warn(`[waiver-wire] Only ${rosteredIds.size} rostered players for league ${leagueId}. Data may be incomplete.`);
+    return {
+      players: [],
+      warning: `Only ${rosteredIds.size} rostered players found. Roster data may not have synced for this league. Try re-syncing from Settings.`,
+    };
+  }
 
   // Get all NFL-rostered skill players NOT on any roster in this league
   const freeRows = await db.execute(sql`
@@ -51,7 +64,7 @@ export async function getWaiverWire(leagueId: string, weights?: SourceWeights): 
 
   type PR = { player_id: string; full_name: string; position: string; team: string; age: number | null };
   const players = freeRows as unknown as PR[];
-  if (players.length === 0) return [];
+  if (players.length === 0) return { players: [], warning: null };
 
   // Detect SF mode from league settings
   const leagueRow = await db.execute(sql`
@@ -102,5 +115,5 @@ export async function getWaiverWire(leagueId: string, weights?: SourceWeights): 
   }
 
   results.sort((a, b) => b.edge_score - a.edge_score);
-  return results.slice(0, 50);
+  return { players: results.slice(0, 50), warning: null };
 }

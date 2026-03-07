@@ -77,6 +77,34 @@ router.post("/api/admin/match-fc", async (_req, res) => {
   }
 });
 
+router.get("/api/admin/roster-health/:leagueId", async (req, res) => {
+  try {
+    const { leagueId } = req.params;
+    const result = await db.execute(sql`
+      SELECT
+        COUNT(DISTINCT player_id)::int AS total_players,
+        COUNT(DISTINCT owner_id)::int AS total_owners,
+        MAX(updated_at)::text AS last_updated
+      FROM roster_players
+      WHERE league_id = ${leagueId}
+    `);
+    const row = (result as unknown as {
+      total_players: number;
+      total_owners: number;
+      last_updated: string | null;
+    }[])[0];
+    res.json({
+      league_id: leagueId,
+      rostered_players: row?.total_players ?? 0,
+      unique_owners: row?.total_owners ?? 0,
+      last_updated: row?.last_updated ?? null,
+      healthy: (row?.total_players ?? 0) >= 50,
+    });
+  } catch (err) {
+    res.status(500).json({ message: String(err) });
+  }
+});
+
 /** POST /api/admin/sync-ktc */
 router.post("/api/admin/sync-ktc", async (_req, res) => {
   try {

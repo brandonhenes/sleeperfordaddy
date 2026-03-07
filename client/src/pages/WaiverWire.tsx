@@ -173,7 +173,9 @@ export function WaiverContent() {
     }
   }, [leagues.length, selectedLeagueId]);
 
-  const { data: players, isLoading: waiverLoading } = useWaiverWire(selectedLeagueId);
+  const { data: waiverData, isLoading: waiverLoading } = useWaiverWire(selectedLeagueId);
+  const players = waiverData?.players ?? [];
+  const warning = waiverData?.warning ?? null;
 
   if (overviewLoading) {
     return <div className="animate-pulse" style={{ ...cardStyle, height: 60, marginTop: 16 }} />;
@@ -212,6 +214,22 @@ export function WaiverContent() {
         ))}
       </div>
 
+      {warning && (
+        <div
+          style={{
+            ...cardStyle,
+            marginTop: 12,
+            padding: 14,
+            borderColor: "#f59e0b",
+            background: "rgba(245,158,11,0.12)",
+            color: "#fde68a",
+            fontSize: 13,
+          }}
+        >
+          {warning}
+        </div>
+      )}
+
       <div style={{ marginTop: 12 }}>
         {waiverLoading ? (
           <div style={{ display: "grid", gap: 12 }}>
@@ -220,7 +238,7 @@ export function WaiverContent() {
             ))}
           </div>
         ) : (
-          <WaiverTable players={players ?? []} filter={posFilter} />
+          <WaiverTable players={players} filter={posFilter} />
         )}
       </div>
     </>

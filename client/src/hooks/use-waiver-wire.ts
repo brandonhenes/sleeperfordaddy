@@ -17,10 +17,15 @@ export interface WaiverPlayer {
   hidden_gem: boolean;
 }
 
+export interface WaiverWireResult {
+  players: WaiverPlayer[];
+  warning: string | null;
+}
+
 export function useWaiverWire(leagueId: string) {
   const weights = weightQueryParams();
   const querySuffix = weights ? `?${weights.slice(1)}` : "";
-  return useQuery<WaiverPlayer[]>({
+  return useQuery<WaiverWireResult>({
     queryKey: ["waiver-wire", leagueId, weights],
     queryFn: () => apiFetch(`/api/waiver-wire/${encodeURIComponent(leagueId)}${querySuffix}`),
     enabled: !!leagueId,
