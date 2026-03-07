@@ -27,7 +27,11 @@ function timeAgo(dateStr: string | null): { label: string; color: string } {
   return { label: `${Math.round(days)}d ago`, color };
 }
 
-export default function FreshnessBar() {
+export default function FreshnessBar({
+  leagueId,
+}: {
+  leagueId?: string;
+}) {
   const queryClient = useQueryClient();
   const username = useMemo(
     () => (typeof window !== "undefined" ? localStorage.getItem("edge_username") ?? "" : ""),
@@ -111,7 +115,9 @@ export default function FreshnessBar() {
               setSyncMessage("");
               setSyncing(true);
               startSync.mutate(
-                { username, force: true, scope: "latest" },
+                leagueId
+                  ? { username, force: true, leagueId }
+                  : { username, force: true, scope: "latest" },
                 {
                   onError: (err) => {
                     setSyncing(false);
@@ -134,7 +140,11 @@ export default function FreshnessBar() {
               opacity: syncing || startSync.isPending ? 0.7 : 1,
             }}
           >
-            {syncing || startSync.isPending ? "Resyncing..." : "Resync Site"}
+            {syncing || startSync.isPending
+              ? "Resyncing..."
+              : leagueId
+                ? "Resync League"
+                : "Resync Site"}
           </button>
         </div>
       ) : null}

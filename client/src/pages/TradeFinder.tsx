@@ -607,7 +607,7 @@ export default function TradeFinder() {
         <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 4 }}>
           Suggested trades and acquisition plans based on roster composition, archetypes, and draft capital
         </p>
-        <FreshnessBar />
+        <FreshnessBar leagueId={selectedLeague || undefined} />
       </div>
 
       <div style={{ display: "flex", gap: 0, borderBottom: "1px solid var(--border)", marginBottom: 16, marginTop: 8 }}>

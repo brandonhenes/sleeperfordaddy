@@ -1,5 +1,7 @@
 import { useState, useMemo } from "react";
 import { useParams } from "wouter";
+import { useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import AppShell from "../components/AppShell";
 import { StatCard } from "../components/ui";
 import { PlayerLink } from "../components/ui";
@@ -17,6 +19,7 @@ import {
   type SlotGrade,
   type ScoredPick,
 } from "../hooks/use-power-rankings";
+import { useStartSync, useSyncStatus } from "../hooks/use-sleeper";
 
 // ─── Helpers ───
 
@@ -296,7 +299,76 @@ function RosterRow({ roster, rank }: { roster: RosterRanking; rank: number }) {
 
 // ─── League Card ───
 
-function LeagueCard({ league }: { league: LeaguePowerRanking }) {
+function LeagueSyncButton({
+  username,
+  leagueId,
+}: {
+  username: string;
+  leagueId: string;
+}) {
+  const queryClient = useQueryClient();
+  const [syncing, setSyncing] = useState(false);
+  const [message, setMessage] = useState("");
+  const startSync = useStartSync();
+  const syncStatus = useSyncStatus(username, syncing);
+
+  useEffect(() => {
+    const status = syncStatus.data?.status;
+    if (!status) return;
+    if (status === "running") {
+      setMessage("Syncing...");
+      return;
+    }
+    if (status === "completed" || status === "done" || status === "complete") {
+      setSyncing(false);
+      setMessage("Synced");
+      queryClient.invalidateQueries();
+      return;
+    }
+    if (status === "failed" || status === "error") {
+      setSyncing(false);
+      setMessage(syncStatus.data?.error || "Failed");
+    }
+  }, [queryClient, syncStatus.data]);
+
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        setMessage("");
+        setSyncing(true);
+        startSync.mutate(
+          { username, force: true, leagueId },
+          {
+            onError: (err) => {
+              setSyncing(false);
+              setMessage(err.message || "Failed");
+            },
+          }
+        );
+      }}
+      disabled={syncing || startSync.isPending}
+      style={{
+        border: "1px solid rgba(245,158,11,0.3)",
+        background: syncing ? "rgba(245,158,11,0.08)" : "rgba(245,158,11,0.14)",
+        color: "var(--amber)",
+        borderRadius: 8,
+        padding: "6px 10px",
+        fontSize: 11,
+        fontWeight: 700,
+        cursor: syncing || startSync.isPending ? "not-allowed" : "pointer",
+        fontFamily: "inherit",
+        whiteSpace: "nowrap",
+      }}
+      title={message || "Sync only this league"}
+    >
+      {syncing || startSync.isPending ? "Resyncing..." : message || "Resync League"}
+    </button>
+  );
+}
+
+function LeagueCard({ league, username }: { league: LeaguePowerRanking; username: string }) {
   const [expanded, setExpanded] = useState(false);
   const userRoster = league.rosters.find((r) => r.is_user);
 
@@ -322,6 +394,7 @@ function LeagueCard({ league }: { league: LeaguePowerRanking }) {
             )}
           </span>
         </div>
+        <LeagueSyncButton username={username} leagueId={league.league_id} />
         {userRoster && <EdgeScoreBadge score={userRoster.avg_starter_score} size="md" />}
         {userRoster && <ArchetypeBadge archetype={userRoster.archetype} />}
         {userRoster && (
@@ -397,7 +470,7 @@ export default function PowerRankings() {
           </div>
           <div style={{ display: "grid", gap: 12 }}>
             {leagues.map((l) => (
-              <LeagueCard key={l.league_id} league={l} />
+              <LeagueCard key={l.league_id} league={l} username={username ?? ""} />
             ))}
           </div>
         </>

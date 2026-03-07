@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useParams } from "wouter";
 import AppShell from "../components/AppShell";
 import EdgeScoreBadge from "../components/EdgeScoreBadge";
+import FreshnessBar from "../components/FreshnessBar";
 import { PlayerLink } from "../components/ui";
 import { posColor } from "../lib/position-colors";
 import { useOverview } from "../hooks/use-sleeper";
@@ -191,6 +192,7 @@ export function WaiverContent() {
 
   return (
     <>
+      <FreshnessBar leagueId={selectedLeagueId || undefined} />
       <LeagueSelector leagues={leagues} selected={selectedLeagueId} onChange={setSelectedLeagueId} />
 
       <div style={{ display: "flex", gap: 6, marginTop: 12 }}>

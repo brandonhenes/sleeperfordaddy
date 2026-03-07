@@ -16,6 +16,7 @@ interface StartSyncInput {
   username: string;
   force?: boolean;
   scope?: "full" | "latest";
+  leagueId?: string;
 }
 
 interface SyncStatus {
@@ -42,13 +43,14 @@ export function useStartSync() {
   const queryClient = useQueryClient();
 
   return useMutation<SyncResponse, Error, StartSyncInput>({
-    mutationFn: ({ username, force, scope }: StartSyncInput) =>
+    mutationFn: ({ username, force, scope, leagueId }: StartSyncInput) =>
       apiFetch("/api/sync", {
         method: "POST",
         body: JSON.stringify({
           username,
           force: force === true,
           scope: scope === "latest" ? "latest" : "full",
+          leagueId: leagueId || undefined,
         }),
       }),
     onSuccess: (_data, variables) => {

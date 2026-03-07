@@ -2,7 +2,7 @@ import { randomUUID } from "crypto";
 import { and, eq } from "drizzle-orm";
 import { SEASONS, SLEEPER_CONCURRENCY, TRANSACTION_ROUNDS } from "../../shared/constants.js";
 import { getUser } from "../sleeper/users.js";
-import { getUserLeagues, getLeagueUsers } from "../sleeper/leagues.js";
+import { getUserLeagues, getLeagueUsers, getLeague } from "../sleeper/leagues.js";
 import { getLeagueRosters } from "../sleeper/rosters.js";
 import { getLeagueMatchups } from "../sleeper/matchups.js";
 import { getLeagueTransactions } from "../sleeper/transactions.js";
@@ -104,11 +104,12 @@ function isRunningJobStale(job: { status: string; updated_at: number }): boolean
  */
 export async function startSync(
   username: string,
-  options?: { force?: boolean; scope?: SyncScope }
+  options?: { force?: boolean; scope?: SyncScope; leagueId?: string }
 ): Promise<{ jobId: string; alreadyRunning: boolean }> {
   const key = username.toLowerCase();
   const force = options?.force === true;
   const scope: SyncScope = options?.scope === "latest" ? "latest" : "full";
+  const leagueId = options?.leagueId?.trim() || undefined;
   const latest = await getLatestSyncJob(username);
 
   if (latest && isRunningJobStale(latest)) {
@@ -143,7 +144,7 @@ export async function startSync(
   lastSyncStart.set(key, Date.now());
 
   // Run sync in background (don't await)
-  runSync(jobId, username, scope).catch((err) => {
+  runSync(jobId, username, scope, leagueId).catch((err) => {
     console.error(`[sync] Fatal error for ${username}:`, err);
     updateSyncJob(jobId, {
       status: "failed",
@@ -159,7 +160,12 @@ export async function startSync(
 /**
  * The main sync pipeline.
  */
-async function runSync(jobId: string, username: string, scope: SyncScope) {
+async function runSync(
+  jobId: string,
+  username: string,
+  scope: SyncScope,
+  leagueId?: string
+) {
   console.log(`[sync] Starting sync for ${username} (job ${jobId})`);
 
   // Step 1: Resolve user
@@ -190,16 +196,16 @@ async function runSync(jobId: string, username: string, scope: SyncScope) {
   await updateSyncJob(jobId, {
     step: "fetching_leagues",
     detail:
-      scope === "latest"
+      leagueId
+        ? `League sync (${leagueId})`
+        : scope === "latest"
         ? `Latest season sync (${currentSeason})`
         : `Seasons ${SEASONS[0]}-${currentSeason}`,
   });
 
-  const allLeagues = await fetchLeaguesForScope(
-    sleeperUser.user_id,
-    currentSeason,
-    scope
-  );
+  const allLeagues = leagueId
+    ? await fetchSpecificLeague(leagueId)
+    : await fetchLeaguesForScope(sleeperUser.user_id, currentSeason, scope);
 
   const uniqueLeagues = dedupeLeagues(allLeagues).filter((l) =>
     isDynastyLeagueFromSleeperSettings(l.settings)
@@ -240,7 +246,7 @@ async function runSync(jobId: string, username: string, scope: SyncScope) {
     }
   );
 
-  if (scope === "latest") {
+  if (scope === "latest" || leagueId) {
     clearSleeperCache();
     clearDynastyLeagueCache(sleeperUser.user_id);
     clearGlobalScaleCache();
@@ -255,10 +261,14 @@ async function runSync(jobId: string, username: string, scope: SyncScope) {
       status: "completed",
       step: "done",
       leagues_done: uniqueLeagues.length,
-      detail: `Synced ${uniqueLeagues.length} latest-season leagues`,
+      detail: leagueId
+        ? `Synced league ${leagueId}`
+        : `Synced ${uniqueLeagues.length} latest-season leagues`,
     });
 
-    console.log(`[sync] Completed latest-season sync for ${username}`);
+    console.log(
+      `[sync] Completed ${leagueId ? "single-league" : "latest-season"} sync for ${username}`
+    );
     return;
   }
 
@@ -844,6 +854,12 @@ async function fetchLeaguesForScope(
   }
 
   return [];
+}
+
+async function fetchSpecificLeague(leagueId: string): Promise<SleeperLeague[]> {
+  const league = await getLeague(leagueId);
+  if (!league) return [];
+  return [league];
 }
 
 async function runWithConcurrency<T>(

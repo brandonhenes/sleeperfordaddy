@@ -14,6 +14,10 @@ router.post("/api/sync", async (req, res) => {
 
     const force = req.body.force === true;
     const scope = req.body.scope === "latest" ? "latest" : "full";
+    const leagueId =
+      typeof req.body.leagueId === "string" && req.body.leagueId.trim().length > 0
+        ? req.body.leagueId.trim()
+        : undefined;
 
     if (!force) {
       const { needsSync, syncJob } = await checkSyncStatus(username);
@@ -29,6 +33,7 @@ router.post("/api/sync", async (req, res) => {
     const { jobId, alreadyRunning } = await startSync(username, {
       force,
       scope,
+      leagueId,
     });
     res.json({
       job_id: jobId,
