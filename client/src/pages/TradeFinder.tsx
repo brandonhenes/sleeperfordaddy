@@ -57,6 +57,11 @@ function AssetRow({ asset }: { asset: TradePackageAsset }) {
       >
         {Math.round(asset.edge_score)}
       </span>
+      {asset.trade_power > 0 && (
+        <span className="font-mono" style={{ fontSize: 10, color: "var(--text-muted)" }}>
+          TP:{asset.trade_power.toFixed(1)}
+        </span>
+      )}
       {asset.asset_type === "pick" && <span style={{ color: "#06b6d4", fontWeight: 700, fontSize: 10 }}>PICK</span>}
       {asset.position && <span style={{ color: posColor(asset.position), fontWeight: 700, fontSize: 10 }}>{asset.position}</span>}
       <PlayerLink name={asset.label} style={{ flex: 1, fontWeight: 500 }} />
@@ -84,20 +89,39 @@ function PackageView({ pkg }: { pkg: TradePackage }) {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
         <div>
           <div style={{ fontSize: 11, fontWeight: 700, color: "#ef4444", letterSpacing: 0.5, marginBottom: 8, borderBottom: "2px solid #ef4444", paddingBottom: 4 }}>
-            YOU SEND ({pkg.send_total.toFixed(1)} edge)
+            YOU SEND ({pkg.send_total.toFixed(1)} TP)
+            <span style={{ color: "var(--text-muted)", fontWeight: 400, fontSize: 10, marginLeft: 4 }}>
+              ({pkg.send_edge.toFixed(1)} edge)
+            </span>
+            {pkg.package_penalty_pct_send > 0 && (
+              <span style={{ color: "var(--red)", fontWeight: 400, fontSize: 10, marginLeft: 4 }}>
+                ({pkg.package_penalty_pct_send}% pkg penalty)
+              </span>
+            )}
           </div>
           {pkg.you_send.map((asset, i) => <AssetRow key={`send-${i}-${asset.label}`} asset={asset} />)}
         </div>
         <div>
           <div style={{ fontSize: 11, fontWeight: 700, color: "#22c55e", letterSpacing: 0.5, marginBottom: 8, borderBottom: "2px solid #22c55e", paddingBottom: 4 }}>
-            YOU RECEIVE ({pkg.receive_total.toFixed(1)} edge)
+            YOU RECEIVE ({pkg.receive_total.toFixed(1)} TP)
+            <span style={{ color: "var(--text-muted)", fontWeight: 400, fontSize: 10, marginLeft: 4 }}>
+              ({pkg.receive_edge.toFixed(1)} edge)
+            </span>
+            {pkg.package_penalty_pct_receive > 0 && (
+              <span style={{ color: "var(--red)", fontWeight: 400, fontSize: 10, marginLeft: 4 }}>
+                ({pkg.package_penalty_pct_receive}% pkg penalty)
+              </span>
+            )}
           </div>
           {pkg.you_receive.map((asset, i) => <AssetRow key={`receive-${i}-${asset.label}`} asset={asset} />)}
         </div>
       </div>
 
       <div style={{ textAlign: "center", fontSize: 13, fontWeight: 700, marginTop: 12, padding: "8px 0", color: pkg.delta >= 0 ? "var(--green)" : "var(--red)" }}>
-        {pkg.delta >= 0 ? "You win" : "You overpay"} by {Math.abs(pkg.delta).toFixed(1)} points
+        {pkg.delta >= 0 ? "You win" : "You overpay"} by {Math.abs(pkg.delta).toFixed(1)} TP
+        <span style={{ color: "var(--text-muted)", fontSize: 11, fontWeight: 500, marginLeft: 6 }}>
+          (raw edge: {pkg.delta_edge > 0 ? "+" : ""}{pkg.delta_edge.toFixed(1)})
+        </span>
         <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 600 }}>({fairnessLabel(pkg.fairness)})</span>
       </div>
 
@@ -155,6 +179,23 @@ function PartnerCard({ suggestion }: { suggestion: TradeSuggestion }) {
             {partner.archetype} | {packages.length} package{packages.length !== 1 ? "s" : ""}
           </div>
         </div>
+        {pkg?.trade_type && (
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 600,
+              color: "var(--text-muted)",
+              padding: "2px 8px",
+              borderRadius: 4,
+              background: "rgba(255,255,255,0.05)",
+              textTransform: "uppercase",
+              letterSpacing: 0.5,
+              whiteSpace: "nowrap",
+            }}
+          >
+            {pkg.trade_type.replace(/-/g, " ")}
+          </span>
+        )}
         <div style={{ fontSize: 12, color: "var(--text-muted)", maxWidth: 300, textAlign: "right" }}>{partner.compatibility_reason}</div>
         <span style={{ fontSize: 12, color: "var(--text-muted)", marginLeft: 8 }}>{open ? "▲" : "▼"}</span>
       </button>
@@ -351,6 +392,11 @@ function AssetChip({ asset }: { asset: EvaluatedAsset }) {
       }}>
         {Math.round(asset.edge_score)}
       </span>
+      {asset.trade_power > 0 && (
+        <span className="font-mono" style={{ fontSize: 10, color: "var(--text-muted)" }}>
+          TP:{asset.trade_power.toFixed(1)}
+        </span>
+      )}
       {asset.position && <span style={{ color: posColor(asset.position), fontWeight: 700, fontSize: 10 }}>{asset.position}</span>}
       <PlayerLink name={asset.label} style={{ flex: 1, fontWeight: 500 }} />
     </div>

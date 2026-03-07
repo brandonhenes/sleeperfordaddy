@@ -4,6 +4,7 @@ import type { EvaluatedAsset, TradeAssetInput, TradeEvaluation } from "../../sha
 import type { SourceWeights } from "./edge-score.js";
 import { getCompositeValues, getGlobalScaleParams } from "./composite-values.js";
 import { computeEdgeScores } from "./edge-score.js";
+import { evaluateTradeValue } from "./trade-value.js";
 import {
   parseLeagueScoring,
   loadPlayerUsageStats,
@@ -34,13 +35,6 @@ function agreementFromScores(scores: Array<number | null>): "high" | "medium" | 
   if (spread < 5) return "high";
   if (spread <= 12) return "medium";
   return "low";
-}
-
-function fairnessFromDelta(delta: number): TradeEvaluation["fairness"] {
-  const gap = Math.abs(delta);
-  if (gap <= 6) return "fair";
-  if (gap <= 15) return "slight_edge";
-  return "lopsided";
 }
 
 function normalizePick(asset: TradeAssetInput): { season: string; round: number; tier: "early" | "mid" | "late" } {
@@ -184,6 +178,7 @@ function toEvaluatedAsset(raw: RawEval, edge: { score: number; fc_score: number 
     position: raw.position,
     label: raw.label,
     edge_score: edge.score,
+    trade_power: 0,
     fc_score: edge.fc_score,
     ktc_score: edge.ktc_score,
     dp_score: edge.dp_score,
@@ -226,10 +221,6 @@ export async function evaluateTrade(
     )
   );
 
-  const totalA = Math.round(evalA.reduce((s, a) => s + a.edge_score, 0) * 10) / 10;
-  const totalB = Math.round(evalB.reduce((s, a) => s + a.edge_score, 0) * 10) / 10;
-  const delta = Math.round((totalA - totalB) * 10) / 10;
-
   if (leagueId) {
     const leagueRow = await db.execute(sql`
       SELECT scoring_settings FROM leagues WHERE league_id = ${leagueId} LIMIT 1
@@ -252,11 +243,36 @@ export async function evaluateTrade(
     }
   }
 
+  const edgesA = evalA.map((a) => a.edge_score);
+  const edgesB = evalB.map((a) => a.edge_score);
+  const tvResult = evaluateTradeValue(edgesA, edgesB);
+
+  for (let i = 0; i < evalA.length; i++) {
+    evalA[i].trade_power = tvResult.sideA.trade_powers[i] ?? 0;
+  }
+  for (let i = 0; i < evalB.length; i++) {
+    evalB[i].trade_power = tvResult.sideB.trade_powers[i] ?? 0;
+  }
+
+  const totalEdgeA = Math.round(evalA.reduce((s, a) => s + a.edge_score, 0) * 10) / 10;
+  const totalEdgeB = Math.round(evalB.reduce((s, a) => s + a.edge_score, 0) * 10) / 10;
+
   return {
-    sideA: { assets: evalA, total_edge: totalA },
-    sideB: { assets: evalB, total_edge: totalB },
-    delta,
-    fairness: fairnessFromDelta(delta),
+    sideA: {
+      assets: evalA,
+      total_edge: totalEdgeA,
+      total_trade_power: tvResult.sideA.total_tp,
+      package_penalty_pct: tvResult.sideA.penalty_pct,
+    },
+    sideB: {
+      assets: evalB,
+      total_edge: totalEdgeB,
+      total_trade_power: tvResult.sideB.total_tp,
+      package_penalty_pct: tvResult.sideB.penalty_pct,
+    },
+    delta: tvResult.delta_tp,
+    delta_edge: Math.round((totalEdgeA - totalEdgeB) * 10) / 10,
+    fairness: tvResult.fairness,
   };
 }
 

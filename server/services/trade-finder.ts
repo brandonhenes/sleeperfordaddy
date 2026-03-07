@@ -20,6 +20,7 @@ import {
   isNonStandardScoring,
   type LeagueScoringSettings,
 } from "./scoring-adjustment.js";
+import { evaluateTradeValue } from "./trade-value.js";
 
 // Constants
 
@@ -28,7 +29,6 @@ type Pos = (typeof POSITIONS)[number];
 
 const MIN_STARTERS: Record<Pos, number> = { QB: 1, RB: 2, WR: 2, TE: 1 };
 const MIN_EDGE_SCORE = 42;
-const FAIRNESS_BAND = 15;
 
 const ARCHETYPE_WANTS: Record<string, string> = {
   "Dynasty Juggernaut": "depth maintenance",
@@ -62,19 +62,13 @@ function median(arr: number[]): number {
     : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
-function fairness(delta: number): "fair" | "slight_edge" | "lopsided" {
-  const abs = Math.abs(delta);
-  if (abs <= 5) return "fair";
-  if (abs <= FAIRNESS_BAND) return "slight_edge";
-  return "lopsided";
-}
-
 function assetFromPlayer(a: CoreAsset): TradePackageAsset {
   return {
     asset_type: "player",
     label: a.full_name,
     position: a.position,
     edge_score: a.edge_score,
+    trade_power: 0,
     fc_score: a.fc_score,
     ktc_score: a.ktc_score,
     dp_score: a.dp_score,
@@ -109,6 +103,7 @@ function assetFromPick(p: ScoredPick): TradePackageAsset {
     label: p.label,
     position: null,
     edge_score: p.edge_score,
+    trade_power: 0,
     fc_score: null,
     ktc_score: p.ktc_score,
     dp_score: p.dp_score,
@@ -125,6 +120,59 @@ function totalEdge(assets: TradePackageAsset[]): number {
 function roundTo(n: number, d: number): number {
   const f = Math.pow(10, d);
   return Math.round(n * f) / f;
+}
+
+function tradeTypeForPackage(
+  type: TradePackage["type"]
+): TradePackage["trade_type"] {
+  if (type === "balanced") return "1-for-1";
+  if (type === "consolidation") return "2-for-1";
+  if (type === "player_plus_pick") return "player-plus-pick";
+  return "pick-package";
+}
+
+type PackageScore = {
+  sendAssets: TradePackageAsset[];
+  receiveAssets: TradePackageAsset[];
+  sendTotal: number;
+  receiveTotal: number;
+  delta: number;
+  sendEdge: number;
+  receiveEdge: number;
+  deltaEdge: number;
+  packagePenaltySend: number;
+  packagePenaltyReceive: number;
+  fairness: "fair" | "slight_edge" | "lopsided";
+};
+
+function scorePackage(
+  send: TradePackageAsset[],
+  receive: TradePackageAsset[]
+): PackageScore {
+  const tv = evaluateTradeValue(
+    receive.map((a) => a.edge_score),
+    send.map((a) => a.edge_score)
+  );
+
+  return {
+    sendAssets: send.map((asset, i) => ({
+      ...asset,
+      trade_power: tv.sideB.trade_powers[i] ?? 0,
+    })),
+    receiveAssets: receive.map((asset, i) => ({
+      ...asset,
+      trade_power: tv.sideA.trade_powers[i] ?? 0,
+    })),
+    sendTotal: tv.sideB.total_tp,
+    receiveTotal: tv.sideA.total_tp,
+    delta: tv.delta_tp,
+    sendEdge: roundTo(totalEdge(send), 1),
+    receiveEdge: roundTo(totalEdge(receive), 1),
+    deltaEdge: roundTo(totalEdge(receive) - totalEdge(send), 1),
+    packagePenaltySend: tv.sideB.penalty_pct,
+    packagePenaltyReceive: tv.sideA.penalty_pct,
+    fairness: tv.fairness,
+  };
 }
 
 // Profile Building
@@ -262,30 +310,34 @@ function generatePackages(
         continue;
       }
 
-      const delta = oppGives.edge_score - userGives.edge_score;
-      const f = fairness(delta);
-      if (f === "lopsided") continue;
-
       const send = [assetFromPlayerWithScoring(userGives, scoring, usage, hasCustom)];
       const receive = [assetFromPlayerWithScoring(oppGives, scoring, usage, hasCustom)];
+      const scored = scorePackage(send, receive);
+      if (scored.fairness === "lopsided" || scored.sendTotal <= 0 || scored.receiveTotal <= 0) continue;
 
       packages.push({
         type: "balanced",
+        trade_type: tradeTypeForPackage("balanced"),
         label: "Balanced Swap",
-        you_send: send,
-        you_receive: receive,
-        send_total: roundTo(totalEdge(send), 1),
-        receive_total: roundTo(totalEdge(receive), 1),
-        delta: roundTo(delta, 1),
-        fairness: f,
+        you_send: scored.sendAssets,
+        you_receive: scored.receiveAssets,
+        send_total: scored.sendTotal,
+        receive_total: scored.receiveTotal,
+        delta: scored.delta,
+        send_edge: scored.sendEdge,
+        receive_edge: scored.receiveEdge,
+        delta_edge: scored.deltaEdge,
+        package_penalty_pct_send: scored.packagePenaltySend,
+        package_penalty_pct_receive: scored.packagePenaltyReceive,
+        fairness: scored.fairness,
         why_you_do_it: user.needs.includes(oppPos as Pos)
           ? `Fills your ${oppPos} need with their surplus`
           : `Upgrades ${oppPos} depth, trades ${userPos} surplus`,
         why_they_accept: opp.needs.includes(userPos as Pos)
           ? `Fills their ${userPos} need. ${ARCHETYPE_WANTS[opp.roster.archetype] ?? ""}`
           : `Upgrades their ${userPos}, trades ${oppPos} depth`,
-        sweetener_hint: Math.abs(delta) > 3 && Math.abs(delta) <= 10
-          ? `Add a late-round pick to ${delta > 0 ? "sweeten for them" : "balance for you"}`
+        sweetener_hint: Math.abs(scored.deltaEdge) > 3 && Math.abs(scored.deltaEdge) <= 10
+          ? `Add a late-round pick to ${scored.deltaEdge > 0 ? "sweeten for them" : "balance for you"}`
           : null,
       });
     }
@@ -323,27 +375,84 @@ function generatePackages(
 
     const send = sendAssets.map((a) => assetFromPlayerWithScoring(a, scoring, usage, hasCustom));
     const receive = [assetFromPlayerWithScoring(target, scoring, usage, hasCustom)];
-    const delta = totalEdge(receive) - totalEdge(send);
-    const f = fairness(delta);
-    if (f === "lopsided" && delta < -FAIRNESS_BAND) continue;
+    const scored = scorePackage(send, receive);
+    if (scored.fairness === "lopsided" || scored.sendTotal <= 0 || scored.receiveTotal <= 0) continue;
 
     packages.push({
       type: "consolidation",
+      trade_type: tradeTypeForPackage("consolidation"),
       label: "2-for-1 Consolidation",
-      you_send: send,
-      you_receive: receive,
-      send_total: roundTo(totalEdge(send), 1),
-      receive_total: roundTo(totalEdge(receive), 1),
-      delta: roundTo(delta, 1),
-      fairness: f,
+      you_send: scored.sendAssets,
+      you_receive: scored.receiveAssets,
+      send_total: scored.sendTotal,
+      receive_total: scored.receiveTotal,
+      delta: scored.delta,
+      send_edge: scored.sendEdge,
+      receive_edge: scored.receiveEdge,
+      delta_edge: scored.deltaEdge,
+      package_penalty_pct_send: scored.packagePenaltySend,
+      package_penalty_pct_receive: scored.packagePenaltyReceive,
+      fairness: scored.fairness,
       why_you_do_it: `Consolidate depth into a ${oppPos} starter upgrade`,
       why_they_accept: `Gets ${[...usedPos].join(" + ")} help. They're a ${opp.roster.archetype} who wants ${ARCHETYPE_WANTS[opp.roster.archetype] ?? "flexibility"}.`,
-      sweetener_hint: delta < -3
+      sweetener_hint: scored.deltaEdge < -3
         ? "You may need to add a mid-round pick to get them to accept"
-        : delta > 8
+        : scored.deltaEdge > 8
           ? "You're overpaying slightly. Try removing the weaker piece."
           : null,
     });
+  }
+
+  for (const oppPos of POSITIONS) {
+    if (opp.surplus[oppPos].length === 0) continue;
+    if (!user.needs.includes(oppPos as Pos)) continue;
+
+    const target = opp.surplus[oppPos][0];
+    if (!target || target.edge_score < 55) continue;
+
+    for (const userPos of POSITIONS) {
+      if (userPos === oppPos) continue;
+      if (user.surplus[userPos].length === 0) continue;
+      if (!opp.needs.includes(userPos as Pos)) continue;
+
+      const userPlayer = user.surplus[userPos][0];
+      if (!userPlayer || userPlayer.edge_score < 45) continue;
+
+      for (const pick of user.tradeablePicks.slice(0, 3)) {
+        if (pick.edge_score <= 0) continue;
+
+        const send = [
+          assetFromPlayerWithScoring(userPlayer, scoring, usage, hasCustom),
+          assetFromPick(pick),
+        ];
+        const receive = [assetFromPlayerWithScoring(target, scoring, usage, hasCustom)];
+        const scored = scorePackage(send, receive);
+        if (scored.fairness === "lopsided" || scored.sendTotal <= 0 || scored.receiveTotal <= 0) {
+          continue;
+        }
+
+        packages.push({
+          type: "player_plus_pick",
+          trade_type: tradeTypeForPackage("player_plus_pick"),
+          label: "Player + Pick",
+          you_send: scored.sendAssets,
+          you_receive: scored.receiveAssets,
+          send_total: scored.sendTotal,
+          receive_total: scored.receiveTotal,
+          delta: scored.delta,
+          send_edge: scored.sendEdge,
+          receive_edge: scored.receiveEdge,
+          delta_edge: scored.deltaEdge,
+          package_penalty_pct_send: scored.packagePenaltySend,
+          package_penalty_pct_receive: scored.packagePenaltyReceive,
+          fairness: scored.fairness,
+          why_you_do_it: `${userPos} surplus plus draft capital lands a real ${oppPos} upgrade`,
+          why_they_accept: `Gets ${userPos} help plus a future pick for their ${oppPos} surplus.`,
+          sweetener_hint: scored.deltaEdge < -5 ? "Try downgrading the pick tier if the cost feels steep." : null,
+        });
+        break;
+      }
+    }
   }
 
   if (user.tradeablePicks.length > 0) {
@@ -382,9 +491,8 @@ function generatePackages(
       }
 
       const receive = [assetFromPlayerWithScoring(target, scoring, usage, hasCustom)];
-      const delta = totalEdge(receive) - totalEdge(send);
-      const f = fairness(delta);
-      if (f === "lopsided" && delta < -FAIRNESS_BAND) continue;
+      const scored = scorePackage(send, receive);
+      if (scored.fairness === "lopsided" || scored.sendTotal <= 0 || scored.receiveTotal <= 0) continue;
 
       const isDupe = packages.some(
         (p) =>
@@ -395,19 +503,24 @@ function generatePackages(
 
       packages.push({
         type: "picks_heavy",
+        trade_type: tradeTypeForPackage("picks_heavy"),
         label: "Picks + Depth",
-        you_send: send,
-        you_receive: receive,
-        send_total: roundTo(totalEdge(send), 1),
-        receive_total: roundTo(totalEdge(receive), 1),
-        delta: roundTo(delta, 1),
-        fairness: f,
+        you_send: scored.sendAssets,
+        you_receive: scored.receiveAssets,
+        send_total: scored.sendTotal,
+        receive_total: scored.receiveTotal,
+        delta: scored.delta,
+        send_edge: scored.sendEdge,
+        receive_edge: scored.receiveEdge,
+        delta_edge: scored.deltaEdge,
+        package_penalty_pct_send: scored.packagePenaltySend,
+        package_penalty_pct_receive: scored.packagePenaltyReceive,
+        fairness: scored.fairness,
         why_you_do_it: `Acquire ${oppPos} starter using draft capital`,
         why_they_accept: `Gets future picks. They're a ${opp.roster.archetype} who wants ${ARCHETYPE_WANTS[opp.roster.archetype] ?? "draft capital"}.`,
-        sweetener_hint:
-          delta < -5
-            ? "Consider upgrading the pick round or adding another asset"
-            : null,
+        sweetener_hint: scored.deltaEdge < -5
+          ? "Consider upgrading the pick round or adding another asset"
+          : null,
       });
     }
   }
@@ -421,14 +534,18 @@ function generatePackages(
     deduped.push(pkg);
   }
 
-  const typeOrder = { consolidation: 0, balanced: 1, picks_heavy: 2 };
+  const typeOrder = { balanced: 0, player_plus_pick: 1, consolidation: 2, picks_heavy: 3 };
+  const fairnessRank = { fair: 0, slight_edge: 1, lopsided: 2 };
   deduped.sort((a, b) => {
-    const aDelta = a.delta;
-    const bDelta = b.delta;
-    return bDelta - aDelta || (typeOrder[a.type] ?? 9) - (typeOrder[b.type] ?? 9);
+    return (
+      (fairnessRank[a.fairness] ?? 9) - (fairnessRank[b.fairness] ?? 9) ||
+      b.receive_total - a.receive_total ||
+      b.delta - a.delta ||
+      (typeOrder[a.type] ?? 9) - (typeOrder[b.type] ?? 9)
+    );
   });
 
-  return deduped.slice(0, 3);
+  return deduped.slice(0, 4);
 }
 
 // Main

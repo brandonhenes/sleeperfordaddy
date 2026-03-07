@@ -38,6 +38,7 @@ function toEvaluatedAsset(a: CoreAsset): EvaluatedAsset {
     position: a.position,
     label: a.full_name,
     edge_score: a.edge_score,
+    trade_power: 0,
     fc_score: a.fc_score,
     ktc_score: a.ktc_score,
     dp_score: a.dp_score,

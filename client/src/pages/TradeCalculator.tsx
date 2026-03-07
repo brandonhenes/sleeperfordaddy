@@ -76,10 +76,10 @@ function pickLabel(a: TradeAssetInput): string {
 
 function buildShareText(result: TradeEvaluation): string {
   const lines = [`[The Edge] Trade Eval`];
-  lines.push(`Side A (${result.sideA.total_edge.toFixed(1)} edge): ${result.sideA.assets.map((a) => a.label).join(", ")}`);
-  lines.push(`Side B (${result.sideB.total_edge.toFixed(1)} edge): ${result.sideB.assets.map((a) => a.label).join(", ")}`);
+  lines.push(`Side A (${result.sideA.total_trade_power.toFixed(1)} TP, ${result.sideA.total_edge.toFixed(1)} edge): ${result.sideA.assets.map((a) => a.label).join(", ")}`);
+  lines.push(`Side B (${result.sideB.total_trade_power.toFixed(1)} TP, ${result.sideB.total_edge.toFixed(1)} edge): ${result.sideB.assets.map((a) => a.label).join(", ")}`);
   const winner = result.delta > 0 ? "A" : result.delta < 0 ? "B" : "Even";
-  lines.push(`${winner} wins by ${Math.abs(result.delta).toFixed(1)} points. Fairness: ${result.fairness}`);
+  lines.push(`${winner} wins by ${Math.abs(result.delta).toFixed(1)} TP. Fairness: ${result.fairness}`);
   return lines.join("\n");
 }
 
@@ -113,6 +113,11 @@ function AssetRow({ asset }: { asset: EvaluatedAsset }) {
       }}
     >
       <EdgeScoreBadge score={asset.edge_score} size="sm" />
+      {asset.trade_power > 0 && (
+        <span className="font-mono" style={{ fontSize: 10, color: "var(--text-muted)" }}>
+          TP:{asset.trade_power.toFixed(1)}
+        </span>
+      )}
       <span style={{ flex: 1, fontWeight: 500, minWidth: 100 }}>{asset.label}</span>
       <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
         <ScoreCell label="FC" value={asset.fc_score} />
@@ -164,8 +169,8 @@ function DeltaBar({ delta, totalA, totalB }: { delta: number; totalA: number; to
   return (
     <div style={{ marginTop: 12 }}>
       <div style={{ display: "flex", fontSize: 11, fontWeight: 700, marginBottom: 4 }}>
-        <span style={{ flex: 1 }}>Side A: {totalA.toFixed(1)}</span>
-        <span style={{ textAlign: "right" }}>Side B: {totalB.toFixed(1)}</span>
+        <span style={{ flex: 1 }}>Side A: {totalA.toFixed(1)} TP</span>
+        <span style={{ textAlign: "right" }}>Side B: {totalB.toFixed(1)} TP</span>
       </div>
       <div style={{ display: "flex", height: 10, borderRadius: 5, overflow: "hidden" }}>
         <div style={{ width: `${pctA}%`, background: "#3b82f6", transition: "width 0.3s" }} />
@@ -173,7 +178,7 @@ function DeltaBar({ delta, totalA, totalB }: { delta: number; totalA: number; to
       </div>
       {delta !== 0 && (
         <div style={{ textAlign: "center", fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
-          {delta > 0 ? "Side A" : "Side B"} wins by {Math.abs(delta).toFixed(1)} points
+          {delta > 0 ? "Side A" : "Side B"} wins by {Math.abs(delta).toFixed(1)} trade power
         </div>
       )}
     </div>
@@ -562,7 +567,12 @@ export default function TradeCalculator() {
                 {result.delta !== 0 && (
                   <span style={{ fontSize: 13, color: "var(--text-dim)" }}>
                     {result.delta > 0 ? "Side A" : "Side B"} wins by{" "}
-                    <strong style={{ color: "var(--text)" }}>{Math.abs(result.delta).toFixed(1)}</strong> points
+                    <strong style={{ color: "var(--text)" }}>{Math.abs(result.delta).toFixed(1)}</strong> trade power
+                    {result.delta_edge !== 0 && (
+                      <span style={{ color: "var(--text-muted)", marginLeft: 6 }}>
+                        (raw edge: {result.delta_edge > 0 ? "+" : ""}{result.delta_edge.toFixed(1)})
+                      </span>
+                    )}
                   </span>
                 )}
               </div>
@@ -570,13 +580,18 @@ export default function TradeCalculator() {
             </div>
 
             {/* Delta bar */}
-            <DeltaBar delta={result.delta} totalA={result.sideA.total_edge} totalB={result.sideB.total_edge} />
+            <DeltaBar delta={result.delta} totalA={result.sideA.total_trade_power} totalB={result.sideB.total_trade_power} />
 
             {/* Per-side asset breakdown */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 20 }}>
               <div>
                 <div style={{ fontSize: 12, fontWeight: 700, color: "#3b82f6", marginBottom: 6 }}>
-                  SIDE A - {result.sideA.total_edge.toFixed(1)} total
+                  SIDE A - {result.sideA.total_trade_power.toFixed(1)} TP (edge: {result.sideA.total_edge.toFixed(1)})
+                  {result.sideA.package_penalty_pct > 0 && (
+                    <span style={{ color: "var(--red)", fontWeight: 400, fontSize: 10, marginLeft: 4 }}>
+                      ({result.sideA.package_penalty_pct}% pkg penalty)
+                    </span>
+                  )}
                 </div>
                 <div style={{ border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden" }}>
                   {result.sideA.assets.map((a, i) => (
@@ -586,7 +601,12 @@ export default function TradeCalculator() {
               </div>
               <div>
                 <div style={{ fontSize: 12, fontWeight: 700, color: "#8b5cf6", marginBottom: 6 }}>
-                  SIDE B - {result.sideB.total_edge.toFixed(1)} total
+                  SIDE B - {result.sideB.total_trade_power.toFixed(1)} TP (edge: {result.sideB.total_edge.toFixed(1)})
+                  {result.sideB.package_penalty_pct > 0 && (
+                    <span style={{ color: "var(--red)", fontWeight: 400, fontSize: 10, marginLeft: 4 }}>
+                      ({result.sideB.package_penalty_pct}% pkg penalty)
+                    </span>
+                  )}
                 </div>
                 <div style={{ border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden" }}>
                   {result.sideB.assets.map((a, i) => (

@@ -255,9 +255,20 @@ export interface TradeAssetInput {
 }
 
 export interface TradeEvaluation {
-  sideA: { assets: EvaluatedAsset[]; total_edge: number };
-  sideB: { assets: EvaluatedAsset[]; total_edge: number };
-  delta: number; // positive = sideA wins
+  sideA: {
+    assets: EvaluatedAsset[];
+    total_edge: number;
+    total_trade_power: number;
+    package_penalty_pct: number;
+  };
+  sideB: {
+    assets: EvaluatedAsset[];
+    total_edge: number;
+    total_trade_power: number;
+    package_penalty_pct: number;
+  };
+  delta: number; // positive = sideA wins by trade power
+  delta_edge: number; // positive = sideA wins by raw edge
   fairness: "fair" | "slight_edge" | "lopsided";
 }
 
@@ -266,6 +277,7 @@ export interface EvaluatedAsset {
   position: string | null;
   label: string;
   edge_score: number;
+  trade_power: number;
   fc_score: number | null;
   ktc_score: number | null;
   dp_score: number | null;
@@ -288,13 +300,19 @@ export interface TradeSuggestion {
 }
 
 export interface TradePackage {
-  type: "balanced" | "consolidation" | "picks_heavy";
+  type: "balanced" | "consolidation" | "picks_heavy" | "player_plus_pick";
+  trade_type: "1-for-1" | "player-plus-pick" | "2-for-1" | "pick-package";
   label: string;
   you_send: TradePackageAsset[];
   you_receive: TradePackageAsset[];
-  send_total: number;
-  receive_total: number;
-  delta: number;
+  send_total: number; // trade power
+  receive_total: number; // trade power
+  delta: number; // trade power delta
+  send_edge: number;
+  receive_edge: number;
+  delta_edge: number;
+  package_penalty_pct_send: number;
+  package_penalty_pct_receive: number;
   fairness: "fair" | "slight_edge" | "lopsided";
   why_you_do_it: string;
   why_they_accept: string;
@@ -306,6 +324,7 @@ export interface TradePackageAsset {
   label: string;
   position: string | null;
   edge_score: number;
+  trade_power: number;
   fc_score: number | null;
   ktc_score: number | null;
   dp_score: number | null;
