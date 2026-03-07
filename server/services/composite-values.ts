@@ -331,31 +331,21 @@ export async function getCompositeValues(
 ): Promise<Map<string, CompositeValue>> {
   if (playerIds.length === 0) return new Map();
 
-  // Always compute fresh to ensure all sources are used.
-  // The daily snapshot may contain stale data from before the FC pipeline fix.
-  // TODO: Re-enable snapshot reads after a fresh snapshot is generated with full source coverage.
-  // To re-enable: uncomment the snapshot block below and remove the direct return.
+  // Always compute fresh until a new snapshot is generated with full source coverage.
+  // The player_scores_daily snapshot was written before the FC/DP pipeline fixes
+  // and contains stale sources_used values. Re-enable snapshot reads after
+  // running a fresh snapshot post-fix.
+  // TODO: Re-enable snapshot reads:
   return computeCompositeRuntime(playerIds, mode, weights);
 
   /*
-  // When custom weights are provided, skip snapshots and compute fresh
-  if (weights) {
-    return computeCompositeRuntime(playerIds, mode, weights);
-  }
-
   const snapshotMap = await readFromDailySnapshot(playerIds, mode);
-  if (snapshotMap && snapshotMap.size === playerIds.length) {
-    return snapshotMap;
-  }
-
+  if (snapshotMap && snapshotMap.size === playerIds.length) return snapshotMap;
   const final = snapshotMap ?? new Map<string, CompositeValue>();
   const missing = playerIds.filter((id) => !final.has(id));
   if (missing.length === 0) return final;
-
   const runtime = await computeCompositeRuntime(missing, mode);
-  for (const [id, val] of runtime) {
-    final.set(id, val);
-  }
+  for (const [id, val] of runtime) final.set(id, val);
   return final;
   */
 }
