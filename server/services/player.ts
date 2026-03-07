@@ -3,7 +3,6 @@ import { sql } from "drizzle-orm";
 import { getDynastyLeagueIdsForUserLatestSeason } from "./dynasty-leagues.js";
 import type { SourceWeights } from "./edge-score.js";
 import { getCompositeValues } from "./composite-values.js";
-import { computeEdgeScores } from "./edge-score.js";
 import { getAgeCurveStatus, type AgeCurveStatus } from "./age-curves.js";
 import { resolvePlayer } from "./player-resolver.js";
 
@@ -213,16 +212,11 @@ export async function getPlayerDetail(
     const compMap = await getCompositeValues([pm.player_id], mode, weights);
     const comp = compMap.get(pm.player_id);
     if (comp) {
-      const inputs = [{ sleeper_id: pm.player_id, fc_value: comp.fc_value, ktc_value: comp.ktc_value, dp_value: comp.dp_value }];
-      const edgeMap = computeEdgeScores(inputs, undefined, weights);
-      const e = edgeMap.get(pm.player_id);
-      if (e) {
-        edgeScore = e.score;
-        fcScore = e.fc_score;
-        ktcScore = e.ktc_score;
-        dpScore = e.dp_score;
-        sourcesAvailable = e.sources_used;
-      }
+      edgeScore = comp.edge_score;
+      fcScore = comp.fc_score;
+      ktcScore = comp.ktc_score;
+      dpScore = comp.dp_score;
+      sourcesAvailable = comp.sources_available;
     }
   }
 

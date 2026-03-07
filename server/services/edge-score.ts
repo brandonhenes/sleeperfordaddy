@@ -26,22 +26,24 @@ function computeSourceParams(
   values: number[],
   override?: { floor: number; max: number }
 ): SourceParams | null {
+  if (override && override.max > override.floor && override.floor > 0) {
+    const logMax = Math.log(override.max);
+    const logFloor = Math.log(override.floor);
+    if (logMax > logFloor) {
+      return { logMax, logFloor };
+    }
+  }
+
   const valid = values.filter((v) => v > 0);
   if (valid.length < 2) return null;
 
   let max: number;
   let floor: number;
-
-  if (override && override.max > override.floor && override.floor > 0) {
-    max = override.max;
-    floor = override.floor;
-  } else {
-    const sorted = [...valid].sort((a, b) => a - b);
-    max = sorted[sorted.length - 1];
-    // 5th percentile from bottom = "barely rosterable" line
-    const floorIdx = Math.floor(sorted.length * 0.05);
-    floor = sorted[floorIdx];
-  }
+  const sorted = [...valid].sort((a, b) => a - b);
+  max = sorted[sorted.length - 1];
+  // 5th percentile from bottom = "barely rosterable" line
+  const floorIdx = Math.floor(sorted.length * 0.05);
+  floor = sorted[floorIdx];
 
   if (floor <= 0 || max <= floor) return null;
   const logMax = Math.log(max);

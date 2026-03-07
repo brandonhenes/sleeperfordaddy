@@ -56,9 +56,11 @@ function normalizeAgreement(value: string | null | undefined): "high" | "medium"
 }
 
 function safeScale(floor: number | null, max: number | null): Scale {
-  const f = floor ?? 1;
-  const m = max ?? f + 1;
-  if (f <= 0 || m <= f) return { floor: 1, max: 2 };
+  const m = max ?? 0;
+  if (m <= 0) return { floor: 1, max: 2 };
+
+  const f = floor != null && floor > 0 ? floor : 1;
+  if (m <= f) return { floor: f, max: f + 1 };
   return { floor: f, max: m };
 }
 
@@ -85,12 +87,15 @@ export async function getGlobalScaleParams(
     const rows = mode === "sf"
     ? await db.execute(sql`
         SELECT
-          percentile_cont(0.05) WITHIN GROUP (ORDER BY fc.dynasty_value)::real AS fc_floor,
-          max(fc.dynasty_value)::real AS fc_max,
-          percentile_cont(0.05) WITHIN GROUP (ORDER BY ktc.value_sf)::real AS ktc_floor,
-          max(ktc.value_sf)::real AS ktc_max,
-          percentile_cont(0.05) WITHIN GROUP (ORDER BY dp.value_2qb)::real AS dp_floor,
-          max(dp.value_2qb)::real AS dp_max
+          percentile_cont(0.05) WITHIN GROUP (ORDER BY fc.dynasty_value)
+            FILTER (WHERE fc.dynasty_value > 0)::real AS fc_floor,
+          max(fc.dynasty_value) FILTER (WHERE fc.dynasty_value > 0)::real AS fc_max,
+          percentile_cont(0.05) WITHIN GROUP (ORDER BY ktc.value_sf)
+            FILTER (WHERE ktc.value_sf > 0)::real AS ktc_floor,
+          max(ktc.value_sf) FILTER (WHERE ktc.value_sf > 0)::real AS ktc_max,
+          percentile_cont(0.05) WITHIN GROUP (ORDER BY dp.value_2qb)
+            FILTER (WHERE dp.value_2qb > 0)::real AS dp_floor,
+          max(dp.value_2qb) FILTER (WHERE dp.value_2qb > 0)::real AS dp_max
         FROM players_master pm
         LEFT JOIN fantasycalc_daily fc
           ON fc.sleeper_id = pm.player_id
@@ -101,12 +106,15 @@ export async function getGlobalScaleParams(
       `)
     : await db.execute(sql`
         SELECT
-          percentile_cont(0.05) WITHIN GROUP (ORDER BY fc.dynasty_value)::real AS fc_floor,
-          max(fc.dynasty_value)::real AS fc_max,
-          percentile_cont(0.05) WITHIN GROUP (ORDER BY ktc.value_1qb)::real AS ktc_floor,
-          max(ktc.value_1qb)::real AS ktc_max,
-          percentile_cont(0.05) WITHIN GROUP (ORDER BY dp.value_1qb)::real AS dp_floor,
-          max(dp.value_1qb)::real AS dp_max
+          percentile_cont(0.05) WITHIN GROUP (ORDER BY fc.dynasty_value)
+            FILTER (WHERE fc.dynasty_value > 0)::real AS fc_floor,
+          max(fc.dynasty_value) FILTER (WHERE fc.dynasty_value > 0)::real AS fc_max,
+          percentile_cont(0.05) WITHIN GROUP (ORDER BY ktc.value_1qb)
+            FILTER (WHERE ktc.value_1qb > 0)::real AS ktc_floor,
+          max(ktc.value_1qb) FILTER (WHERE ktc.value_1qb > 0)::real AS ktc_max,
+          percentile_cont(0.05) WITHIN GROUP (ORDER BY dp.value_1qb)
+            FILTER (WHERE dp.value_1qb > 0)::real AS dp_floor,
+          max(dp.value_1qb) FILTER (WHERE dp.value_1qb > 0)::real AS dp_max
         FROM players_master pm
         LEFT JOIN fantasycalc_daily fc
           ON fc.sleeper_id = pm.player_id
