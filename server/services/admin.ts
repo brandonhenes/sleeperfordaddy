@@ -39,7 +39,7 @@ export async function recomputeTags(
         END AS new_tag
       FROM player_exposure pe2
       LEFT JOIN fantasycalc_daily fc
-        ON LOWER(pe2.player_name) = LOWER(fc.player_name)
+        ON fc.sleeper_id = pe2.player_id
         AND fc.snapshot_date = (SELECT MAX(snapshot_date) FROM fantasycalc_daily)
       WHERE LOWER(pe2.username) = LOWER(${username})
     ) sub

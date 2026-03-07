@@ -10,6 +10,7 @@ import {
   backfillKtcSleeperIds,
 } from "../services/source-coverage-backfill.js";
 import { backfillPlayerAliases } from "../services/player-resolver.js";
+import { matchFcSleeperIds } from "../services/sync-fc-match.js";
 
 import { db } from "../db/connection.js";
 import { sql } from "drizzle-orm";
@@ -62,6 +63,17 @@ router.post("/api/admin/sync-crosswalk", async (_req, res) => {
   } catch (err) {
     console.error("[admin/sync-crosswalk] Error:", err);
     res.status(500).json({ message: (err as Error).message ?? "Internal server error" });
+  }
+});
+
+/** POST /api/admin/match-fc */
+router.post("/api/admin/match-fc", async (_req, res) => {
+  try {
+    const stats = await matchFcSleeperIds();
+    res.json(stats);
+  } catch (err) {
+    console.error("[admin] FC match error:", err);
+    res.status(500).json({ message: "FC match failed", error: String(err) });
   }
 });
 

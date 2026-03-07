@@ -96,7 +96,7 @@ async function getUserExposure(username: string): Promise<{ totalLeagues: number
     FROM roster_players rp
     JOIN players_master pm ON rp.player_id = pm.player_id
     LEFT JOIN fantasycalc_daily fc
-      ON LOWER(pm.full_name) = LOWER(fc.player_name)
+      ON fc.sleeper_id = pm.player_id
       AND fc.snapshot_date = (SELECT MAX(snapshot_date) FROM fantasycalc_daily)
     WHERE rp.owner_id = ${userId}
       AND rp.league_id IN (${inClause})

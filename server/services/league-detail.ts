@@ -90,7 +90,7 @@ export async function getLeagueDetail(
       FROM roster_players rp
       JOIN players_master pm ON rp.player_id = pm.player_id
       LEFT JOIN fantasycalc_daily fc
-        ON pm.full_name = fc.player_name
+        ON fc.sleeper_id = pm.player_id
         AND fc.snapshot_date = (SELECT MAX(snapshot_date) FROM fantasycalc_daily)
       WHERE rp.league_id = ${leagueId}
         AND rp.owner_id = ${userId}
