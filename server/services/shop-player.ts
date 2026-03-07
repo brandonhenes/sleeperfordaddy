@@ -1,38 +1,23 @@
 import { getPowerRankings, type LeaguePowerRanking, type RosterRanking, type CoreAsset } from "./power-rankings.js";
+import type { ScoredPick } from "./draft-picks.js";
 import type { ShopPlayerResult, ShopOpportunity, EvaluatedAsset } from "../../shared/types.js";
-
-// ─── Constants ───
-
-/** How much each archetype values each asset type (players vs picks, win-now vs youth) */
-const ARCHETYPE_BUY_MOTIVATION: Record<string, { wants_vets: number; wants_youth: number; wants_picks: number }> = {
-  "Dynasty Juggernaut": { wants_vets: 30, wants_youth: 60, wants_picks: 20 },
-  "All-In Contender":   { wants_vets: 90, wants_youth: 30, wants_picks: 10 },
-  "Fragile Contender":  { wants_vets: 70, wants_youth: 80, wants_picks: 20 },
-  "Productive Struggle": { wants_vets: 20, wants_youth: 70, wants_picks: 90 },
-  "Rebuilder":          { wants_vets: 10, wants_youth: 80, wants_picks: 95 },
-  "Dead Zone":          { wants_vets: 50, wants_youth: 60, wants_picks: 50 },
-  "Competitor":         { wants_vets: 60, wants_youth: 50, wants_picks: 40 },
-};
-
-/** What each user archetype WANTS to receive back */
-const ARCHETYPE_RECEIVE_PREF: Record<string, { prefer_youth: boolean; prefer_proven: boolean; prefer_picks: boolean }> = {
-  "Dynasty Juggernaut": { prefer_youth: true, prefer_proven: false, prefer_picks: false },
-  "All-In Contender":   { prefer_youth: false, prefer_proven: true, prefer_picks: false },
-  "Fragile Contender":  { prefer_youth: true, prefer_proven: true, prefer_picks: false },
-  "Productive Struggle": { prefer_youth: true, prefer_proven: false, prefer_picks: true },
-  "Rebuilder":          { prefer_youth: true, prefer_proven: false, prefer_picks: true },
-  "Dead Zone":          { prefer_youth: true, prefer_proven: true, prefer_picks: true },
-  "Competitor":         { prefer_youth: false, prefer_proven: true, prefer_picks: false },
-};
+import { evaluateTradeValue } from "./trade-value.js";
+import { buildLeagueBehaviors, estimateAcceptance, type ManagerBehavior } from "./manager-behavior.js";
 
 const POSITIONS = ["QB", "RB", "WR", "TE"];
 const MIN_STARTERS: Record<string, number> = { QB: 1, RB: 2, WR: 2, TE: 1 };
-type GradeTier = "elite" | "strong" | "average" | "weak" | "hole";
-const TIERS: GradeTier[] = ["elite", "strong", "average", "weak", "hole"];
 
-// ─── Helpers ───
+const ARCHETYPE_BUY_MOTIVATION: Record<string, { wants_vets: number; wants_youth: number; wants_picks: number }> = {
+  "Dynasty Juggernaut": { wants_vets: 30, wants_youth: 60, wants_picks: 20 },
+  "All-In Contender": { wants_vets: 90, wants_youth: 30, wants_picks: 10 },
+  "Fragile Contender": { wants_vets: 70, wants_youth: 80, wants_picks: 20 },
+  "Productive Struggle": { wants_vets: 20, wants_youth: 70, wants_picks: 90 },
+  Rebuilder: { wants_vets: 10, wants_youth: 80, wants_picks: 95 },
+  "Dead Zone": { wants_vets: 50, wants_youth: 60, wants_picks: 50 },
+  Competitor: { wants_vets: 60, wants_youth: 50, wants_picks: 40 },
+};
 
-function toEvaluatedAsset(a: CoreAsset): EvaluatedAsset {
+function toEval(a: CoreAsset): EvaluatedAsset {
   return {
     player_id: a.player_id,
     position: a.position,
@@ -48,19 +33,20 @@ function toEvaluatedAsset(a: CoreAsset): EvaluatedAsset {
   };
 }
 
-function tradeFairness(delta: number): "fair" | "slight_edge" | "lopsided" {
-  const abs = Math.abs(delta);
-  if (abs <= 4) return "fair";
-  if (abs <= 10) return "slight_edge";
-  return "lopsided";
-}
-
-function gradeLabel(avg: number): GradeTier {
-  if (avg >= 88) return "elite";
-  if (avg >= 78) return "strong";
-  if (avg >= 68) return "average";
-  if (avg >= 55) return "weak";
-  return "hole";
+function pickToEval(p: ScoredPick): EvaluatedAsset {
+  return {
+    player_id: null,
+    position: null,
+    label: p.label,
+    edge_score: p.edge_score,
+    trade_power: 0,
+    fc_score: null,
+    ktc_score: p.ktc_score,
+    dp_score: p.dp_score,
+    league_adjusted_score: null,
+    scoring_delta_ppg: null,
+    source_agreement: "high",
+  };
 }
 
 function median(arr: number[]): number {
@@ -71,18 +57,16 @@ function median(arr: number[]): number {
 }
 
 function scoreBuyerMotivation(
-  opponent: RosterRanking,
+  opp: RosterRanking,
   player: CoreAsset,
   leagueMedians: Record<string, number>
 ): { score: number; reason: string } {
-  const prefs = ARCHETYPE_BUY_MOTIVATION[opponent.archetype] ?? ARCHETYPE_BUY_MOTIVATION["Competitor"];
-
-  const posPlayers = opponent.core_assets
+  const prefs = ARCHETYPE_BUY_MOTIVATION[opp.archetype] ?? ARCHETYPE_BUY_MOTIVATION.Competitor;
+  const posPlayers = opp.core_assets
     .filter((a) => a.position === player.position)
     .sort((a, b) => b.edge_score - a.edge_score);
   const aboveMedian = posPlayers.filter((p) => p.edge_score > (leagueMedians[player.position] ?? 60));
-  const minNeeded = MIN_STARTERS[player.position] ?? 1;
-  const isNeed = aboveMedian.length < minNeeded;
+  const isNeed = aboveMedian.length < (MIN_STARTERS[player.position] ?? 1);
   const needBonus = isNeed ? 30 : 0;
 
   const isYoung = (player.age ?? 25) <= 25;
@@ -96,110 +80,271 @@ function scoreBuyerMotivation(
   if (isNeed) reasons.push(`${player.position} is a need`);
   if (isYoung && prefs.wants_youth >= 70) reasons.push("values young assets");
   if (isVet && prefs.wants_vets >= 70) reasons.push("wants win-now pieces");
-  reasons.push(opponent.archetype);
+  reasons.push(opp.archetype);
 
   return { score, reason: reasons.join(", ") };
 }
 
-function scoreSourceEdge(asset: CoreAsset): { score: number; description: string | null } {
-  const expertScores = [asset.fc_score, asset.dp_score].filter((s): s is number => s != null);
-  if (asset.ktc_score == null || expertScores.length === 0) {
-    return { score: 50, description: null };
-  }
-  const expertAvg = expertScores.reduce((a, b) => a + b, 0) / expertScores.length;
-  const diff = expertAvg - asset.ktc_score;
+function fillTradePower(assets: EvaluatedAsset[], tps: number[]): EvaluatedAsset[] {
+  return assets.map((a, i) => ({ ...a, trade_power: tps[i] ?? 0 }));
+}
 
-  if (diff <= 0) {
-    return { score: Math.max(10, 50 + Math.round(diff * 2)), description: null };
-  }
-
-  const score = Math.min(100, 50 + Math.round(diff * 5));
+function scorePackage(sendEdges: number[], receiveEdges: number[]) {
+  const tv = evaluateTradeValue(sendEdges, receiveEdges);
   return {
-    score,
-    description: `${asset.full_name}: crowd at ${asset.ktc_score}, experts at ${Math.round(expertAvg)}`,
+    sendTPs: tv.sideA.trade_powers,
+    receiveTPs: tv.sideB.trade_powers,
+    sendTotal: tv.sideA.total_tp,
+    receiveTotal: tv.sideB.total_tp,
+    delta: tv.delta_tp,
+    fairness: tv.fairness,
   };
 }
 
-function scoreWindowMatch(
-  userArchetype: string,
-  returnAsset: CoreAsset
-): { score: number; description: string } {
-  const prefs = ARCHETYPE_RECEIVE_PREF[userArchetype] ?? ARCHETYPE_RECEIVE_PREF["Competitor"];
-  const isYoung = (returnAsset.age ?? 25) <= 25;
-  const isProven = returnAsset.edge_score >= 70 && (returnAsset.age ?? 25) >= 26;
-
-  let score = 50;
-  const reasons: string[] = [];
-
-  if (isYoung && prefs.prefer_youth) {
-    score += 25;
-    reasons.push(`Young ${returnAsset.position} fits your ${userArchetype.toLowerCase()} timeline`);
+function computeNeeds(roster: RosterRanking, leagueMedians: Record<string, number>): string[] {
+  const needs: string[] = [];
+  for (const pos of POSITIONS) {
+    const posPlayers = roster.core_assets
+      .filter((a) => a.position === pos)
+      .sort((a, b) => b.edge_score - a.edge_score);
+    const aboveMedian = posPlayers.filter((p) => p.edge_score > (leagueMedians[pos] ?? 60));
+    if (aboveMedian.length < (MIN_STARTERS[pos] ?? 1)) needs.push(pos);
   }
-  if (isProven && prefs.prefer_proven) {
-    score += 25;
-    reasons.push(`Proven producer at ${returnAsset.position} helps you compete now`);
-  }
-  if (!isYoung && !isProven) {
-    reasons.push(`${returnAsset.position} depth piece`);
-  }
-
-  return { score: Math.min(100, score), description: reasons[0] ?? "Positional value" };
+  return needs;
 }
 
-function computeRosterImpact(
-  userRoster: RosterRanking,
-  tradedAway: CoreAsset,
-  received: CoreAsset
-): ShopOpportunity["roster_impact"] {
-  const grades = userRoster.lineup?.slot_grades ?? [];
-  const gradeMap = new Map(grades.map((g) => [g.slot_label, g]));
-
-  const tradedPos = tradedAway.position;
-  const receivedPos = received.position;
-
-  const tradedGrade = gradeMap.get(tradedPos);
-  const receivedGrade = gradeMap.get(receivedPos);
-
-  const gradeBefore: GradeTier = tradedGrade?.grade ?? "hole";
-  let gradeAfter: GradeTier = gradeBefore;
-  if (tradedGrade && tradedAway.edge_score >= tradedGrade.avg_score) {
-    const idx = TIERS.indexOf(gradeBefore);
-    gradeAfter = TIERS[Math.min(idx + 1, TIERS.length - 1)];
+function computeTopPlayerIdsByPos(roster: RosterRanking): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const pos of POSITIONS) {
+    const top = roster.core_assets
+      .filter((a) => a.position === pos)
+      .sort((a, b) => b.edge_score - a.edge_score)[0];
+    if (top) out[pos] = top.player_id;
   }
-
-  const gainBefore: GradeTier = receivedGrade?.grade ?? "hole";
-  let gainAfter: GradeTier = gainBefore;
-  if (receivedGrade && received.edge_score > receivedGrade.avg_score) {
-    const idx = TIERS.indexOf(gainBefore);
-    gainAfter = TIERS[Math.max(idx - 1, 0)];
-  } else if (!receivedGrade || receivedGrade.avg_score === 0) {
-    gainAfter = gradeLabel(received.edge_score);
-  }
-
-  const parts: string[] = [];
-  if (gradeBefore !== gradeAfter) {
-    parts.push(`${tradedPos} ${gradeBefore}\u2192${gradeAfter}`);
-  }
-  if (gainBefore !== gainAfter) {
-    parts.push(`${receivedPos} ${gainBefore}\u2192${gainAfter}`);
-  }
-
-  return {
-    position_traded: tradedPos,
-    grade_before: gradeBefore,
-    grade_after: gradeAfter,
-    position_gained: receivedPos,
-    gain_grade_before: gainBefore,
-    gain_grade_after: gainAfter,
-    net_summary: parts.length > 0 ? parts.join(", ") : "Minimal roster impact",
-  };
+  return out;
 }
 
-// ─── Main ───
+interface PackageContext {
+  userRoster: RosterRanking;
+  opp: RosterRanking;
+  playerAsset: CoreAsset;
+  leagueMedians: Record<string, number>;
+  ambition: number;
+}
+
+interface RawPackage {
+  path: ShopOpportunity["path"];
+  path_label: string;
+  you_send: EvaluatedAsset[];
+  you_receive: EvaluatedAsset[];
+  sendTotal: number;
+  receiveTotal: number;
+  delta: number;
+  fairness: ShopOpportunity["fairness"];
+  why_you_do_it: string;
+  why_they_accept: string;
+}
+
+function generatePackages(ctx: PackageContext): RawPackage[] {
+  const { userRoster, opp, playerAsset, leagueMedians, ambition } = ctx;
+  const packages: RawPackage[] = [];
+
+  const oppSurplus: CoreAsset[] = [];
+  for (const pos of POSITIONS) {
+    const posPlayers = opp.core_assets
+      .filter((a) => a.position === pos)
+      .sort((a, b) => b.edge_score - a.edge_score);
+    const aboveMedian = posPlayers.filter((p) => p.edge_score > (leagueMedians[pos] ?? 60));
+    if (aboveMedian.length > (MIN_STARTERS[pos] ?? 1)) {
+      oppSurplus.push(...aboveMedian.slice(MIN_STARTERS[pos] ?? 1));
+    }
+  }
+
+  const userNeeds = computeNeeds(userRoster, leagueMedians);
+  const userPicks = (userRoster.draft_picks ?? [])
+    .filter((p) => p.edge_score > 0)
+    .sort((a, b) => b.edge_score - a.edge_score);
+  const oppPicks = (opp.draft_picks ?? [])
+    .filter((p) => p.edge_score > 0)
+    .sort((a, b) => b.edge_score - a.edge_score);
+  const userDepth = userRoster.core_assets
+    .filter((a) => a.player_id !== playerAsset.player_id && a.edge_score >= 40 && a.edge_score < 70)
+    .sort((a, b) => b.edge_score - a.edge_score);
+  const returnCandidates = opp.core_assets
+    .filter((a) => POSITIONS.includes(a.position) && a.edge_score >= 42)
+    .sort((a, b) => b.edge_score - a.edge_score);
+
+  for (const candidate of returnCandidates.slice(0, 10)) {
+    const scored = scorePackage([playerAsset.edge_score], [candidate.edge_score]);
+    if (scored.fairness === "lopsided") continue;
+    const sendAssets = fillTradePower([toEval(playerAsset)], scored.sendTPs);
+    const receiveAssets = fillTradePower([toEval(candidate)], scored.receiveTPs);
+    const fillsUserNeed = userNeeds.includes(candidate.position);
+    packages.push({
+      path: "even_swap",
+      path_label: "Even Swap",
+      you_send: sendAssets,
+      you_receive: receiveAssets,
+      sendTotal: scored.sendTotal,
+      receiveTotal: scored.receiveTotal,
+      delta: scored.delta,
+      fairness: scored.fairness,
+      why_you_do_it: fillsUserNeed
+        ? `Swap ${playerAsset.position} for ${candidate.position} help you actually need`
+        : `Pivot ${playerAsset.position} value into ${candidate.position}`,
+      why_they_accept: `Gets ${playerAsset.position} help while moving ${candidate.position} surplus`,
+    });
+  }
+
+  for (const candidate of returnCandidates.filter((c) => c.edge_score < playerAsset.edge_score - 5).slice(0, 6)) {
+    for (const pick of oppPicks.slice(0, 4)) {
+      const scored = scorePackage([playerAsset.edge_score], [candidate.edge_score, pick.edge_score]);
+      if (scored.fairness === "lopsided") continue;
+      packages.push({
+        path: "they_add_pick",
+        path_label: "Player + Pick Return",
+        you_send: fillTradePower([toEval(playerAsset)], scored.sendTPs),
+        you_receive: fillTradePower([toEval(candidate), pickToEval(pick)], scored.receiveTPs),
+        sendTotal: scored.sendTotal,
+        receiveTotal: scored.receiveTotal,
+        delta: scored.delta,
+        fairness: scored.fairness,
+        why_you_do_it: `Take back ${candidate.position} depth plus draft capital`,
+        why_they_accept: `Upgrades to ${playerAsset.full_name} and pays the gap with a pick`,
+      });
+      break;
+    }
+  }
+
+  const upgradeTargets = returnCandidates
+    .filter((c) => c.edge_score > playerAsset.edge_score + 5)
+    .slice(0, ambition >= 3 ? 10 : ambition >= 2 ? 6 : 3);
+
+  for (const target of upgradeTargets) {
+    for (const pick of userPicks.slice(0, 4)) {
+      const scored = scorePackage([playerAsset.edge_score, pick.edge_score], [target.edge_score]);
+      if (scored.fairness === "lopsided") continue;
+      packages.push({
+        path: "you_upgrade",
+        path_label: "Player + Pick Upgrade",
+        you_send: fillTradePower([toEval(playerAsset), pickToEval(pick)], scored.sendTPs),
+        you_receive: fillTradePower([toEval(target)], scored.receiveTPs),
+        sendTotal: scored.sendTotal,
+        receiveTotal: scored.receiveTotal,
+        delta: scored.delta,
+        fairness: scored.fairness,
+        why_you_do_it: `Package up for a clear ${target.position} upgrade in ${target.full_name}`,
+        why_they_accept: `Gets current production plus a future pick`,
+      });
+      break;
+    }
+
+    if (ambition >= 2) {
+      for (const depth of userDepth.slice(0, 3)) {
+        const scored = scorePackage([playerAsset.edge_score, depth.edge_score], [target.edge_score]);
+        if (scored.fairness === "lopsided") continue;
+        packages.push({
+          path: "you_upgrade",
+          path_label: "2-for-1 Upgrade",
+          you_send: fillTradePower([toEval(playerAsset), toEval(depth)], scored.sendTPs),
+          you_receive: fillTradePower([toEval(target)], scored.receiveTPs),
+          sendTotal: scored.sendTotal,
+          receiveTotal: scored.receiveTotal,
+          delta: scored.delta,
+          fairness: scored.fairness,
+          why_you_do_it: `Consolidate depth into a better weekly starter`,
+          why_they_accept: `Turns one asset into two usable pieces`,
+        });
+        break;
+      }
+    }
+
+    if (ambition >= 3 && userPicks.length > 0 && userDepth.length > 0) {
+      const pick = userPicks[0];
+      const depth = userDepth[0];
+      const scored = scorePackage(
+        [playerAsset.edge_score, pick.edge_score, depth.edge_score],
+        [target.edge_score]
+      );
+      if (scored.delta >= 0) {
+        packages.push({
+          path: "you_upgrade",
+          path_label: "3-for-1 Upgrade",
+          you_send: fillTradePower([toEval(playerAsset), pickToEval(pick), toEval(depth)], scored.sendTPs),
+          you_receive: fillTradePower([toEval(target)], scored.receiveTPs),
+          sendTotal: scored.sendTotal,
+          receiveTotal: scored.receiveTotal,
+          delta: scored.delta,
+          fairness: scored.fairness,
+          why_you_do_it: `Reach for a stud by combining player, pick, and depth`,
+          why_they_accept: `They cash out one star into multiple usable assets`,
+        });
+      }
+    }
+  }
+
+  const youngPieces = returnCandidates.filter(
+    (c) => (c.age ?? 30) <= 25 && c.edge_score >= 45 && c.edge_score < playerAsset.edge_score
+  );
+
+  for (let i = 0; i < Math.min(Math.max(youngPieces.length - 1, 0), 4); i++) {
+    for (let j = i + 1; j < Math.min(youngPieces.length, i + 4); j++) {
+      const p1 = youngPieces[i];
+      const p2 = youngPieces[j];
+      const scored = scorePackage([playerAsset.edge_score], [p1.edge_score, p2.edge_score]);
+      if (scored.fairness === "lopsided" && scored.delta < 0) continue;
+      packages.push({
+        path: "sell_for_pieces",
+        path_label: "Sell for Youth",
+        you_send: fillTradePower([toEval(playerAsset)], scored.sendTPs),
+        you_receive: fillTradePower([toEval(p1), toEval(p2)], scored.receiveTPs),
+        sendTotal: scored.sendTotal,
+        receiveTotal: scored.receiveTotal,
+        delta: scored.delta,
+        fairness: scored.fairness,
+        why_you_do_it: `Turn one veteran slot into two younger assets`,
+        why_they_accept: `Consolidates depth into a stronger starter`,
+      });
+      break;
+    }
+  }
+
+  for (const candidate of returnCandidates.filter((c) => (c.age ?? 30) <= 25 && c.edge_score >= 45).slice(0, 4)) {
+    for (const pick of oppPicks.slice(0, 3)) {
+      const scored = scorePackage([playerAsset.edge_score], [candidate.edge_score, pick.edge_score]);
+      if (scored.fairness === "lopsided" && scored.delta < 0) continue;
+      packages.push({
+        path: "sell_for_pieces",
+        path_label: "Sell for Youth + Pick",
+        you_send: fillTradePower([toEval(playerAsset)], scored.sendTPs),
+        you_receive: fillTradePower([toEval(candidate), pickToEval(pick)], scored.receiveTPs),
+        sendTotal: scored.sendTotal,
+        receiveTotal: scored.receiveTotal,
+        delta: scored.delta,
+        fairness: scored.fairness,
+        why_you_do_it: `Cash out into a young piece plus a future pick`,
+        why_they_accept: `Buys immediate points with one outgoing package`,
+      });
+      break;
+    }
+  }
+
+  const unique = new Map<string, RawPackage>();
+  for (const pkg of packages) {
+    const key = `${pkg.path}|${pkg.you_send.map((a) => a.label).join("+")}|${pkg.you_receive.map((a) => a.label).join("+")}`;
+    const existing = unique.get(key);
+    if (!existing || pkg.sendTotal + pkg.receiveTotal > existing.sendTotal + existing.receiveTotal) {
+      unique.set(key, pkg);
+    }
+  }
+
+  return [...unique.values()];
+}
 
 export async function shopPlayer(
   username: string,
-  playerId: string
+  playerId: string,
+  ambition = 2
 ): Promise<ShopPlayerResult | null> {
   const allLeagues = await getPowerRankings(username);
   if (allLeagues.length === 0) return null;
@@ -220,120 +365,113 @@ export async function shopPlayer(
 
   if (leaguesWithPlayer.length === 0) return null;
 
+  const clampedAmbition = Math.max(1, Math.min(3, ambition));
   const firstAsset = leaguesWithPlayer[0].playerAsset;
-  const opportunities: ShopOpportunity[] = [];
+  const allOpportunities: ShopOpportunity[] = [];
 
   for (const { league, userRoster, playerAsset } of leaguesWithPlayer) {
-    const medians: Record<string, number> = {};
+    const leagueMedians: Record<string, number> = {};
     for (const pos of POSITIONS) {
       const allScores: number[] = [];
-      for (const r of league.rosters) {
-        const top = r.core_assets
+      for (const roster of league.rosters) {
+        const top = roster.core_assets
           .filter((a) => a.position === pos)
           .sort((a, b) => b.edge_score - a.edge_score)
           .slice(0, (MIN_STARTERS[pos] ?? 1) + 1);
         allScores.push(...top.map((a) => a.edge_score));
       }
-      medians[pos] = median(allScores);
+      leagueMedians[pos] = median(allScores);
     }
 
+    const behaviors = await buildLeagueBehaviors(league.league_id);
     const opponents = league.rosters.filter((r) => !r.is_user);
 
     for (const opp of opponents) {
-      const motivation = scoreBuyerMotivation(opp, playerAsset, medians);
-      if (motivation.score < 25) continue;
+      const motivation = scoreBuyerMotivation(opp, playerAsset, leagueMedians);
+      if (motivation.score < 20) continue;
 
-      const candidateReturns = opp.core_assets
-        .filter((a) =>
-          a.position !== playerAsset.position &&
-          a.edge_score >= 45 &&
-          POSITIONS.includes(a.position)
-        )
-        .sort((a, b) => b.edge_score - a.edge_score);
+      const oppNeeds = computeNeeds(opp, leagueMedians);
+      const topPlayerIdsByPos = computeTopPlayerIdsByPos(opp);
+      const behavior: ManagerBehavior | null = behaviors.get(opp.roster_id) ?? null;
+      const packages = generatePackages({
+        userRoster,
+        opp,
+        playerAsset,
+        leagueMedians,
+        ambition: clampedAmbition,
+      });
 
-      if (candidateReturns.length === 0) continue;
+      for (const pkg of packages) {
+        const acceptance = estimateAcceptance({
+          fairness: pkg.fairness,
+          delta: pkg.delta,
+          sendAssets: pkg.you_send,
+          receiveAssets: pkg.you_receive,
+          sendEdges: pkg.you_send.map((a) => a.edge_score),
+          receiveEdges: pkg.you_receive.map((a) => a.edge_score),
+          opponent: {
+            archetype: opp.archetype,
+            needs: oppNeeds,
+            top_player_ids_by_pos: topPlayerIdsByPos,
+            behavior,
+          },
+        });
 
-      let bestReturn: CoreAsset | null = null;
-      let bestComposite = -1;
-      let bestSourceEdge = { score: 50, description: null as string | null };
-      let bestWindowMatch = { score: 50, description: "Positional value" };
-      let bestImpact: ShopOpportunity["roster_impact"] | null = null;
-
-      for (const candidate of candidateReturns.slice(0, 8)) {
-        const delta = playerAsset.edge_score - candidate.edge_score;
-        if (Math.abs(delta) > 15) continue;
-
-        const srcEdge = scoreSourceEdge(candidate);
-        const winMatch = scoreWindowMatch(userRoster.archetype, candidate);
-        const impact = computeRosterImpact(userRoster, playerAsset, candidate);
-
-        let impactScore = 50;
-        const tiers = ["hole", "weak", "average", "strong", "elite"];
-        const gainJump = tiers.indexOf(impact.gain_grade_after) - tiers.indexOf(impact.gain_grade_before);
-        const lossJump = tiers.indexOf(impact.grade_before) - tiers.indexOf(impact.grade_after);
-        impactScore = Math.min(100, Math.max(0, 50 + (gainJump * 15) - (lossJump * 10)));
-
-        const composite = (
-          motivation.score * 0.25 +
-          srcEdge.score * 0.20 +
-          winMatch.score * 0.20 +
-          impactScore * 0.25 +
-          (delta > 0 && delta <= 6 ? 10 : 0)
+        const acceptanceScore = acceptance?.probability ?? 0;
+        const fillsNeed = pkg.you_send.some((a) => a.position && oppNeeds.includes(a.position));
+        const score = Math.round(
+          motivation.score * 0.2 +
+          acceptanceScore * 0.4 +
+          (pkg.fairness === "fair" ? 30 : pkg.fairness === "slight_edge" ? 15 : 0) * 0.2 +
+          (fillsNeed ? 20 : 0) * 0.2
         );
 
-        if (composite > bestComposite) {
-          bestComposite = composite;
-          bestReturn = candidate;
-          bestSourceEdge = srcEdge;
-          bestWindowMatch = winMatch;
-          bestImpact = impact;
-        }
+        allOpportunities.push({
+          league_id: league.league_id,
+          league_name: league.league_name,
+          league_mode: league.mode,
+          your_archetype: userRoster.archetype,
+          opportunity_score: score,
+          path: pkg.path,
+          path_label: pkg.path_label,
+          you_send: pkg.you_send,
+          you_receive: pkg.you_receive,
+          from_team: opp.display_name,
+          from_archetype: opp.archetype,
+          buyer_motivation: motivation.reason,
+          motivation_score: motivation.score,
+          send_total_tp: pkg.sendTotal,
+          receive_total_tp: pkg.receiveTotal,
+          delta_tp: pkg.delta,
+          fairness: pkg.fairness,
+          why_you_do_it: pkg.why_you_do_it,
+          why_they_accept: pkg.why_they_accept,
+          acceptance: acceptance ?? {
+            probability: 0,
+            label: "Hard",
+            accept_reasons: [],
+            reject_reasons: ["No acceptance signal available"],
+          },
+        });
       }
-
-      if (!bestReturn || !bestImpact) continue;
-
-      const delta = playerAsset.edge_score - bestReturn.edge_score;
-
-      opportunities.push({
-        league_id: league.league_id,
-        league_name: league.league_name,
-        league_mode: league.mode,
-        your_archetype: userRoster.archetype,
-        opportunity_score: Math.round(bestComposite),
-
-        you_send: toEvaluatedAsset(playerAsset),
-        you_receive: [toEvaluatedAsset(bestReturn)],
-        from_team: opp.display_name,
-        from_archetype: opp.archetype,
-
-        buyer_motivation: motivation.reason,
-        motivation_score: motivation.score,
-
-        source_edge: bestSourceEdge.description,
-        source_edge_score: bestSourceEdge.score,
-
-        window_match: bestWindowMatch.description,
-        window_score: bestWindowMatch.score,
-
-        roster_impact: bestImpact,
-
-        fairness: tradeFairness(delta),
-        delta,
-      });
     }
   }
 
-  // Layer 5: Cross-league arbitrage — keep best per league, rank by score
-  const bestPerLeague = new Map<string, ShopOpportunity>();
-  for (const opp of opportunities) {
-    const existing = bestPerLeague.get(opp.league_id);
-    if (!existing || opp.opportunity_score > existing.opportunity_score) {
-      bestPerLeague.set(opp.league_id, opp);
-    }
+  const grouped = new Map<string, ShopOpportunity[]>();
+  for (const opp of allOpportunities) {
+    const key = `${opp.league_id}|${opp.from_team}|${opp.path}`;
+    const list = grouped.get(key) ?? [];
+    list.push(opp);
+    grouped.set(key, list);
   }
 
-  const ranked = [...bestPerLeague.values()]
-    .sort((a, b) => b.opportunity_score - a.opportunity_score);
+  const deduped: ShopOpportunity[] = [];
+  for (const list of grouped.values()) {
+    list.sort((a, b) => b.opportunity_score - a.opportunity_score);
+    deduped.push(...list.slice(0, 2));
+  }
+
+  deduped.sort((a, b) => b.opportunity_score - a.opportunity_score);
 
   return {
     player_id: playerId,
@@ -341,6 +479,6 @@ export async function shopPlayer(
     position: firstAsset.position,
     edge_score: firstAsset.edge_score,
     leagues_owned: leaguesWithPlayer.length,
-    opportunities: ranked,
+    opportunities: deduped.slice(0, 30),
   };
 }

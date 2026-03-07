@@ -430,6 +430,7 @@ function AcquisitionCard({ opportunity }: { opportunity: AcquisitionOpportunity 
 }
 
 function AssetChip({ asset }: { asset: EvaluatedAsset }) {
+  const isPick = asset.position == null;
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 0", borderBottom: "1px solid var(--border)", fontSize: 12 }}>
       <span style={{
@@ -443,6 +444,7 @@ function AssetChip({ asset }: { asset: EvaluatedAsset }) {
           TP:{asset.trade_power.toFixed(1)}
         </span>
       )}
+      {isPick && <span style={{ color: "#06b6d4", fontWeight: 700, fontSize: 10 }}>PICK</span>}
       {asset.position && <span style={{ color: posColor(asset.position), fontWeight: 700, fontSize: 10 }}>{asset.position}</span>}
       <PlayerLink name={asset.label} style={{ flex: 1, fontWeight: 500 }} />
     </div>
@@ -453,13 +455,16 @@ function ShopOpportunityCard({ opp }: { opp: ShopOpportunity }) {
   return (
     <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 12, padding: 16, marginBottom: 12 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-        <div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <span style={{ fontSize: 14, fontWeight: 700 }}>{opp.league_name}</span>
-          <span style={{ fontSize: 10, fontWeight: 600, color: "var(--text-muted)", marginLeft: 8, padding: "2px 6px", background: "rgba(255,255,255,0.05)", borderRadius: 4 }}>
-            {opp.your_archetype}
+          <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 3, background: "rgba(245,158,11,0.1)", color: "var(--amber)" }}>
+            {opp.path_label}
+          </span>
+          <span style={{ fontSize: 10, fontWeight: 600, color: "var(--text-muted)", padding: "2px 6px", background: "rgba(255,255,255,0.05)", borderRadius: 4 }}>
+            {opp.from_archetype}
           </span>
         </div>
-        <span style={{ fontSize: 13, fontWeight: 800, color: opp.opportunity_score >= 70 ? "var(--green)" : opp.opportunity_score >= 50 ? "var(--amber)" : "var(--text-muted)" }}>
+        <span style={{ fontSize: 13, fontWeight: 800, color: opp.opportunity_score >= 60 ? "var(--green)" : opp.opportunity_score >= 40 ? "var(--amber)" : "var(--text-muted)" }}>
           {opp.opportunity_score}/100
         </span>
       </div>
@@ -467,39 +472,59 @@ function ShopOpportunityCard({ opp }: { opp: ShopOpportunity }) {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
         <div>
           <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", borderBottom: "2px solid #ef4444", paddingBottom: 4, marginBottom: 6 }}>
-            You Send
+            You Send ({opp.send_total_tp.toFixed(1)} TP)
           </div>
-          <AssetChip asset={opp.you_send} />
+          {opp.you_send.map((a, i) => (
+            <AssetChip key={`send-${i}-${a.label}`} asset={a} />
+          ))}
         </div>
         <div>
           <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", borderBottom: "2px solid #22c55e", paddingBottom: 4, marginBottom: 6 }}>
-            You Receive from {opp.from_team}
+            You Receive from {opp.from_team} ({opp.receive_total_tp.toFixed(1)} TP)
           </div>
           {opp.you_receive.map((a, i) => (
-            <AssetChip key={i} asset={a} />
+            <AssetChip key={`receive-${i}-${a.label}`} asset={a} />
           ))}
         </div>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, padding: 10, background: "rgba(255,255,255,0.02)", borderRadius: 8, fontSize: 11, color: "var(--text-dim)", lineHeight: 1.5 }}>
         <div>
-          <span style={{ fontWeight: 700, color: "var(--text-muted)" }}>Why they buy: </span>
-          {opp.buyer_motivation}
+          <span style={{ fontWeight: 700, color: "var(--text-muted)" }}>Why you do it: </span>
+          {opp.why_you_do_it}
         </div>
-        {opp.source_edge && (
-          <div>
-            <span style={{ fontWeight: 700, color: "var(--text-muted)" }}>Value edge: </span>
-            {opp.source_edge}
+        <div>
+          <span style={{ fontWeight: 700, color: "var(--text-muted)" }}>Why they accept: </span>
+          {opp.why_they_accept}
+        </div>
+      </div>
+
+      <div style={{ marginTop: 8, padding: 10, background: "rgba(255,255,255,0.02)", borderRadius: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
+          <span style={{
+            fontSize: 11,
+            fontWeight: 800,
+            padding: "3px 8px",
+            borderRadius: 4,
+            background: opp.acceptance.label === "Likely" ? "rgba(34,197,94,0.15)" : opp.acceptance.label === "Possible" ? "rgba(245,158,11,0.15)" : "rgba(239,68,68,0.15)",
+            color: opp.acceptance.label === "Likely" ? "#22c55e" : opp.acceptance.label === "Possible" ? "#f59e0b" : "#ef4444",
+          }}>
+            {opp.acceptance.label} ({opp.acceptance.probability}%)
+          </span>
+          <span style={{ fontSize: 10, color: "var(--text-muted)" }}>{opp.buyer_motivation}</span>
+        </div>
+        {opp.acceptance.accept_reasons.length > 0 && (
+          <div style={{ fontSize: 10, color: "var(--text-dim)", marginBottom: 2 }}>
+            <span style={{ color: "var(--green)", fontWeight: 700 }}>Accept: </span>
+            {opp.acceptance.accept_reasons.join(" | ")}
           </div>
         )}
-        <div>
-          <span style={{ fontWeight: 700, color: "var(--text-muted)" }}>Window fit: </span>
-          {opp.window_match}
-        </div>
-        <div>
-          <span style={{ fontWeight: 700, color: "var(--text-muted)" }}>Roster impact: </span>
-          {opp.roster_impact.net_summary}
-        </div>
+        {opp.acceptance.reject_reasons.length > 0 && (
+          <div style={{ fontSize: 10, color: "var(--text-dim)" }}>
+            <span style={{ color: "var(--red)", fontWeight: 700 }}>Risk: </span>
+            {opp.acceptance.reject_reasons.join(" | ")}
+          </div>
+        )}
       </div>
 
       <div style={{ display: "flex", justifyContent: "space-between", marginTop: 10, paddingTop: 8, borderTop: "1px solid var(--border)", fontSize: 12 }}>
@@ -507,10 +532,10 @@ function ShopOpportunityCard({ opp }: { opp: ShopOpportunity }) {
           color: opp.fairness === "fair" ? "var(--green)" : opp.fairness === "slight_edge" ? "var(--amber)" : "var(--red)",
           fontWeight: 600, textTransform: "uppercase", fontSize: 11,
         }}>
-          {opp.fairness === "fair" ? "Fair" : opp.fairness === "slight_edge" ? "Slight Edge" : "Lopsided"} Trade
+          {opp.fairness === "fair" ? "Fair" : opp.fairness === "slight_edge" ? "Slight Edge" : "Lopsided"}
         </span>
         <span style={{ color: "var(--text-muted)" }}>
-          Delta: {opp.delta > 0 ? "+" : ""}{opp.delta.toFixed(1)} edge
+          {opp.delta_tp > 0 ? "You overpay" : opp.delta_tp < 0 ? "You underpay" : "Even"} by {Math.abs(opp.delta_tp).toFixed(1)} TP
         </span>
       </div>
     </div>
@@ -525,6 +550,8 @@ export default function TradeFinder() {
   const [targetSearch, setTargetSearch] = useState("");
   const [selectedTarget, setSelectedTarget] = useState<{ name: string; id: string } | null>(null);
   const [selectedPlayer, setSelectedPlayer] = useState("");
+  const [shopAmbition, setShopAmbition] = useState(2);
+  const [shopPathFilter, setShopPathFilter] = useState<string | null>(null);
 
   const { data: leagues, isLoading: leaguesLoading } = usePowerRankings(phase === "ready" ? username : "");
   const { data: suggestions, isLoading: suggestionsLoading, error: suggestionsError } = useTradeSuggestions(phase === "ready" ? username : "", selectedLeague);
@@ -539,8 +566,10 @@ export default function TradeFinder() {
   const { data: acquisitionData, isLoading: acquisitionLoading } = useAcquisition(phase === "ready" ? username : "", selectedTarget);
   const { data: shopResult, isLoading: shopLoading } = useShopPlayer(
     phase === "ready" ? username ?? "" : "",
-    mode === "shop" ? selectedPlayer : ""
+    mode === "shop" ? selectedPlayer : "",
+    shopAmbition
   );
+  const filteredShopResults = shopResult?.opportunities.filter((o) => !shopPathFilter || o.path === shopPathFilter) ?? [];
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -589,7 +618,7 @@ export default function TradeFinder() {
         ]).map((m) => (
           <button
             key={m.key}
-            onClick={() => { setMode(m.key); setSelectedTarget(null); setSelectedPlayer(""); }}
+            onClick={() => { setMode(m.key); setSelectedTarget(null); setSelectedPlayer(""); setShopPathFilter(null); }}
             style={{ background: "transparent", border: "none", borderBottom: mode === m.key ? "2px solid var(--amber)" : "2px solid transparent", color: mode === m.key ? "var(--amber)" : "var(--text-muted)", padding: "10px 20px", fontSize: 14, fontWeight: 700, cursor: "pointer", letterSpacing: 0.3, transition: "color 0.15s, border-color 0.15s", fontFamily: "inherit" }}
           >
             {m.label}
@@ -672,7 +701,7 @@ export default function TradeFinder() {
             </label>
             <select
               value={selectedPlayer}
-              onChange={(e) => setSelectedPlayer(e.target.value)}
+              onChange={(e) => { setSelectedPlayer(e.target.value); setShopPathFilter(null); }}
               style={{ display: "block", width: "100%", marginTop: 8, padding: "10px 12px", background: "var(--dark-base)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text)", fontSize: 14, cursor: "pointer" }}
             >
               <option value="">Choose a player...</option>
@@ -694,6 +723,38 @@ export default function TradeFinder() {
             </select>
           </div>
 
+          {selectedPlayer && (
+            <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: "12px 16px", marginTop: 8, display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)" }}>Trade Ambition:</span>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {[
+                  { value: 1, label: "Conservative", desc: "Even swaps, small adds" },
+                  { value: 2, label: "Moderate", desc: "Player + pick packages" },
+                  { value: 3, label: "Aggressive", desc: "Big packages, reach for studs" },
+                ].map((opt) => (
+                  <button
+                    key={opt.value}
+                    onClick={() => setShopAmbition(opt.value)}
+                    style={{
+                      padding: "6px 14px",
+                      borderRadius: 6,
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                      border: shopAmbition === opt.value ? "2px solid var(--amber)" : "1px solid var(--border)",
+                      background: shopAmbition === opt.value ? "rgba(245,158,11,0.1)" : "transparent",
+                      color: shopAmbition === opt.value ? "var(--amber)" : "var(--text-muted)",
+                    }}
+                    title={opt.desc}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {selectedPlayer && shopLoading && (
             <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: "48px 24px", marginTop: 16, textAlign: "center" }}>
               <span className="animate-pulse" style={{ color: "var(--amber)", fontSize: 14 }}>
@@ -709,13 +770,39 @@ export default function TradeFinder() {
                   {shopResult.player_name} owned in {shopResult.leagues_owned} league{shopResult.leagues_owned !== 1 ? "s" : ""} — {shopResult.opportunities.length} opportunit{shopResult.opportunities.length !== 1 ? "ies" : "y"} found
                 </span>
               </div>
-              {shopResult.opportunities.map((opp, i) => (
+              <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
+                {[
+                  { key: null, label: `All (${shopResult.opportunities.length})` },
+                  { key: "even_swap", label: `Even Swaps (${shopResult.opportunities.filter((o) => o.path === "even_swap").length})` },
+                  { key: "they_add_pick", label: `They Add Pick (${shopResult.opportunities.filter((o) => o.path === "they_add_pick").length})` },
+                  { key: "you_upgrade", label: `You Upgrade (${shopResult.opportunities.filter((o) => o.path === "you_upgrade").length})` },
+                  { key: "sell_for_pieces", label: `Sell for Pieces (${shopResult.opportunities.filter((o) => o.path === "sell_for_pieces").length})` },
+                ].map((f) => (
+                  <button
+                    key={f.key ?? "all"}
+                    onClick={() => setShopPathFilter(f.key)}
+                    style={{
+                      padding: "4px 10px",
+                      borderRadius: 4,
+                      fontSize: 11,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                      border: shopPathFilter === f.key ? "1px solid var(--amber)" : "1px solid var(--border)",
+                      background: shopPathFilter === f.key ? "rgba(245,158,11,0.1)" : "transparent",
+                      color: shopPathFilter === f.key ? "var(--amber)" : "var(--text-muted)",
+                    }}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+              {filteredShopResults.map((opp, i) => (
                 <ShopOpportunityCard key={`${opp.league_id}-${i}`} opp={opp} />
               ))}
-              {shopResult.opportunities.length === 0 && (
+              {filteredShopResults.length === 0 && (
                 <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: "48px 24px", textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>
-                  No good trade opportunities found for this player across your leagues.
-                  This can happen if no opponents have matching needs or fair return assets.
+                  No trade packages match the current path filter.
                 </div>
               )}
             </div>
@@ -725,3 +812,5 @@ export default function TradeFinder() {
     </AppShell>
   );
 }
+
+

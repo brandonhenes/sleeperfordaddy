@@ -42,7 +42,8 @@ router.get("/api/trade/shop/:username/:playerId", async (req, res) => {
     if (!username || !playerId) {
       return res.status(400).json({ message: "username and playerId are required" });
     }
-    const data = await shopPlayer(username, playerId);
+    const ambition = Number(req.query.ambition ?? 2);
+    const data = await shopPlayer(username, playerId, ambition);
     if (!data) {
       return res.status(404).json({ message: "Player not found in any league" });
     }

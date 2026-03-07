@@ -519,41 +519,26 @@ export interface ShopOpportunity {
   league_name: string;
   league_mode: "sf" | "1qb";
   your_archetype: string;
-  opportunity_score: number; // 0-100, composite of all 5 layers
-
-  // What you send
-  you_send: EvaluatedAsset;
-
-  // What you get back
+  opportunity_score: number;
+  path: "even_swap" | "they_add_pick" | "you_upgrade" | "sell_for_pieces";
+  path_label: string;
+  you_send: EvaluatedAsset[];
   you_receive: EvaluatedAsset[];
-  from_team: string; // opponent display name
+  from_team: string;
   from_archetype: string;
-
-  // Layer 1: Archetype targeting
-  buyer_motivation: string; // why opponent wants your player
-  motivation_score: number; // 0-100
-
-  // Layer 2: Source disagreement
-  source_edge: string | null; // e.g. "Waddle: crowd at 71, experts at 82"
-  source_edge_score: number; // 0-100, how much value you're capturing
-
-  // Layer 3: Window matching
-  window_match: string; // e.g. "Young WR fits your rebuild timeline"
-  window_score: number; // 0-100
-
-  // Layer 4: Roster impact
-  roster_impact: {
-    position_traded: string;
-    grade_before: string; // "elite" | "strong" | "average" | "weak" | "hole"
-    grade_after: string;
-    position_gained: string;
-    gain_grade_before: string;
-    gain_grade_after: string;
-    net_summary: string; // e.g. "RB Strong→Average, WR Hole→Strong"
-  };
-
-  // Trade fairness
+  buyer_motivation: string;
+  motivation_score: number;
+  send_total_tp: number;
+  receive_total_tp: number;
+  delta_tp: number;
   fairness: "fair" | "slight_edge" | "lopsided";
-  delta: number; // edge score difference
+  why_you_do_it: string;
+  why_they_accept: string;
+  acceptance: {
+    probability: number;
+    label: "Likely" | "Possible" | "Unlikely" | "Hard";
+    accept_reasons: string[];
+    reject_reasons: string[];
+  };
 }
 

@@ -13,12 +13,12 @@ export function useTradeSuggestions(username: string, leagueId: string) {
   });
 }
 
-export function useShopPlayer(username: string, playerId: string) {
+export function useShopPlayer(username: string, playerId: string, ambition: number = 2) {
   return useQuery<ShopPlayerResult>({
-    queryKey: ["shop-player", username, playerId],
+    queryKey: ["shop-player", username, playerId, ambition],
     queryFn: () =>
       apiFetch(
-        `/api/trade/shop/${encodeURIComponent(username)}/${encodeURIComponent(playerId)}`
+        `/api/trade/shop/${encodeURIComponent(username)}/${encodeURIComponent(playerId)}?ambition=${ambition}`
       ),
     enabled: !!username && !!playerId,
   });
