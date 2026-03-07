@@ -123,7 +123,7 @@ function PlayerHeader({ summary }: { summary: PlayerSummary }) {
 
 // ─── Exposure ───
 
-function ExposureSection({ exposure, ownership }: { exposure: ExposureInfo; ownership: OwnershipEntry[] }) {
+function ExposureSection({ exposure, ownership, username }: { exposure: ExposureInfo; ownership: OwnershipEntry[]; username: string }) {
   return (
     <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: "16px 20px" }}>
       <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 10 }}>
@@ -134,8 +134,9 @@ function ExposureSection({ exposure, ownership }: { exposure: ExposureInfo; owne
       {ownership.length > 0 ? (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
           {ownership.map((l) => (
-            <span
+            <Link
               key={l.league_id}
+              href={`/trade-finder/${encodeURIComponent(username)}?league=${encodeURIComponent(l.league_id)}`}
               style={{
                 padding: "4px 12px",
                 borderRadius: 6,
@@ -144,10 +145,15 @@ function ExposureSection({ exposure, ownership }: { exposure: ExposureInfo; owne
                 background: "rgba(96,165,250,0.12)",
                 color: "var(--blue)",
                 border: "1px solid rgba(96,165,250,0.2)",
+                textDecoration: "none",
+                cursor: "pointer",
+                transition: "background 0.15s",
               }}
+              onMouseEnter={(e) => { (e.target as HTMLElement).style.background = "rgba(96,165,250,0.25)"; }}
+              onMouseLeave={(e) => { (e.target as HTMLElement).style.background = "rgba(96,165,250,0.12)"; }}
             >
               {l.league_name}
-            </span>
+            </Link>
           ))}
         </div>
       ) : (
@@ -354,12 +360,12 @@ function TradeComps({ trades }: { trades: { trade_id: string; league_name: strin
 
 // ─── Quick Actions ───
 
-function QuickActions({ playerName }: { playerName: string }) {
+function QuickActions({ playerName, playerId }: { playerName: string; playerId: string | null }) {
   const username = typeof window !== "undefined" ? localStorage.getItem("edge_username") ?? "" : "";
   return (
     <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
       {username && (
-        <Link href={`/trade-finder/${encodeURIComponent(username)}`}>
+        <Link href={`/trade-finder/${encodeURIComponent(username)}?mode=shop&player=${encodeURIComponent(playerId ?? "")}`}>
           <button
             style={{
               background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8,
@@ -418,13 +424,13 @@ export default function PlayerDetail() {
       </div>
 
       <SectionHeader icon="📊" title="EXPOSURE" subtitle="Your ownership across leagues" />
-      <ExposureSection exposure={data.exposure} ownership={data.ownership} />
+      <ExposureSection exposure={data.exposure} ownership={data.ownership} username={username} />
 
       <SectionHeader icon="📈" title="VALUE HISTORY" subtitle="FantasyCalc dynasty value (90 days)" />
       <ValueChart data={data.valueHistory} />
 
       <SectionHeader icon="🎯" title="QUICK ACTIONS" subtitle="" />
-      <QuickActions playerName={data.summary.player_name} />
+      <QuickActions playerName={data.summary.player_name} playerId={data.summary.player_id} />
 
       {comparables && comparables.length > 0 && (
         <>

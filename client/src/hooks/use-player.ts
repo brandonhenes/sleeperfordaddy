@@ -15,6 +15,7 @@ export interface AgeCurveStatus {
 }
 
 export interface PlayerSummary {
+  player_id: string | null;
   player_name: string;
   position: string | null;
   team: string | null;

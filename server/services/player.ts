@@ -7,6 +7,7 @@ import { getAgeCurveStatus, type AgeCurveStatus } from "./age-curves.js";
 import { resolvePlayer } from "./player-resolver.js";
 
 export interface PlayerSummary {
+  player_id: string | null;
   player_name: string;
   position: string | null;
   team: string | null;
@@ -227,6 +228,7 @@ export async function getPlayerDetail(
   const ownedLeagues = ownershipRows as unknown as OwnershipEntry[];
 
   const summary: PlayerSummary = {
+    player_id: pm?.player_id ?? null,
     player_name: pm?.full_name ?? fcSummary?.player_name ?? normalizedInput,
     position,
     team: fcSummary?.team ?? null,
@@ -263,18 +265,38 @@ export async function getPlayerDetail(
     if (tradeIds.length > 0) {
       const idFrags = tradeIds.map((t) => sql`${t.trade_id}`);
       const allAssets = await db.execute(sql`
-        SELECT trade_id, roster_id, direction,
-               COALESCE(asset_name, asset_key) AS label
-        FROM trade_assets
-        WHERE trade_id IN (${sql.join(idFrags, sql`, `)})
+        SELECT
+          ta.trade_id,
+          ta.roster_id,
+          ta.direction,
+          ta.asset_type,
+          ta.asset_key,
+          CASE
+            WHEN ta.asset_type = 'player' AND pm.full_name IS NOT NULL
+              THEN pm.full_name || ' (' || COALESCE(pm.position, '') || ')'
+            WHEN ta.asset_type = 'pick'
+              THEN COALESCE(ta.asset_name, ta.asset_key)
+            ELSE COALESCE(ta.asset_name, ta.asset_key)
+          END AS label
+        FROM trade_assets ta
+        LEFT JOIN players_master pm
+          ON ta.asset_type = 'player' AND ta.asset_key = pm.player_id
+        WHERE ta.trade_id IN (${sql.join(idFrags, sql`, `)})
       `);
-      type AR = { trade_id: string; roster_id: number; direction: string; label: string };
+      type AR = {
+        trade_id: string;
+        roster_id: number;
+        direction: string;
+        asset_type: string;
+        asset_key: string;
+        label: string;
+      };
       const assetMap = new Map<string, { gave: string[]; received: string[] }>();
 
       // Find which roster_id had the target player in each trade
       const playerRoster = new Map<string, number>();
       for (const a of allAssets as unknown as AR[]) {
-        if (a.label === pm.player_id || a.label === pm.full_name) {
+        if (a.asset_type === "player" && a.asset_key === pm.player_id) {
           playerRoster.set(a.trade_id, a.roster_id);
         }
       }

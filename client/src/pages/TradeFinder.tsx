@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams, Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import AppShell from "../components/AppShell";
@@ -541,6 +541,22 @@ export default function TradeFinder() {
     phase === "ready" ? username ?? "" : "",
     mode === "shop" ? selectedPlayer : ""
   );
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const urlMode = params.get("mode");
+    const urlPlayer = params.get("player");
+    const urlLeague = params.get("league");
+
+    if (urlLeague) {
+      setSelectedLeague(urlLeague);
+    }
+    if (urlMode === "shop" && urlPlayer) {
+      setMode("shop");
+      setSelectedPlayer(urlPlayer);
+    }
+  }, []);
 
   if (phase === "checking" || phase === "syncing") {
     return (
