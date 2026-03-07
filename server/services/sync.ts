@@ -91,12 +91,31 @@ export async function checkSyncStatus(username: string) {
   };
 }
 
+function isRunningJobStale(job: { status: string; updated_at: number }): boolean {
+  if (job.status !== "running") return false;
+  const ageMinutes = (Date.now() - job.updated_at) / 60_000;
+  return ageMinutes > SYNC_STALE_MINUTES;
+}
+
 /**
  * Start a background sync job for a username.
  * Returns immediately with the job_id; sync runs in the background.
  */
-export async function startSync(username: string): Promise<{ jobId: string; alreadyRunning: boolean }> {
+export async function startSync(
+  username: string,
+  options?: { force?: boolean }
+): Promise<{ jobId: string; alreadyRunning: boolean }> {
   const key = username.toLowerCase();
+  const force = options?.force === true;
+  const latest = await getLatestSyncJob(username);
+
+  if (latest && isRunningJobStale(latest)) {
+    await updateSyncJob(latest.job_id, {
+      status: "failed",
+      error: "Sync timed out and was marked stale",
+    });
+    syncLocks.delete(key);
+  }
 
   // Check if already running
   if (syncLocks.get(key)) {
@@ -104,11 +123,12 @@ export async function startSync(username: string): Promise<{ jobId: string; alre
     if (existing && existing.status === "running") {
       return { jobId: existing.job_id, alreadyRunning: true };
     }
+    syncLocks.delete(key);
   }
 
   // Enforce cooldown
   const lastStart = lastSyncStart.get(key);
-  if (lastStart && Date.now() - lastStart < MIN_SYNC_INTERVAL) {
+  if (!force && lastStart && Date.now() - lastStart < MIN_SYNC_INTERVAL) {
     const existing = await getLatestSyncJob(username);
     if (existing) {
       return { jobId: existing.job_id, alreadyRunning: false };

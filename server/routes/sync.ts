@@ -25,7 +25,7 @@ router.post("/api/sync", async (req, res) => {
       }
     }
 
-    const { jobId, alreadyRunning } = await startSync(username);
+    const { jobId, alreadyRunning } = await startSync(username, { force });
     res.json({
       job_id: jobId,
       status: alreadyRunning ? "running" : "running",
@@ -45,19 +45,19 @@ router.get("/api/sync/status", async (req, res) => {
       return res.status(400).json({ message: "username is required" });
     }
 
-    const job = await getLatestSyncJob(username);
-    if (!job) {
+    const { syncJob } = await checkSyncStatus(username);
+    if (!syncJob) {
       return res.json({ status: "not_started" });
     }
 
     res.json({
-      job_id: job.job_id,
-      status: job.status,
-      step: job.step,
-      detail: job.detail,
-      leagues_total: job.leagues_total,
-      leagues_done: job.leagues_done,
-      error: job.error,
+      job_id: syncJob.job_id,
+      status: syncJob.status,
+      step: syncJob.step,
+      detail: syncJob.detail,
+      leagues_total: syncJob.leagues_total,
+      leagues_done: syncJob.leagues_done,
+      error: syncJob.error,
     });
   } catch (err) {
     console.error("[sync] Error checking status:", err);
