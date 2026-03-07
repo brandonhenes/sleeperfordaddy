@@ -3,6 +3,7 @@ import { sql } from "drizzle-orm";
 import { getCompositeValues } from "./composite-values.js";
 import { getAgeCurveStatus, type AgeCurveStatus } from "./age-curves.js";
 import type { SourceWeights } from "./edge-score.js";
+import { getLeagueRosters } from "../sleeper/rosters.js";
 
 export interface WaiverPlayer {
   player_id: string;
@@ -31,24 +32,78 @@ function scoreAgreement(scores: (number | null)[]): "high" | "medium" | "low" {
   return spread < 5 ? "high" : spread <= 12 ? "medium" : "low";
 }
 
-export async function getWaiverWire(leagueId: string, weights?: SourceWeights): Promise<WaiverWireResult> {
-  // Get all player IDs rostered in this league
-  const rosteredRows = await db.execute(sql`
+function addIds(target: Set<string>, ids: string[] | null | undefined) {
+  if (!ids) return;
+  for (const id of ids) {
+    if (id && id !== "0") target.add(id);
+  }
+}
+
+async function getLeagueRosteredPlayerIds(
+  leagueId: string
+): Promise<{ ids: Set<string>; warning: string | null }> {
+  const dbRows = await db.execute(sql`
     SELECT DISTINCT rp.player_id
     FROM roster_players rp
     WHERE rp.league_id = ${leagueId}
   `);
-  const rosteredIds = new Set(
-    (rosteredRows as unknown as { player_id: string }[]).map((r) => r.player_id)
+  const dbIds = new Set(
+    (dbRows as unknown as { player_id: string }[]).map((r) => r.player_id)
   );
 
+  const liveIds = new Set<string>();
+  try {
+    const rosters = await getLeagueRosters(leagueId);
+    for (const roster of rosters) {
+      addIds(liveIds, roster.players);
+      addIds(liveIds, roster.reserve);
+      addIds(liveIds, roster.taxi);
+      addIds(liveIds, roster.starters);
+    }
+  } catch (err) {
+    console.warn(`[waiver-wire] Failed to fetch live rosters for ${leagueId}:`, err);
+  }
+
+  const ids = liveIds.size > 0
+    ? new Set([...dbIds, ...liveIds])
+    : dbIds;
+
+  const warningParts: string[] = [];
+  if (liveIds.size > dbIds.size) {
+    warningParts.push(
+      `Using live Sleeper rosters to exclude ${liveIds.size - dbIds.size} additional rostered players missing from local sync.`
+    );
+  }
+  if (ids.size < 50) {
+    warningParts.push(
+      `Only ${ids.size} rostered players found. Roster data may not have synced for this league. Try re-syncing from Settings.`
+    );
+  }
+
+  return {
+    ids,
+    warning: warningParts.length > 0 ? warningParts.join(" ") : null,
+  };
+}
+
+export async function getWaiverWire(leagueId: string, weights?: SourceWeights): Promise<WaiverWireResult> {
+  const { ids: rosteredIds, warning: rosterWarning } =
+    await getLeagueRosteredPlayerIds(leagueId);
+
   if (rosteredIds.size < 50) {
-    console.warn(`[waiver-wire] Only ${rosteredIds.size} rostered players for league ${leagueId}. Data may be incomplete.`);
+    console.warn(
+      `[waiver-wire] Only ${rosteredIds.size} rostered players for league ${leagueId}. Data may be incomplete.`
+    );
     return {
       players: [],
-      warning: `Only ${rosteredIds.size} rostered players found. Roster data may not have synced for this league. Try re-syncing from Settings.`,
+      warning: rosterWarning,
     };
   }
+
+  const rosteredIdList = [...rosteredIds];
+  const exclusionClause = rosteredIdList.length > 0
+    ? sql`AND pm.player_id NOT IN (${sql.join(rosteredIdList.map((id) => sql`${id}`), sql`, `)})`
+    : sql``;
 
   // Get all NFL-rostered skill players NOT on any roster in this league
   const freeRows = await db.execute(sql`
@@ -56,9 +111,7 @@ export async function getWaiverWire(leagueId: string, weights?: SourceWeights): 
     FROM players_master pm
     WHERE pm.position IN ('QB', 'RB', 'WR', 'TE')
       AND pm.team IS NOT NULL
-      AND pm.player_id NOT IN (
-        SELECT rp.player_id FROM roster_players rp WHERE rp.league_id = ${leagueId}
-      )
+      ${exclusionClause}
     ORDER BY pm.full_name
   `);
 
@@ -120,11 +173,16 @@ export async function getWaiverWire(leagueId: string, weights?: SourceWeights): 
   }
 
   results.sort((a, b) => b.edge_score - a.edge_score);
+  const warningParts = [];
+  if (rosterWarning) warningParts.push(rosterWarning);
+  if (excludedIncomplete > 0) {
+    warningParts.push(
+      `Excluded ${excludedIncomplete} free agents with incomplete market coverage (fewer than 2 value sources).`
+    );
+  }
+
   return {
     players: results.slice(0, 50),
-    warning:
-      excludedIncomplete > 0
-        ? `Excluded ${excludedIncomplete} free agents with incomplete market coverage (fewer than 2 value sources).`
-        : null,
+    warning: warningParts.length > 0 ? warningParts.join(" ") : null,
   };
 }
