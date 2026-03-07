@@ -62,6 +62,11 @@ function safeScale(floor: number | null, max: number | null): Scale {
   return { floor: f, max: m };
 }
 
+function isDpScaleUsable(scale: Scale): boolean {
+  // DynastyProcess player values should be trade-value scale, not tiny rank-like numbers.
+  return scale.max >= 100;
+}
+
 /**
  * Fetch global scale parameters from all QB/RB/WR/TE players.
  * This prevents score inflation when caller passes small subsets.
@@ -159,6 +164,8 @@ async function readFromDailySnapshot(
 ): Promise<Map<string, CompositeValue> | null> {
   const asOfDate = await getSnapshotAsOfDate();
   if (!asOfDate || playerIds.length === 0) return null;
+  const globalScale = await getGlobalScaleParams(mode);
+  const dpUsable = isDpScaleUsable(globalScale.dp);
 
   try {
     const idFragments = playerIds.map((id) => sql`${id}`);
@@ -199,20 +206,27 @@ async function readFromDailySnapshot(
 
     const out = new Map<string, CompositeValue>();
     for (const r of snapshotRows) {
-      const srcScores = [r.fc_score, r.ktc_score, r.dp_score].filter(
+      const fcScore = r.fc_score;
+      const ktcScore = r.ktc_score;
+      const dpScore = dpUsable ? r.dp_score : null;
+      const srcScores = [fcScore, ktcScore, dpScore].filter(
         (s): s is number => s != null
       );
+      const edgeScore = srcScores.length > 0
+        ? Math.round((srcScores.reduce((sum, score) => sum + score, 0) / srcScores.length) * 10) / 10
+        : 0;
+
       out.set(r.sleeper_id, {
         sleeper_id: r.sleeper_id,
         fc_value: r.fc_value,
         ktc_value: r.ktc_value,
-        dp_value: r.dp_value,
-        edge_score: r.edge_score ?? 0,
-        fc_score: r.fc_score,
-        ktc_score: r.ktc_score,
-        dp_score: r.dp_score,
-        sources_available: r.sources_used ?? srcScores.length,
-        source_agreement: normalizeAgreement(r.source_agreement) ?? computeAgreement(srcScores),
+        dp_value: dpUsable ? r.dp_value : null,
+        edge_score: edgeScore,
+        fc_score: fcScore,
+        ktc_score: ktcScore,
+        dp_score: dpScore,
+        sources_available: srcScores.length,
+        source_agreement: normalizeAgreement(computeAgreement(srcScores)),
       });
     }
 
@@ -262,7 +276,7 @@ async function computeCompositeRuntime(
   const globalScale = await getGlobalScaleParams(mode);
   // If DP max is tiny, crosswalk coverage is bad and DP is on an incompatible scale.
   // Disable DP contribution to avoid inflated edge scores from low-value artifacts.
-  const dpUsable = globalScale.dp.max > 1;
+  const dpUsable = isDpScaleUsable(globalScale.dp);
 
   // Build inputs for edge scoring
   const inputs = rawRows.map((r) => ({

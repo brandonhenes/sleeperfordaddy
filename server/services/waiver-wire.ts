@@ -86,9 +86,14 @@ export async function getWaiverWire(leagueId: string, weights?: SourceWeights): 
   const compMap = await getCompositeValues(playerIds, mode, weights);
 
   const results: WaiverPlayer[] = [];
+  let excludedIncomplete = 0;
   for (const p of players) {
     const comp = compMap.get(p.player_id);
     if (!comp || comp.edge_score <= 0) continue;
+    if (comp.sources_available < 2) {
+      excludedIncomplete++;
+      continue;
+    }
 
     const ageCurve = getAgeCurveStatus(p.position, p.age);
 
@@ -115,5 +120,11 @@ export async function getWaiverWire(leagueId: string, weights?: SourceWeights): 
   }
 
   results.sort((a, b) => b.edge_score - a.edge_score);
-  return { players: results.slice(0, 50), warning: null };
+  return {
+    players: results.slice(0, 50),
+    warning:
+      excludedIncomplete > 0
+        ? `Excluded ${excludedIncomplete} free agents with incomplete market coverage (fewer than 2 value sources).`
+        : null,
+  };
 }

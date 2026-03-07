@@ -166,28 +166,30 @@ export async function getFreeAgentGaps(username: string): Promise<ArbitrageGap[]
   const playerIds = candidateRows.map((r) => r.player_id);
   const compMap = await getCompositeValues(playerIds, "sf");
 
-  return candidateRows
-    .map((r) => {
-      const comp = compMap.get(r.player_id);
-      const free = r.free_leagues ?? [];
-      const owned = r.owned_leagues ?? [];
-      return {
-        player_id: r.player_id,
-        full_name: r.full_name,
-        position: r.position,
-        team: r.team,
-        edge_score: comp?.edge_score ?? 0,
-        fc_value: comp?.fc_value ?? null,
-        ktc_value: comp?.ktc_value ?? null,
-        dp_value: comp?.dp_value ?? null,
-        owned_leagues: owned,
-        free_leagues: free,
-        owned_count: owned.length,
-        free_count: free.length,
-      };
-    })
-    .filter((r) => r.edge_score > 0)
-    .sort((a, b) => b.edge_score - a.edge_score);
+  const gaps: ArbitrageGap[] = [];
+  for (const r of candidateRows) {
+    const comp = compMap.get(r.player_id);
+    if (!comp || comp.edge_score <= 0 || comp.sources_available < 2) continue;
+
+    const free = r.free_leagues ?? [];
+    const owned = r.owned_leagues ?? [];
+    gaps.push({
+      player_id: r.player_id,
+      full_name: r.full_name,
+      position: r.position,
+      team: r.team,
+      edge_score: comp.edge_score,
+      fc_value: comp.fc_value ?? null,
+      ktc_value: comp.ktc_value ?? null,
+      dp_value: comp.dp_value ?? null,
+      owned_leagues: owned,
+      free_leagues: free,
+      owned_count: owned.length,
+      free_count: free.length,
+    });
+  }
+
+  return gaps.sort((a, b) => b.edge_score - a.edge_score);
   })();
 
   arbitrageInFlight.set(cacheKey, work);
