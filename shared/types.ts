@@ -542,3 +542,53 @@ export interface ShopOpportunity {
   };
 }
 
+// Trade History / Execution Tracker
+
+export interface TradeGrade {
+  trade_id: string;
+  league_id: string;
+  league_name: string;
+  trade_date: string;
+  trade_timestamp: number;
+  gave: TradeGradedAsset[];
+  received: TradeGradedAsset[];
+  gave_total_then: number;
+  gave_total_now: number;
+  received_total_then: number;
+  received_total_now: number;
+  net_value_change: number;
+  grade: "win" | "loss" | "push";
+  grade_magnitude: number;
+  partner_names: string[];
+}
+
+export interface TradeGradedAsset {
+  asset_type: "player" | "pick";
+  asset_key: string;
+  label: string;
+  position: string | null;
+  edge_score_then: number | null;
+  edge_score_now: number | null;
+  value_change: number;
+}
+
+export interface TradeHistoryStats {
+  total_trades: number;
+  wins: number;
+  losses: number;
+  pushes: number;
+  win_rate: number;
+  total_value_gained: number;
+  avg_value_per_trade: number;
+  best_trade: TradeGrade | null;
+  worst_trade: TradeGrade | null;
+  by_position: { position: string; trades: number; net_value: number }[];
+  by_league: { league_id: string; league_name: string; trades: number; win_rate: number; net_value: number }[];
+  by_month: { month: string; trades: number; win_rate: number; net_value: number }[];
+}
+
+export interface TradeHistoryResponse {
+  trades: TradeGrade[];
+  stats: TradeHistoryStats;
+}
+

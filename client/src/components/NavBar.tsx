@@ -15,6 +15,7 @@ const NAV_ITEMS = [
   { path: "market", label: "Market", icon: "📈" },
   { path: "trade-calculator", label: "Trade Calc", icon: "⚖️" },
   { path: "trade-finder", label: "Trade Finder", icon: "🔍" },
+  { path: "trade-history", label: "Trade Log", icon: "📒" },
   { path: "rookie-draft", label: "Draft", icon: "🎓" },
   { path: "free-agents", label: "Free Agents", icon: "🔀" },
   { path: "history", label: "History", icon: "🕒" },
