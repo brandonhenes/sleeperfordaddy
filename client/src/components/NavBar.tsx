@@ -154,8 +154,26 @@ function NotificationBell({ username }: { username: string }) {
 
 export default function NavBar({ username, avatarId }: NavBarProps) {
   const [location] = useLocation();
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(() =>
+    typeof window !== "undefined" ? window.innerWidth < 768 : false,
+  );
 
   const noUserPaths = ["market", "trade-calculator", "settings", "rookie-draft"];
+
+  useEffect(() => {
+    function handleResize() {
+      setIsMobile(window.innerWidth < 768);
+    }
+
+    handleResize();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  useEffect(() => {
+    setMobileMenuOpen(false);
+  }, [location, isMobile]);
 
   function isActive(path: string): boolean {
     if (noUserPaths.includes(path)) return location.startsWith(`/${path}`);
@@ -170,129 +188,199 @@ export default function NavBar({ username, avatarId }: NavBarProps) {
   const initial = username.charAt(0).toUpperCase();
 
   return (
-    <nav
-      style={{
-        background: "var(--dark)",
-        borderBottom: "1px solid var(--border)",
-        padding: "0 24px",
-        display: "flex",
-        alignItems: "center",
-        position: "sticky",
-        top: 0,
-        zIndex: 100,
-      }}
-    >
-      <Link href="/">
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            marginRight: 40,
-            padding: "16px 0",
-            cursor: "pointer",
-          }}
-        >
-          <span style={{ fontSize: 20 }}>⚡</span>
-          <span
-            className="font-mono"
+    <>
+      <nav
+        style={{
+          background: "var(--dark)",
+          borderBottom: "1px solid var(--border)",
+          padding: isMobile ? "0 16px" : "0 24px",
+          display: "flex",
+          alignItems: "center",
+          position: "sticky",
+          top: 0,
+          zIndex: 100,
+        }}
+      >
+        <Link href="/">
+          <div
             style={{
-              color: "var(--amber)",
-              fontWeight: 800,
-              fontSize: 18,
-              letterSpacing: 1.5,
+              display: "flex",
+              alignItems: "center",
+              gap: isMobile ? 8 : 10,
+              marginRight: isMobile ? 0 : 40,
+              padding: "16px 0",
+              cursor: "pointer",
+              flexShrink: 0,
             }}
           >
-            THE EDGE
-          </span>
-        </div>
-      </Link>
+            <span style={{ fontSize: isMobile ? 18 : 20 }}>⚡</span>
+            <span
+              className="font-mono"
+              style={{
+                color: "var(--amber)",
+                fontWeight: 800,
+                fontSize: isMobile ? 15 : 18,
+                letterSpacing: isMobile ? 1.2 : 1.5,
+              }}
+            >
+              THE EDGE
+            </span>
+          </div>
+        </Link>
 
-      {NAV_ITEMS.map((item) => {
-        const active = isActive(item.path);
-        return (
-          <Link key={item.path} href={navHref(item.path)}>
+        {!isMobile && (
+          <div style={{ display: "flex", alignItems: "center" }}>
+            {NAV_ITEMS.map((item) => {
+              const active = isActive(item.path);
+              return (
+                <Link key={item.path} href={navHref(item.path)}>
+                  <button
+                    style={{
+                      background: "none",
+                      border: "none",
+                      color: active ? "var(--amber)" : "var(--text-muted)",
+                      padding: "18px 16px",
+                      cursor: "pointer",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      letterSpacing: 0.5,
+                      borderBottom: active
+                        ? "2px solid var(--amber)"
+                        : "2px solid transparent",
+                      transition: "all 0.2s",
+                      fontFamily: "inherit",
+                    }}
+                  >
+                    {item.icon} {item.label}
+                  </button>
+                </Link>
+              );
+            })}
+          </div>
+        )}
+
+        <div
+          style={{
+            marginLeft: "auto",
+            display: "flex",
+            alignItems: "center",
+            gap: isMobile ? 8 : 12,
+            flexShrink: 0,
+          }}
+        >
+          {isMobile && (
+            <button
+              onClick={() => setMobileMenuOpen((open) => !open)}
+              style={{
+                background: "none",
+                border: "1px solid var(--border)",
+                borderRadius: 8,
+                width: 36,
+                height: 36,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+                fontSize: 18,
+                fontWeight: 700,
+                color: "var(--text-muted)",
+                fontFamily: "inherit",
+              }}
+              aria-label="Toggle navigation menu"
+              aria-expanded={mobileMenuOpen}
+            >
+              {mobileMenuOpen ? "✕" : "☰"}
+            </button>
+          )}
+
+          <Link href="/how-it-works">
             <button
               style={{
                 background: "none",
-                border: "none",
-                color: active ? "var(--amber)" : "var(--text-muted)",
-                padding: "18px 16px",
+                border: "1px solid var(--border)",
+                borderRadius: "50%",
+                width: 28,
+                height: 28,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
                 cursor: "pointer",
-                fontSize: 13,
-                fontWeight: 600,
-                letterSpacing: 0.5,
-                borderBottom: active
-                  ? "2px solid var(--amber)"
-                  : "2px solid transparent",
-                transition: "all 0.2s",
-                fontFamily: "inherit",
+                fontSize: 14,
+                fontWeight: 700,
+                color: "var(--text-muted)",
               }}
+              aria-label="How It Works"
             >
-              {item.icon} {item.label}
+              ?
             </button>
           </Link>
-        );
-      })}
+          <NotificationBell username={username} />
+          {!isMobile && <span style={{ color: "var(--text-muted)", fontSize: 12 }}>{username}</span>}
+          {avatarId ? (
+            <img
+              src={avatarUrl(avatarId)}
+              alt={username}
+              style={{ width: 32, height: 32, borderRadius: "50%" }}
+            />
+          ) : (
+            <div
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: "50%",
+                background: "linear-gradient(135deg, var(--amber), var(--amber-dark))",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 14,
+                fontWeight: 700,
+                color: "var(--dark-base)",
+              }}
+            >
+              {initial}
+            </div>
+          )}
+        </div>
+      </nav>
 
-      <div
-        style={{
-          marginLeft: "auto",
-          display: "flex",
-          alignItems: "center",
-          gap: 12,
-        }}
-      >
-        <Link href="/how-it-works">
-          <button
-            style={{
-              background: "none",
-              border: "1px solid var(--border)",
-              borderRadius: "50%",
-              width: 28,
-              height: 28,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              cursor: "pointer",
-              fontSize: 14,
-              fontWeight: 700,
-              color: "var(--text-muted)",
-            }}
-            aria-label="How It Works"
-          >
-            ?
-          </button>
-        </Link>
-        <NotificationBell username={username} />
-        <span style={{ color: "var(--text-muted)", fontSize: 12 }}>
-          {username}
-        </span>
-        {avatarId ? (
-          <img
-            src={avatarUrl(avatarId)}
-            alt={username}
-            style={{ width: 32, height: 32, borderRadius: "50%" }}
-          />
-        ) : (
-          <div
-            style={{
-              width: 32,
-              height: 32,
-              borderRadius: "50%",
-              background: "linear-gradient(135deg, var(--amber), var(--amber-dark))",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: 14,
-              fontWeight: 700,
-              color: "var(--dark-base)",
-            }}
-          >
-            {initial}
+      {isMobile && mobileMenuOpen && (
+        <div
+          style={{
+            background: "var(--dark)",
+            borderBottom: "1px solid var(--border)",
+            padding: "8px 16px 16px",
+          }}
+        >
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            {NAV_ITEMS.map((item) => {
+              const active = isActive(item.path);
+              return (
+                <Link key={`mobile-${item.path}`} href={navHref(item.path)}>
+                  <button
+                    onClick={() => setMobileMenuOpen(false)}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      color: active ? "var(--amber)" : "var(--text-muted)",
+                      padding: "14px 0",
+                      cursor: "pointer",
+                      fontSize: 14,
+                      fontWeight: 600,
+                      letterSpacing: 0.3,
+                      borderBottom: "1px solid rgba(51,65,85,0.35)",
+                      textAlign: "left",
+                      fontFamily: "inherit",
+                      width: "100%",
+                    }}
+                  >
+                    {item.icon} {item.label}
+                  </button>
+                </Link>
+              );
+            })}
           </div>
-        )}
-      </div>
-    </nav>
+        </div>
+      )}
+    </>
   );
 }
