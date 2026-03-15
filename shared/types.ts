@@ -282,6 +282,7 @@ export interface TradePickBreakdown {
   pickSlot: number;
   tier: "early" | "mid" | "late";
   baseEdgeValue: number;
+  futureYearDiscount: number;
   classStrengthModifier: number;
   finalValue: number;
   projectedProspect: string | null;
@@ -297,6 +298,7 @@ export interface PickValue {
   currentOwnerRosterId: number | null;
   tier: "early" | "mid" | "late";
   baseEdgeValue: number;
+  futureYearDiscount: number;
   classStrengthModifier: number;
   finalValue: number;
   projectedProspect: string | null;

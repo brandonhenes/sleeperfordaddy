@@ -12,6 +12,7 @@ import {
 } from "./draft-picks.js";
 import { optimizeLineup, type OptimizedLineup } from "./lineup-optimizer.js";
 import { getDynastyLeagueIdsForUserLatestSeason } from "./dynasty-leagues.js";
+import { enrichScoredPick } from "./pick-values.js";
 import { parseLeagueScoring, scoringLabel } from "./scoring-adjustment.js";
 
 const prCache = new Map<string, { data: LeaguePowerRanking[]; expires: number }>();
@@ -286,10 +287,18 @@ export async function getPowerRankings(username: string): Promise<LeaguePowerRan
       const e = combined.get(`pick_${p.season}_${p.round}_${p.original_owner_id}`);
       if (e) { p.edge_score = e.score; p.ktc_score = e.ktc_score; p.dp_score = e.dp_score; }
     }
+    const enrichedValued = await Promise.all(
+      valued.map((pick) =>
+        enrichScoredPick(pick, {
+          leagueSize: league.total_rosters,
+          format: mode,
+        })
+      )
+    );
 
     // Group picks by owner roster_id, filter out zero-value picks
     const picksByRid = new Map<number, ScoredPick[]>();
-    for (const p of valued) {
+    for (const p of enrichedValued) {
       const a = picksByRid.get(p.roster_id) ?? []; a.push(p); picksByRid.set(p.roster_id, a);
     }
 
@@ -660,9 +669,17 @@ async function getPowerRankingsDbOnly(
         p.dp_score = e.dp_score;
       }
     }
+    const enrichedValued = await Promise.all(
+      valued.map((pick) =>
+        enrichScoredPick(pick, {
+          leagueSize: league.total_rosters,
+          format: mode,
+        })
+      )
+    );
 
     const picksByRid = new Map<number, ScoredPick[]>();
-    for (const p of valued) {
+    for (const p of enrichedValued) {
       if (p.edge_score <= 0) continue;
       const a = picksByRid.get(p.roster_id) ?? [];
       a.push(p);

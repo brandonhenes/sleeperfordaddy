@@ -63,7 +63,7 @@ export default function ClassStrengthSettings() {
         })}
       </div>
       <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 12, lineHeight: 1.6 }}>
-        Pick values update immediately on Trade Calculator and Trade Finder. There is no separate future-year discount. The class modifier is the adjustment.
+        Pick values = Base x Future Year Discount x Class Strength. The future discount drops 0.1 per year (2027 = 0.9, 2028 = 0.8, 2029 = 0.7). Class strength is your adjustment on top of that.
       </div>
     </div>
   );

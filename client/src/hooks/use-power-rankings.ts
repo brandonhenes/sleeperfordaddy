@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import type { TradePickBreakdown } from "../../../shared/types";
 import { apiFetch } from "../lib/api";
 
 export interface AgeCurveStatus {
@@ -62,6 +63,7 @@ export interface ScoredPick {
   edge_score: number;
   ktc_score: number | null;
   dp_score: number | null;
+  pick_breakdown?: TradePickBreakdown | null;
 }
 
 export interface RosterRanking {

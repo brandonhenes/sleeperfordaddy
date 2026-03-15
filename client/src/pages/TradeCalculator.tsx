@@ -355,7 +355,7 @@ function TradePanel({
                 <>
                   <PickBadge pick={asset.pick_breakdown} compact />
                   <div style={{ fontSize: 10, color: "var(--text-muted)", lineHeight: 1.4 }}>
-                    Slot {asset.pick_breakdown.round}.{String(asset.pick_breakdown.pickSlot).padStart(2, "0")} | Base {asset.pick_breakdown.baseEdgeValue.toFixed(1)} | x{asset.pick_breakdown.classStrengthModifier.toFixed(2)}
+                    Slot {asset.pick_breakdown.round}.{String(asset.pick_breakdown.pickSlot).padStart(2, "0")} | Base {asset.pick_breakdown.baseEdgeValue.toFixed(1)} | Year x{asset.pick_breakdown.futureYearDiscount.toFixed(2)} | Class x{asset.pick_breakdown.classStrengthModifier.toFixed(2)}
                     {asset.pick_breakdown.projectedProspect ? ` | ${asset.pick_breakdown.projectedProspect}` : ""}
                     {asset.pick_breakdown.prospectTier != null ? ` (Tier ${asset.pick_breakdown.prospectTier})` : ""}
                   </div>

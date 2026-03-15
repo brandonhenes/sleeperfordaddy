@@ -7,9 +7,9 @@ const STORAGE_KEY = "edge-pick-class-strengths";
 
 export const DEFAULT_CLASS_STRENGTHS: ClassStrengthSettings = {
   [String(YEAR)]: 1.0,
-  [String(YEAR + 1)]: 1.3,
-  [String(YEAR + 2)]: 1.15,
-  [String(YEAR + 3)]: 0.85,
+  [String(YEAR + 1)]: 1.15,
+  [String(YEAR + 2)]: 1.1,
+  [String(YEAR + 3)]: 1.0,
 };
 
 export function classStrengthSeasons(): string[] {

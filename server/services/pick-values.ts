@@ -19,9 +19,9 @@ const CURRENT_SEASON = new Date().getFullYear();
 const UNKNOWN_CLASS_MODIFIER = 0.85;
 const DEFAULT_CLASS_STRENGTHS: ClassStrengthMap = {
   [String(CURRENT_SEASON)]: 1.0,
-  [String(CURRENT_SEASON + 1)]: 1.3,
-  [String(CURRENT_SEASON + 2)]: 1.15,
-  [String(CURRENT_SEASON + 3)]: UNKNOWN_CLASS_MODIFIER,
+  [String(CURRENT_SEASON + 1)]: 1.15,
+  [String(CURRENT_SEASON + 2)]: 1.1,
+  [String(CURRENT_SEASON + 3)]: 1.0,
 };
 
 const ROUND_NAMES: Record<number, string> = {
@@ -136,6 +136,15 @@ function seasonModifier(
   }
   const fallback = DEFAULT_CLASS_STRENGTHS[season] ?? UNKNOWN_CLASS_MODIFIER;
   return clamp(fallback, 0.7, 1.5);
+}
+
+function futureYearDiscount(season: string): number {
+  const yearsOut = Number(season) - CURRENT_SEASON;
+  if (yearsOut <= 0) return 1.0;
+  if (yearsOut === 1) return 0.9;
+  if (yearsOut === 2) return 0.8;
+  if (yearsOut === 3) return 0.7;
+  return 0.6;
 }
 
 export function getClassStrengthModifier(
@@ -366,7 +375,8 @@ export async function getTradePickBreakdown(
     ? baseValueForSlot(round, pickSlot, leagueSize)
     : baseValueForTier(round, tier, leagueSize);
   const classStrengthModifier = seasonModifier(season, options.classStrengths);
-  const finalValue = roundTo(clamp(baseEdgeValue * classStrengthModifier, 0, 99));
+  const discount = futureYearDiscount(season);
+  const finalValue = roundTo(clamp(baseEdgeValue * discount * classStrengthModifier, 0, 99));
   const projectedProspect = await getProjectedProspect(
     season,
     (round - 1) * leagueSize + pickSlot
@@ -378,6 +388,7 @@ export async function getTradePickBreakdown(
     pickSlot,
     tier,
     baseEdgeValue,
+    futureYearDiscount: discount,
     classStrengthModifier,
     finalValue,
     projectedProspect: projectedProspect?.playerName ?? null,
@@ -448,6 +459,7 @@ export async function toPickValue(
     currentOwnerRosterId: pick.roster_id,
     tier: breakdown.tier,
     baseEdgeValue: breakdown.baseEdgeValue,
+    futureYearDiscount: breakdown.futureYearDiscount,
     classStrengthModifier: breakdown.classStrengthModifier,
     finalValue: breakdown.finalValue,
     projectedProspect: breakdown.projectedProspect,

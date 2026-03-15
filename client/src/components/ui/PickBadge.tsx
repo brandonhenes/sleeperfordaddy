@@ -47,6 +47,7 @@ export default function PickBadge({
     `Tier: ${tierLabel(pick.tier)}`,
     `Projected slot: ${pick.round}.${String(pick.pickSlot).padStart(2, "0")}`,
     `Base Edge: ${pick.baseEdgeValue.toFixed(1)}`,
+    `Year discount: x${pick.futureYearDiscount.toFixed(2)}`,
     `Class modifier: x${pick.classStrengthModifier.toFixed(2)}`,
     pick.projectedProspect ? `Prospect: ${pick.projectedProspect}` : null,
     pick.prospectTier != null ? `Prospect tier: ${pick.prospectTier}` : null,
