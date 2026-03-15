@@ -57,6 +57,16 @@ const ARCHETYPE_COLORS: Record<string, string> = {
   Competitor: "bg-slate-500 text-white",
 };
 
+const ARCHETYPE_FILTER_COLORS: Record<string, string> = {
+  "Dynasty Juggernaut": "#f59e0b",
+  "All-In Contender": "#3b82f6",
+  "Fragile Contender": "#f97316",
+  "Productive Struggle": "#22c55e",
+  Rebuilder: "#a855f7",
+  "Dead Zone": "#ef4444",
+  Competitor: "#64748b",
+};
+
 function ArchetypeBadge({ archetype }: { archetype: string }) {
   const cls = ARCHETYPE_COLORS[archetype] ?? "bg-slate-500 text-white";
   return (
@@ -441,8 +451,44 @@ function SummaryCards({ leagues }: { leagues: LeaguePowerRanking[] }) {
 export default function PowerRankings() {
   const { username } = useParams<{ username: string }>();
   const { data, isLoading, error } = usePowerRankings(username ?? "");
+  const [archetypeFilter, setArchetypeFilter] = useState<Set<string>>(new Set());
 
   const leagues = useMemo(() => data ?? [], [data]);
+  const archetypeCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const l of leagues) {
+      const arch = l.rosters.find((r) => r.is_user)?.archetype;
+      if (arch) counts[arch] = (counts[arch] ?? 0) + 1;
+    }
+    return Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  }, [leagues]);
+  const filteredLeagues = useMemo(() => {
+    let list = [...leagues];
+
+    if (archetypeFilter.size > 0) {
+      list = list.filter((l) => {
+        const userArch = l.rosters.find((r) => r.is_user)?.archetype;
+        return !!userArch && archetypeFilter.has(userArch);
+      });
+    }
+
+    list.sort((a, b) => {
+      const aScore = a.rosters.find((r) => r.is_user)?.avg_starter_score ?? 0;
+      const bScore = b.rosters.find((r) => r.is_user)?.avg_starter_score ?? 0;
+      return bScore - aScore;
+    });
+
+    return list;
+  }, [leagues, archetypeFilter]);
+
+  function toggleArchetype(arch: string) {
+    setArchetypeFilter((prev) => {
+      const next = new Set(prev);
+      if (next.has(arch)) next.delete(arch);
+      else next.add(arch);
+      return next;
+    });
+  }
 
   if (isLoading) return <AppShell><LoadingSkeleton /></AppShell>;
 
@@ -465,11 +511,55 @@ export default function PowerRankings() {
       ) : (
         <>
           <SummaryCards leagues={leagues} />
+          {archetypeCounts.length > 0 && (
+            <div style={{ display: "flex", gap: 8, marginTop: 16, flexWrap: "wrap" }}>
+              <button
+                onClick={() => setArchetypeFilter(new Set())}
+                style={{
+                  padding: "6px 14px",
+                  borderRadius: 6,
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                  border: archetypeFilter.size === 0 ? "2px solid var(--amber)" : "1px solid var(--border)",
+                  background: archetypeFilter.size === 0 ? "rgba(245,158,11,0.1)" : "transparent",
+                  color: archetypeFilter.size === 0 ? "var(--amber)" : "var(--text-muted)",
+                }}
+              >
+                All ({leagues.length})
+              </button>
+              {archetypeCounts.map(([arch, count]) => {
+                const isActive = archetypeFilter.has(arch);
+                const color = ARCHETYPE_FILTER_COLORS[arch] ?? "var(--text-muted)";
+                return (
+                  <button
+                    key={arch}
+                    onClick={() => toggleArchetype(arch)}
+                    style={{
+                      padding: "6px 14px",
+                      borderRadius: 6,
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                      border: isActive ? `2px solid ${color}` : "1px solid var(--border)",
+                      background: isActive ? `${color}22` : "transparent",
+                      color: isActive ? color : "var(--text-muted)",
+                      transition: "all 0.15s",
+                    }}
+                  >
+                    {arch} ({count})
+                  </button>
+                );
+              })}
+            </div>
+          )}
           <div style={{ margin: "24px 0 12px", fontSize: 13, color: "var(--text-dim)" }}>
-            {leagues.length} league{leagues.length !== 1 ? "s" : ""}
+            {filteredLeagues.length}{archetypeFilter.size > 0 ? ` of ${leagues.length}` : ""} league{filteredLeagues.length !== 1 ? "s" : ""}
           </div>
           <div style={{ display: "grid", gap: 12 }}>
-            {leagues.map((l) => (
+            {filteredLeagues.map((l) => (
               <LeagueCard key={l.league_id} league={l} username={username ?? ""} />
             ))}
           </div>
