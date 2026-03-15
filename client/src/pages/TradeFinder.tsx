@@ -3,14 +3,23 @@ import { useParams, Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import AppShell from "../components/AppShell";
 import FreshnessBar from "../components/FreshnessBar";
-import { PlayerLink } from "../components/ui";
+import OpponentCard from "../components/OpponentCard";
+import OpponentDetail from "../components/OpponentDetail";
+import { PickBadge, PlayerLink } from "../components/ui";
 import { useEnsureUser } from "../hooks/use-ensure-user";
-import { usePowerRankings } from "../hooks/use-power-rankings";
+import { usePowerRankings, type LeaguePowerRanking } from "../hooks/use-power-rankings";
 import { useTradeSuggestions, useShopPlayer } from "../hooks/use-trade-finder";
 import { useAcquisition } from "../hooks/use-acquisition";
+import {
+  useOpponentExploits,
+  useOpponentProfiles,
+  useRefreshOpponentProfiles,
+} from "../hooks/use-opponent-profiles";
 import { usePortfolio } from "../hooks/use-portfolio";
 import { apiFetch } from "../lib/api";
+import { classStrengthQueryParams } from "../lib/pick-strengths";
 import type {
+  PickValue,
   TradeSuggestion,
   TradePackage,
   TradePackageAsset,
@@ -18,7 +27,15 @@ import type {
   OpponentPerspective,
   ShopOpportunity,
   EvaluatedAsset,
+  OpponentProfile,
+  TradeHealthWarning,
 } from "../../../shared/types";
+
+interface LeaguePicksResponse {
+  picks: PickValue[];
+  totalPickValue: number;
+  picksByRound: Record<string, PickValue[]>;
+}
 
 const POS_COLOR: Record<string, string> = {
   QB: "#e15241",
@@ -44,9 +61,129 @@ function acceptanceColor(label: "Likely" | "Possible" | "Unlikely" | "Hard"): st
   return "var(--red)";
 }
 
+function warningColors(type: TradeHealthWarning["type"]) {
+  if (type === "block") {
+    return {
+      background: "rgba(239,68,68,0.12)",
+      border: "1px solid rgba(239,68,68,0.28)",
+      color: "#fca5a5",
+      label: "#f87171",
+    };
+  }
+  return {
+    background: "rgba(245,158,11,0.12)",
+    border: "1px solid rgba(245,158,11,0.28)",
+    color: "#fcd34d",
+    label: "#fbbf24",
+  };
+}
+
+function humanize(value: string): string {
+  return value
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function formatDateTime(value: string | null | undefined): string {
+  if (!value) return "Never";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString();
+}
+
+function getActivityWeight(level: OpponentProfile["activityLevel"]): number {
+  if (level === "hyperactive") return 100;
+  if (level === "active") return 80;
+  if (level === "moderate") return 50;
+  if (level === "passive") return 20;
+  return 0;
+}
+
+function getTendencyStrength(profile: OpponentProfile): number {
+  const acquired = Object.values(profile.positionsAcquired);
+  const sold = Object.values(profile.positionsSold);
+  const acquiredSpread = acquired.length > 0 ? Math.max(...acquired) - Math.min(...acquired) : 0;
+  const soldSpread = sold.length > 0 ? Math.max(...sold) - Math.min(...sold) : 0;
+  const ageWeight =
+    profile.ageBias === "youth_chaser" || profile.ageBias === "win_now_buyer"
+      ? 30
+      : profile.ageBias === "leans_young" || profile.ageBias === "leans_vet"
+        ? 15
+        : 0;
+  const pickWeight =
+    profile.pickTendency === "hoarder" || profile.pickTendency === "spender"
+      ? 20
+      : profile.pickTendency === "accumulator" || profile.pickTendency === "seller"
+        ? 10
+        : 0;
+  return Math.min(100, acquiredSpread * 8 + soldSpread * 6 + ageWeight + pickWeight);
+}
+
+function getRosterGapScore(profile: OpponentProfile, league: LeaguePowerRanking | undefined): number {
+  const roster = league?.rosters.find((entry) => entry.roster_id === profile.rosterId);
+  const slotGrades = roster?.lineup?.slot_grades ?? [];
+  let score = 0;
+  for (const grade of slotGrades) {
+    if (grade.grade === "hole") score += 22;
+    else if (grade.grade === "weak") score += 12;
+    else if (grade.grade === "average") score += 4;
+  }
+  return Math.min(100, score);
+}
+
+function getExploitability(profile: OpponentProfile, league: LeaguePowerRanking | undefined): number {
+  const activityWeight = getActivityWeight(profile.activityLevel);
+  const tendencyStrength = getTendencyStrength(profile);
+  const rosterGapScore = getRosterGapScore(profile, league);
+  return Math.round(
+    activityWeight * 0.4 + tendencyStrength * 0.3 + rosterGapScore * 0.3
+  );
+}
+
+function TradeHealthList({ warnings }: { warnings: TradeHealthWarning[] }) {
+  if (warnings.length === 0) return null;
+
+  return (
+    <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
+      {warnings.map((warning, index) => {
+        const colors = warningColors(warning.type);
+        return (
+          <div
+            key={`${warning.rule}-${index}`}
+            style={{
+              background: colors.background,
+              border: colors.border,
+              borderRadius: 8,
+              padding: "10px 12px",
+            }}
+          >
+            <div
+              style={{
+                color: colors.label,
+                fontSize: 10,
+                fontWeight: 800,
+                letterSpacing: 0.4,
+                textTransform: "uppercase",
+                marginBottom: 4,
+              }}
+            >
+              {warning.type} | {warning.rule}
+            </div>
+            <div style={{ color: colors.color, fontSize: 12, lineHeight: 1.5 }}>
+              {warning.message}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function AssetRow({ asset }: { asset: TradePackageAsset }) {
   const adjustedDiff =
     asset.league_adjusted_score != null ? asset.league_adjusted_score - asset.edge_score : 0;
+  const pickBreakdown = asset.pick_breakdown ?? null;
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: "1px solid var(--border)", fontSize: 13, flexWrap: "wrap" }}>
       <span
@@ -71,7 +208,13 @@ function AssetRow({ asset }: { asset: TradePackageAsset }) {
       )}
       {asset.asset_type === "pick" && <span style={{ color: "#06b6d4", fontWeight: 700, fontSize: 10 }}>PICK</span>}
       {asset.position && <span style={{ color: posColor(asset.position), fontWeight: 700, fontSize: 10 }}>{asset.position}</span>}
-      <PlayerLink name={asset.label} style={{ flex: 1, fontWeight: 500 }} />
+      {pickBreakdown ? (
+        <div style={{ flex: 1 }}>
+          <PickBadge pick={pickBreakdown} compact />
+        </div>
+      ) : (
+        <PlayerLink name={asset.label} style={{ flex: 1, fontWeight: 500 }} />
+      )}
       {asset.league_adjusted_score != null && Math.abs(adjustedDiff) >= 1 && (
         <span
           style={{
@@ -131,6 +274,8 @@ function PackageView({ pkg }: { pkg: TradePackage }) {
         </span>
         <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 600 }}>({fairnessLabel(pkg.fairness)})</span>
       </div>
+
+      <TradeHealthList warnings={pkg.healthCheck} />
 
       {pkg.acceptance && (
         <div style={{ marginTop: 10, background: "var(--dark-base)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 12px" }}>
@@ -431,6 +576,7 @@ function AcquisitionCard({ opportunity }: { opportunity: AcquisitionOpportunity 
 
 function AssetChip({ asset }: { asset: EvaluatedAsset }) {
   const isPick = asset.position == null;
+  const pickBreakdown = asset.pick_breakdown ?? null;
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 0", borderBottom: "1px solid var(--border)", fontSize: 12 }}>
       <span style={{
@@ -446,7 +592,13 @@ function AssetChip({ asset }: { asset: EvaluatedAsset }) {
       )}
       {isPick && <span style={{ color: "#06b6d4", fontWeight: 700, fontSize: 10 }}>PICK</span>}
       {asset.position && <span style={{ color: posColor(asset.position), fontWeight: 700, fontSize: 10 }}>{asset.position}</span>}
-      <PlayerLink name={asset.label} style={{ flex: 1, fontWeight: 500 }} />
+      {pickBreakdown ? (
+        <div style={{ flex: 1 }}>
+          <PickBadge pick={pickBreakdown} compact />
+        </div>
+      ) : (
+        <PlayerLink name={asset.label} style={{ flex: 1, fontWeight: 500 }} />
+      )}
     </div>
   );
 }
@@ -527,6 +679,8 @@ function ShopOpportunityCard({ opp }: { opp: ShopOpportunity }) {
         )}
       </div>
 
+      <TradeHealthList warnings={opp.healthCheck} />
+
       <div style={{ display: "flex", justifyContent: "space-between", marginTop: 10, paddingTop: 8, borderTop: "1px solid var(--border)", fontSize: 12 }}>
         <span style={{
           color: opp.fairness === "fair" ? "var(--green)" : opp.fairness === "slight_edge" ? "var(--amber)" : "var(--red)",
@@ -542,20 +696,89 @@ function ShopOpportunityCard({ opp }: { opp: ShopOpportunity }) {
   );
 }
 
+function PickInventoryPanel({
+  data,
+  isLoading,
+}: {
+  data: LeaguePicksResponse | undefined;
+  isLoading: boolean;
+}) {
+  return (
+    <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: 16, marginTop: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 0.5 }}>
+            Pick Inventory
+          </div>
+          <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 4 }}>
+            Current direct pick value across the league
+          </div>
+        </div>
+        {data && (
+          <div style={{ fontSize: 13, fontWeight: 800, color: "var(--amber)" }}>
+            Total Edge {Math.round(data.totalPickValue)}
+          </div>
+        )}
+      </div>
+      {isLoading && (
+        <div style={{ color: "var(--text-muted)", fontSize: 12 }}>
+          <span className="animate-pulse">Loading pick values...</span>
+        </div>
+      )}
+      {!isLoading && (!data || data.picks.length === 0) && (
+        <div style={{ color: "var(--text-muted)", fontSize: 12 }}>No owned picks found in this league.</div>
+      )}
+      {data && data.picks.length > 0 && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {data.picks.map((pick) => (
+            <PickBadge
+              key={`${pick.season}-${pick.round}-${pick.pickSlot}-${pick.originalOwnerRosterId ?? "x"}`}
+              pick={pick}
+              compact
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function TradeFinder() {
   const { username } = useParams<{ username: string }>();
   const { phase } = useEnsureUser(username);
   const [selectedLeague, setSelectedLeague] = useState<string>("");
-  const [mode, setMode] = useState<"find" | "acquire" | "shop">("find");
+  const [mode, setMode] = useState<"find" | "acquire" | "shop" | "scout">("find");
   const [targetSearch, setTargetSearch] = useState("");
   const [selectedTarget, setSelectedTarget] = useState<{ name: string; id: string } | null>(null);
   const [selectedPlayer, setSelectedPlayer] = useState("");
   const [shopAmbition, setShopAmbition] = useState(2);
   const [shopPathFilter, setShopPathFilter] = useState<string | null>(null);
+  const [selectedScoutRosterId, setSelectedScoutRosterId] = useState<number | null>(null);
 
   const { data: leagues, isLoading: leaguesLoading } = usePowerRankings(phase === "ready" ? username : "");
   const { data: suggestions, isLoading: suggestionsLoading, error: suggestionsError } = useTradeSuggestions(phase === "ready" ? username : "", selectedLeague);
   const { data: portfolio } = usePortfolio(phase === "ready" ? username : undefined);
+  const selectedLeagueData = leagues?.find((league) => league.league_id === selectedLeague);
+  const classStrengthSuffix = classStrengthQueryParams();
+  const leaguePicksQuery = useQuery<LeaguePicksResponse>({
+    queryKey: ["league-picks", username, selectedLeague, classStrengthSuffix],
+    queryFn: () =>
+      apiFetch(
+        `/api/picks/${encodeURIComponent(selectedLeague)}/${encodeURIComponent(username)}${classStrengthSuffix ? `?${classStrengthSuffix.slice(1)}` : ""}`
+      ),
+    enabled: phase === "ready" && mode === "find" && !!selectedLeague,
+    staleTime: 60 * 1000,
+  });
+  const scoutProfilesQuery = useOpponentProfiles(
+    phase === "ready" && mode === "scout" ? username : "",
+    mode === "scout" ? selectedLeague : ""
+  );
+  const refreshProfilesMutation = useRefreshOpponentProfiles();
+  const exploitAnglesQuery = useOpponentExploits(
+    phase === "ready" && mode === "scout" ? username : "",
+    mode === "scout" ? selectedLeague : "",
+    mode === "scout" ? selectedScoutRosterId : null
+  );
 
   const { data: targetResults = [] } = useQuery<{ player_id: string; label: string; position: string; team: string | null }[]>({
     queryKey: ["acquire-search", targetSearch],
@@ -570,6 +793,18 @@ export default function TradeFinder() {
     shopAmbition
   );
   const filteredShopResults = shopResult?.opportunities.filter((o) => !shopPathFilter || o.path === shopPathFilter) ?? [];
+  const scoutProfilesWithScores = (scoutProfilesQuery.data?.profiles ?? [])
+    .map((profile) => ({
+      profile,
+      exploitability: getExploitability(profile, selectedLeagueData),
+    }))
+    .sort((a, b) => b.exploitability - a.exploitability);
+  const selectedScoutProfile =
+    scoutProfilesWithScores.find(({ profile }) => profile.rosterId === selectedScoutRosterId)?.profile ?? null;
+  const filteredSuggestions = (suggestions ?? []).filter(
+    (suggestion) =>
+      selectedScoutRosterId == null || suggestion.partner.roster_id === selectedScoutRosterId
+  );
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -586,6 +821,24 @@ export default function TradeFinder() {
       setSelectedPlayer(urlPlayer);
     }
   }, []);
+
+  useEffect(() => {
+    setSelectedScoutRosterId(null);
+  }, [selectedLeague]);
+
+  useEffect(() => {
+    if (mode !== "scout") return;
+    if (scoutProfilesWithScores.length === 0) {
+      setSelectedScoutRosterId(null);
+      return;
+    }
+    if (
+      selectedScoutRosterId == null ||
+      !scoutProfilesWithScores.some(({ profile }) => profile.rosterId === selectedScoutRosterId)
+    ) {
+      setSelectedScoutRosterId(scoutProfilesWithScores[0].profile.rosterId);
+    }
+  }, [mode, scoutProfilesWithScores, selectedScoutRosterId]);
 
   if (phase === "checking" || phase === "syncing") {
     return (
@@ -615,6 +868,7 @@ export default function TradeFinder() {
           { key: "find" as const, label: "Find Trades" },
           { key: "acquire" as const, label: "What Would It Take?" },
           { key: "shop" as const, label: "Shop a Player" },
+          { key: "scout" as const, label: "Scout Opponents" },
         ]).map((m) => (
           <button
             key={m.key}
@@ -640,6 +894,28 @@ export default function TradeFinder() {
             )}
           </div>
 
+          {selectedScoutProfile && (
+            <div style={{ background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.25)", borderRadius: 10, padding: "12px 16px", marginTop: 12, display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+              <div style={{ fontSize: 12, color: "var(--text-dim)" }}>
+                Filtering trade suggestions to <span style={{ color: "var(--amber)", fontWeight: 700 }}>{selectedScoutProfile.displayName}</span> from Scout Opponents.
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedScoutRosterId(null)}
+                style={{ border: "1px solid var(--border)", background: "transparent", color: "var(--text-muted)", borderRadius: 8, padding: "6px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}
+              >
+                Clear Filter
+              </button>
+            </div>
+          )}
+
+          {selectedLeague && (
+            <PickInventoryPanel
+              data={leaguePicksQuery.data}
+              isLoading={leaguePicksQuery.isLoading}
+            />
+          )}
+
           {!selectedLeague && <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: "48px 24px", marginTop: 16, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>Select a league above to find trade opportunities</div>}
           {selectedLeague && suggestionsLoading && <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: "48px 24px", marginTop: 16, textAlign: "center" }}><div style={{ color: "var(--amber)", fontSize: 14 }}><span className="animate-pulse">Analyzing rosters and building package variants...</span></div></div>}
           {selectedLeague && suggestionsError && <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: "48px 24px", marginTop: 16, textAlign: "center", color: "var(--red)", fontSize: 13 }}>Failed to load trade suggestions. Try again later.</div>}
@@ -652,12 +928,19 @@ export default function TradeFinder() {
             </div>
           )}
 
-          {selectedLeague && !suggestionsLoading && suggestions && suggestions.length > 0 && (
+          {selectedLeague && !suggestionsLoading && suggestions && suggestions.length > 0 && filteredSuggestions.length === 0 && (
+            <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: "48px 24px", marginTop: 16, textAlign: "center" }}>
+              <div style={{ fontSize: 14, color: "var(--text-muted)" }}>No suggested packages for this opponent</div>
+              <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 8 }}>Try clearing the scout filter or open the Trade Calculator for a custom build.</p>
+            </div>
+          )}
+
+          {selectedLeague && !suggestionsLoading && suggestions && filteredSuggestions.length > 0 && (
             <div style={{ marginTop: 16 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                <span style={{ fontSize: 13, color: "var(--text-muted)" }}>{suggestions.length} partner{suggestions.length !== 1 ? "s" : ""} found</span>
+                <span style={{ fontSize: 13, color: "var(--text-muted)" }}>{filteredSuggestions.length} partner{filteredSuggestions.length !== 1 ? "s" : ""} found</span>
               </div>
-              {suggestions.map((suggestion, i) => <PartnerCard key={`${suggestion.partner.roster_id}-${i}`} suggestion={suggestion} />)}
+              {filteredSuggestions.map((suggestion, i) => <PartnerCard key={`${suggestion.partner.roster_id}-${i}`} suggestion={suggestion} />)}
             </div>
           )}
         </>
@@ -804,6 +1087,116 @@ export default function TradeFinder() {
                 <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: "48px 24px", textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>
                   No trade packages match the current path filter.
                 </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {mode === "scout" && (
+        <div>
+          <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: 16, marginTop: 8 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
+              <div style={{ flex: 1, minWidth: 240 }}>
+                <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 0.5 }}>Select League</label>
+                {leaguesLoading ? (
+                  <div style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 8 }}><span className="animate-pulse">Loading leagues...</span></div>
+                ) : (
+                  <select value={selectedLeague} onChange={(e) => setSelectedLeague(e.target.value)} style={{ display: "block", width: "100%", marginTop: 8, padding: "10px 12px", background: "var(--dark-base)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text)", fontSize: 14, cursor: "pointer" }}>
+                    <option value="">Choose a league...</option>
+                    {leagues?.map((league) => <option key={league.league_id} value={league.league_id}>{league.league_name} ({league.mode.toUpperCase()}{league.scoring_label ? ` | ${league.scoring_label}` : ""})</option>)}
+                  </select>
+                )}
+              </div>
+
+              <div style={{ display: "grid", gap: 8, justifyItems: "end" }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!selectedLeague || phase !== "ready") return;
+                    refreshProfilesMutation.mutate({ leagueId: selectedLeague, username });
+                  }}
+                  disabled={!selectedLeague || refreshProfilesMutation.isPending}
+                  style={{
+                    border: "1px solid rgba(245,158,11,0.35)",
+                    background: "rgba(245,158,11,0.14)",
+                    color: "var(--amber)",
+                    borderRadius: 10,
+                    padding: "10px 14px",
+                    fontSize: 12,
+                    fontWeight: 800,
+                    cursor: !selectedLeague || refreshProfilesMutation.isPending ? "not-allowed" : "pointer",
+                    fontFamily: "inherit",
+                    opacity: !selectedLeague ? 0.6 : 1,
+                  }}
+                >
+                  {refreshProfilesMutation.isPending ? "Refreshing..." : "Refresh Profiles"}
+                </button>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                  <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                    Last profiled: {formatDateTime(scoutProfilesQuery.data?.lastProfiled ?? null)}
+                  </span>
+                  {scoutProfilesQuery.data?.isStale && (
+                    <span style={{ background: "rgba(245,158,11,0.16)", color: "#fbbf24", borderRadius: 999, padding: "4px 8px", fontSize: 10, fontWeight: 800 }}>
+                      Stale data
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {!selectedLeague && (
+            <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: "48px 24px", marginTop: 16, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>
+              Select a league above to scout opponent tendencies.
+            </div>
+          )}
+
+          {selectedLeague && scoutProfilesQuery.isLoading && (
+            <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: "48px 24px", marginTop: 16, textAlign: "center" }}>
+              <span className="animate-pulse" style={{ color: "var(--amber)", fontSize: 14 }}>
+                Building opponent profiles...
+              </span>
+            </div>
+          )}
+
+          {selectedLeague && scoutProfilesQuery.error && (
+            <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: "24px 20px", marginTop: 16, color: "var(--red)", fontSize: 13 }}>
+              {(scoutProfilesQuery.error as Error).message || "Failed to load opponent profiles."}
+            </div>
+          )}
+
+          {selectedLeague && !scoutProfilesQuery.isLoading && !scoutProfilesQuery.error && scoutProfilesWithScores.length === 0 && (
+            <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: "48px 24px", marginTop: 16, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>
+              No opponent profiles are available yet. Refresh profiles to build the first pass from Sleeper history.
+            </div>
+          )}
+
+          {selectedLeague && scoutProfilesWithScores.length > 0 && (
+            <div style={{ display: "grid", gap: 16, marginTop: 16 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 }}>
+                {scoutProfilesWithScores.map(({ profile, exploitability }) => (
+                  <OpponentCard
+                    key={profile.rosterId}
+                    profile={profile}
+                    exploitability={exploitability}
+                    selected={profile.rosterId === selectedScoutRosterId}
+                    onExploit={() => setSelectedScoutRosterId(profile.rosterId)}
+                  />
+                ))}
+              </div>
+
+              {selectedScoutProfile && (
+                <OpponentDetail
+                  profile={selectedScoutProfile}
+                  angles={exploitAnglesQuery.data?.angles ?? []}
+                  isLoading={exploitAnglesQuery.isLoading}
+                  onFindTrades={() => {
+                    setMode("find");
+                    setSelectedScoutRosterId(selectedScoutProfile.rosterId);
+                  }}
+                  onClose={() => setSelectedScoutRosterId(null)}
+                />
               )}
             </div>
           )}

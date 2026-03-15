@@ -27,6 +27,14 @@ import {
   estimateAcceptance,
   type ManagerBehavior,
 } from "./manager-behavior.js";
+import {
+  loadTradeHealthPlayerInfo,
+  tradeHealthCheck,
+} from "./trade-calculator.js";
+import {
+  enrichScoredPick,
+  type ClassStrengthMap,
+} from "./pick-values.js";
 
 // Constants
 
@@ -54,10 +62,14 @@ interface RosterProfile {
   needs: Pos[];
   surplus: Record<Pos, CoreAsset[]>;
   needUrgency: Record<Pos, number>;
-  tradeablePicks: ScoredPick[];
+  tradeablePicks: EnrichedPick[];
   topPlayerIdsByPos: Record<Pos, string>;
   behavior?: ManagerBehavior;
 }
+
+type EnrichedPick = ScoredPick & {
+  pick_breakdown: TradePackageAsset["pick_breakdown"];
+};
 
 // Helpers
 
@@ -72,6 +84,7 @@ function median(arr: number[]): number {
 
 function assetFromPlayer(a: CoreAsset): TradePackageAsset {
   return {
+    player_id: a.player_id,
     asset_type: "player",
     label: a.full_name,
     position: a.position,
@@ -105,8 +118,9 @@ function assetFromPlayerWithScoring(
   return base;
 }
 
-function assetFromPick(p: ScoredPick): TradePackageAsset {
+function assetFromPick(p: EnrichedPick): TradePackageAsset {
   return {
+    player_id: null,
     asset_type: "pick",
     label: p.label,
     position: null,
@@ -118,6 +132,7 @@ function assetFromPick(p: ScoredPick): TradePackageAsset {
     league_adjusted_score: null,
     scoring_delta_ppg: null,
     source_agreement: "high",
+    pick_breakdown: p.pick_breakdown ?? null,
   };
 }
 
@@ -137,6 +152,13 @@ function tradeTypeForPackage(
   if (type === "consolidation") return "2-for-1";
   if (type === "player_plus_pick") return "player-plus-pick";
   return "pick-package";
+}
+
+function packageContainsPick(pkg: Pick<TradePackage, "you_send" | "you_receive">): boolean {
+  return (
+    pkg.you_send.some((asset) => asset.asset_type === "pick") ||
+    pkg.you_receive.some((asset) => asset.asset_type === "pick")
+  );
 }
 
 type PackageScore = {
@@ -270,7 +292,8 @@ function computeLeagueMedians(rosters: RosterRanking[]): Record<Pos, number> {
 
 function buildProfile(
   roster: RosterRanking,
-  medians: Record<Pos, number>
+  medians: Record<Pos, number>,
+  tradeablePicksOverride: EnrichedPick[] = []
 ): RosterProfile {
   const byPos: Record<Pos, CoreAsset[]> = { QB: [], RB: [], WR: [], TE: [] };
   for (const a of roster.core_assets) {
@@ -309,7 +332,7 @@ function buildProfile(
     }
   }
 
-  const tradeablePicks = (roster.draft_picks ?? [])
+  const tradeablePicks = tradeablePicksOverride
     .filter((p) => p.edge_score > 0)
     .sort((a, b) => b.edge_score - a.edge_score);
 
@@ -428,6 +451,7 @@ function generatePackages(
           ? `Add a late-round pick to ${scored.deltaEdge > 0 ? "sweeten for them" : "balance for you"}`
           : null,
         acceptance: null,
+        healthCheck: [],
       });
     }
   }
@@ -490,6 +514,7 @@ function generatePackages(
           ? "You're overpaying slightly. Try removing the weaker piece."
           : null,
       acceptance: null,
+      healthCheck: [],
     });
   }
 
@@ -540,6 +565,7 @@ function generatePackages(
           why_they_accept: `Gets ${userPos} help plus a future pick for their ${oppPos} surplus.`,
           sweetener_hint: scored.deltaEdge < -5 ? "Try downgrading the pick tier if the cost feels steep." : null,
           acceptance: null,
+          healthCheck: [],
         });
         break;
       }
@@ -613,7 +639,57 @@ function generatePackages(
           ? "Consider upgrading the pick round or adding another asset"
           : null,
         acceptance: null,
+        healthCheck: [],
       });
+    }
+  }
+
+  if (user.tradeablePicks.length >= 2 && opp.tradeablePicks.length > 0) {
+    for (const targetPick of opp.tradeablePicks.slice(0, 2)) {
+      const sendPool = user.tradeablePicks.filter(
+        (pick) =>
+          pick.label !== targetPick.label &&
+          (pick.pick_breakdown?.round ?? pick.round) <= 4
+      );
+      for (let i = 0; i < sendPool.length; i++) {
+        for (let j = i + 1; j < Math.min(sendPool.length, i + 4); j++) {
+          const offerA = sendPool[i];
+          const offerB = sendPool[j];
+          const firstRoundCount =
+            ((offerA.pick_breakdown?.round ?? offerA.round) === 1 ? 1 : 0) +
+            ((offerB.pick_breakdown?.round ?? offerB.round) === 1 ? 1 : 0);
+          if (firstRoundCount > 1) continue;
+
+          const send = [assetFromPick(offerA), assetFromPick(offerB)];
+          const receive = [assetFromPick(targetPick)];
+          const scored = scorePackage(send, receive);
+          if (scored.fairness === "lopsided" || scored.sendTotal <= 0 || scored.receiveTotal <= 0) {
+            continue;
+          }
+
+          packages.push({
+            type: "picks_heavy",
+            trade_type: tradeTypeForPackage("picks_heavy"),
+            label: "Pick Upgrade",
+            you_send: scored.sendAssets,
+            you_receive: scored.receiveAssets,
+            send_total: scored.sendTotal,
+            receive_total: scored.receiveTotal,
+            delta: scored.delta,
+            send_edge: scored.sendEdge,
+            receive_edge: scored.receiveEdge,
+            delta_edge: scored.deltaEdge,
+            package_penalty_pct_send: scored.packagePenaltySend,
+            package_penalty_pct_receive: scored.packagePenaltyReceive,
+            fairness: scored.fairness,
+            why_you_do_it: `Roll two picks into ${targetPick.label} and trade up the board`,
+            why_they_accept: "Moves one premium pick for multiple future assets and flexibility.",
+            sweetener_hint: scored.deltaEdge < -4 ? "Swap one pick down a tier if the price is too steep." : null,
+            acceptance: null,
+            healthCheck: [],
+          });
+        }
+      }
     }
   }
 
@@ -626,7 +702,7 @@ function generatePackages(
     deduped.push(pkg);
   }
 
-  const typeOrder = { balanced: 0, player_plus_pick: 1, consolidation: 2, picks_heavy: 3 };
+  const typeOrder = { player_plus_pick: 0, picks_heavy: 1, balanced: 2, consolidation: 3 };
   const fairnessRank = { fair: 0, slight_edge: 1, lopsided: 2 };
   deduped.sort((a, b) => {
     return (
@@ -637,14 +713,39 @@ function generatePackages(
     );
   });
 
-  return deduped.slice(0, 4);
+  const selected: TradePackage[] = [];
+  const pushPackage = (pkg: TradePackage) => {
+    if (selected.some(
+      (existing) =>
+        existing.type === pkg.type &&
+        existing.you_send.map((asset) => asset.label).join("|") === pkg.you_send.map((asset) => asset.label).join("|") &&
+        existing.you_receive.map((asset) => asset.label).join("|") === pkg.you_receive.map((asset) => asset.label).join("|")
+    )) {
+      return;
+    }
+    selected.push(pkg);
+  };
+
+  const pickPackages = deduped.filter(packageContainsPick);
+  const nonPickPackages = deduped.filter((pkg) => !packageContainsPick(pkg));
+  const minimumPickPackages = Math.min(2, pickPackages.length);
+  for (const pkg of pickPackages.slice(0, minimumPickPackages)) {
+    pushPackage(pkg);
+  }
+  for (const pkg of [...nonPickPackages, ...pickPackages.slice(minimumPickPackages)]) {
+    if (selected.length >= 4) break;
+    pushPackage(pkg);
+  }
+
+  return selected.slice(0, 4);
 }
 
 // Main
 
 export async function findTrades(
   username: string,
-  leagueId: string
+  leagueId: string,
+  classStrengths?: ClassStrengthMap
 ): Promise<TradeSuggestion[]> {
   const allLeagues = await getPowerRankings(username);
   const league = allLeagues.find((l) => l.league_id === leagueId);
@@ -665,7 +766,23 @@ export async function findTrades(
 
   const mode = league.mode;
   const medians = computeLeagueMedians(league.rosters);
-  const profiles = league.rosters.map((r) => buildProfile(r, medians));
+  const enrichedPickMap = new Map<number, EnrichedPick[]>();
+  for (const roster of league.rosters) {
+    const picks = await Promise.all(
+      (roster.draft_picks ?? []).map((pick) =>
+        enrichScoredPick(pick, {
+          leagueSize: league.rosters.length,
+          format: league.mode,
+          classStrengths,
+        })
+      )
+    );
+    enrichedPickMap.set(roster.roster_id, picks);
+  }
+
+  const profiles = league.rosters.map((r) =>
+    buildProfile(r, medians, enrichedPickMap.get(r.roster_id) ?? [])
+  );
   const behaviors = await buildLeagueBehaviors(leagueId);
   for (const profile of profiles) {
     profile.behavior = behaviors.get(profile.roster.roster_id);
@@ -675,6 +792,16 @@ export async function findTrades(
   if (!userProfile) return [];
 
   const opponents = profiles.filter((p) => !p.roster.is_user);
+  const healthScoreMap = new Map<string, number>();
+  for (const roster of league.rosters) {
+    for (const asset of roster.core_assets) {
+      healthScoreMap.set(asset.player_id, asset.edge_score);
+    }
+  }
+  const tradeHealthData = await loadTradeHealthPlayerInfo(
+    [...healthScoreMap.keys()],
+    healthScoreMap
+  );
 
   const ranked = opponents
     .map((opp) => {
@@ -689,7 +816,17 @@ export async function findTrades(
 
   for (const { opp, score, reason } of ranked) {
     const basePackages = generatePackages(userProfile, opp, mode, leagueScoring, usageMap, hasCustomScoring);
-    const packages = applyAcceptanceAndBehavior(basePackages, userProfile, opp);
+    const packages = applyAcceptanceAndBehavior(basePackages, userProfile, opp)
+      .map((pkg) => ({
+        ...pkg,
+        healthCheck: tradeHealthCheck(
+          pkg.you_send,
+          pkg.you_receive,
+          tradeHealthData,
+          pkg.fairness
+        ),
+      }))
+      .filter((pkg) => !pkg.healthCheck.some((warning) => warning.type === "block"));
     if (packages.length === 0) continue;
 
     suggestions.push({

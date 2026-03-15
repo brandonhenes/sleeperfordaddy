@@ -6,6 +6,7 @@ import {
   real,
   date,
   timestamp,
+  uuid,
   boolean as pgBoolean,
   primaryKey,
   bigint,
@@ -423,5 +424,97 @@ export const player_value_snapshots = pgTable(
   (table) => [
     primaryKey({ columns: [table.player_id, table.snapshot_date] }),
     index("idx_player_value_snapshots_date").on(table.snapshot_date),
+  ]
+);
+
+export const opponent_profiles = pgTable(
+  "opponent_profiles",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    league_id: text("league_id").notNull(),
+    roster_id: integer("roster_id").notNull(),
+    owner_id: text("owner_id"),
+    display_name: text("display_name"),
+    season: text("season").notNull(),
+    total_trades: integer("total_trades").default(0),
+    total_waiver_moves: integer("total_waiver_moves").default(0),
+    activity_level: text("activity_level"),
+    positions_acquired: jsonb("positions_acquired").default({}),
+    positions_sold: jsonb("positions_sold").default({}),
+    waiver_targets: jsonb("waiver_targets").default({}),
+    avg_age_acquired: real("avg_age_acquired"),
+    avg_age_sold: real("avg_age_sold"),
+    age_bias: text("age_bias"),
+    picks_acquired: integer("picks_acquired").default(0),
+    picks_sold: integer("picks_sold").default(0),
+    pick_tendency: text("pick_tendency"),
+    recent_trades: jsonb("recent_trades").default([]),
+    trade_partners: jsonb("trade_partners").default({}),
+    profiled_at: timestamp("profiled_at", { withTimezone: true }).defaultNow(),
+    seasons_analyzed: integer("seasons_analyzed").default(1),
+  },
+  (table) => [
+    index("idx_opp_profile_league").on(table.league_id),
+    index("idx_opp_profile_activity").on(table.activity_level),
+    uniqueIndex("idx_opp_profile_unique").on(
+      table.league_id,
+      table.roster_id,
+      table.season
+    ),
+  ]
+);
+
+export const rookie_adp = pgTable(
+  "rookie_adp",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    season: text("season").notNull(),
+    player_name: text("player_name").notNull(),
+    position: text("position").notNull(),
+    college: text("college"),
+    adp_rank: real("adp_rank").notNull(),
+    adp_high: integer("adp_high"),
+    adp_low: integer("adp_low"),
+    tier: integer("tier").notNull(),
+    nfl_team: text("nfl_team"),
+    nfl_draft_round: integer("nfl_draft_round"),
+    nfl_draft_pick: integer("nfl_draft_pick"),
+    nfl_draft_capital_grade: text("nfl_draft_capital_grade"),
+    landing_spot_grade: text("landing_spot_grade"),
+    edge_equivalent: real("edge_equivalent"),
+    source: text("source"),
+    updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    index("idx_rookie_adp_season").on(table.season),
+    index("idx_rookie_adp_tier").on(table.tier),
+    uniqueIndex("idx_rookie_adp_unique").on(table.season, table.player_name),
+  ]
+);
+
+export const pick_values = pgTable(
+  "pick_values",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    season: text("season").notNull(),
+    round: integer("round").notNull(),
+    pick_tier: text("pick_tier").notNull(),
+    league_size: integer("league_size").notNull(),
+    format: text("format").notNull(),
+    edge_equivalent: real("edge_equivalent").notNull(),
+    fc_equivalent: real("fc_equivalent"),
+    class_strength_modifier: real("class_strength_modifier").default(1.0),
+    notes: text("notes"),
+    updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    index("idx_pick_values_season").on(table.season),
+    uniqueIndex("idx_pick_values_unique").on(
+      table.season,
+      table.round,
+      table.pick_tier,
+      table.league_size,
+      table.format
+    ),
   ]
 );

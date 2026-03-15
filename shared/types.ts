@@ -252,6 +252,9 @@ export interface TradeAssetInput {
   pick_season?: string;
   pick_round?: number;
   pick_tier?: "early" | "mid" | "late";
+  pick_slot?: number | null;
+  pick_label?: string;
+  pick_original_owner_id?: number | null;
 }
 
 export interface TradeEvaluation {
@@ -270,6 +273,54 @@ export interface TradeEvaluation {
   delta: number; // positive = sideA wins by trade power
   delta_edge: number; // positive = sideA wins by raw edge
   fairness: "fair" | "slight_edge" | "lopsided";
+  healthCheck: TradeHealthWarning[];
+}
+
+export interface TradePickBreakdown {
+  season: string;
+  round: number;
+  pickSlot: number;
+  tier: "early" | "mid" | "late";
+  baseEdgeValue: number;
+  classStrengthModifier: number;
+  finalValue: number;
+  projectedProspect: string | null;
+  prospectTier: number | null;
+  pickLabel: string;
+}
+
+export interface PickValue {
+  season: string;
+  round: number;
+  pickSlot: number;
+  originalOwnerRosterId: number | null;
+  currentOwnerRosterId: number | null;
+  tier: "early" | "mid" | "late";
+  baseEdgeValue: number;
+  classStrengthModifier: number;
+  finalValue: number;
+  projectedProspect: string | null;
+  prospectTier: number | null;
+  pickLabel: string;
+}
+
+export interface RookieADP {
+  season: string;
+  playerName: string;
+  position: string;
+  college: string | null;
+  adpRank: number;
+  adpHigh: number | null;
+  adpLow: number | null;
+  tier: number;
+  nflTeam: string | null;
+  nflDraftRound: number | null;
+  nflDraftPick: number | null;
+  nflDraftCapitalGrade: string | null;
+  landingSpotGrade: string | null;
+  edgeEquivalent: number | null;
+  source: string | null;
+  updatedAt: string | null;
 }
 
 export interface EvaluatedAsset {
@@ -284,6 +335,13 @@ export interface EvaluatedAsset {
   league_adjusted_score: number | null;
   scoring_delta_ppg: number | null;
   source_agreement: "high" | "medium" | "low";
+  pick_breakdown?: TradePickBreakdown | null;
+}
+
+export interface TradeHealthWarning {
+  type: "block" | "warning";
+  rule: string;
+  message: string;
 }
 
 // ─── Trade Finder ───
@@ -327,9 +385,11 @@ export interface TradePackage {
     accept_reasons: string[];
     reject_reasons: string[];
   } | null;
+  healthCheck: TradeHealthWarning[];
 }
 
 export interface TradePackageAsset {
+  player_id?: string | null;
   asset_type: "player" | "pick";
   label: string;
   position: string | null;
@@ -341,6 +401,7 @@ export interface TradePackageAsset {
   league_adjusted_score: number | null;
   scoring_delta_ppg: number | null;
   source_agreement: "high" | "medium" | "low";
+  pick_breakdown?: TradePickBreakdown | null;
 }
 
 // ─── League History ───
@@ -540,6 +601,58 @@ export interface ShopOpportunity {
     accept_reasons: string[];
     reject_reasons: string[];
   };
+  healthCheck: TradeHealthWarning[];
+}
+
+export interface RecentTrade {
+  transactionId: string;
+  season: string;
+  date: string;
+  partnerRosterId: number | null;
+  partnerDisplayName: string | null;
+  acquired: string[];
+  sold: string[];
+}
+
+export interface OpponentProfile {
+  leagueId: string;
+  rosterId: number;
+  ownerId: string | null;
+  displayName: string;
+  season: string;
+  totalTrades: number;
+  totalWaiverMoves: number;
+  activityLevel: "hyperactive" | "active" | "moderate" | "passive" | "inactive";
+  positionsAcquired: Record<string, number>;
+  positionsSold: Record<string, number>;
+  waiverTargets: Record<string, number>;
+  avgAgeAcquired: number | null;
+  avgAgeSold: number | null;
+  ageBias: "youth_chaser" | "leans_young" | "neutral" | "leans_vet" | "win_now_buyer";
+  picksAcquired: number;
+  picksSold: number;
+  pickTendency: "hoarder" | "accumulator" | "neutral" | "seller" | "spender";
+  recentTrades: RecentTrade[];
+  tradePartners: Record<string, number>;
+  profiledAt: string;
+  seasonsAnalyzed: number;
+  isStale: boolean;
+}
+
+export interface ExploitAngle {
+  strategy: string;
+  offer: string;
+  reasoning: string;
+  tendencyExploited: string;
+  confidence: "high" | "medium" | "low";
+}
+
+export interface OpponentProfilesResponse {
+  profiles: OpponentProfile[];
+  myRosterId: number | null;
+  leagueName: string;
+  lastProfiled: string | null;
+  isStale: boolean;
 }
 
 // Trade History / Execution Tracker

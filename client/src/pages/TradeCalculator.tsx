@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import AppShell from "../components/AppShell";
 import EdgeScoreBadge from "../components/EdgeScoreBadge";
 import FreshnessBar from "../components/FreshnessBar";
+import { PickBadge } from "../components/ui";
 import { posColor } from "../lib/position-colors";
 import { useEvaluateTrade } from "../hooks/use-trade-calculator";
 import {
@@ -13,7 +14,12 @@ import {
 } from "../hooks/use-power-rankings";
 import { apiFetch } from "../lib/api";
 import { computeAcceptance, type AcceptanceResult } from "../lib/acceptance";
-import type { EvaluatedAsset, TradeAssetInput, TradeEvaluation } from "../../../shared/types";
+import type {
+  EvaluatedAsset,
+  TradeAssetInput,
+  TradeEvaluation,
+  TradeHealthWarning,
+} from "../../../shared/types";
 
 type Side = "send" | "receive";
 type PickTier = "early" | "mid" | "late";
@@ -62,13 +68,33 @@ const YEAR = new Date().getFullYear();
 const PICK_YEARS = [String(YEAR), String(YEAR + 1), String(YEAR + 2)];
 
 function assetKey(a: TradeAssetInput): string {
-  return a.type === "player"
-    ? `p:${a.player_id}`
-    : `k:${a.pick_season}|${a.pick_round}|${a.pick_tier ?? "mid"}`;
+  if (a.type === "player") {
+    return `p:${a.player_id}`;
+  }
+  const ownerKey = a.pick_original_owner_id != null ? `|${a.pick_original_owner_id}` : "";
+  if (a.pick_slot != null) {
+    return `k:${a.pick_season}|${a.pick_round}|${a.pick_slot}${ownerKey}`;
+  }
+  return `k:${a.pick_season}|${a.pick_round}|${a.pick_tier ?? "mid"}${ownerKey}`;
 }
 
 function pickToAsset(pick: ScoredPick): TradeAssetInput {
-  return { type: "pick", pick_season: pick.season, pick_round: pick.round, pick_tier: pick.tier };
+  return {
+    type: "pick",
+    pick_season: pick.season,
+    pick_round: pick.round,
+    pick_tier: pick.tier,
+    pick_slot: pick.pick_slot ?? null,
+    pick_label: pickDisplay(pick),
+    pick_original_owner_id: pick.original_owner_id,
+  };
+}
+
+function pickKey(pick: ScoredPick): string {
+  if (pick.pick_slot != null) {
+    return `k:${pick.season}|${pick.round}|${pick.pick_slot}|${pick.original_owner_id}`;
+  }
+  return `k:${pick.season}|${pick.round}|${pick.tier}|${pick.original_owner_id}`;
 }
 
 function pickDisplay(pick: ScoredPick): string {
@@ -95,6 +121,62 @@ function acceptanceColor(label: AcceptanceResult["label"]): string {
   if (label === "Possible") return "var(--amber)";
   if (label === "Unlikely") return "#f97316";
   return "var(--red)";
+}
+
+function warningColors(type: TradeHealthWarning["type"]) {
+  if (type === "block") {
+    return {
+      background: "rgba(239,68,68,0.12)",
+      border: "1px solid rgba(239,68,68,0.28)",
+      color: "#fca5a5",
+      label: "#f87171",
+    };
+  }
+  return {
+    background: "rgba(245,158,11,0.12)",
+    border: "1px solid rgba(245,158,11,0.28)",
+    color: "#fcd34d",
+    label: "#fbbf24",
+  };
+}
+
+function TradeHealthPanel({ warnings }: { warnings: TradeHealthWarning[] }) {
+  if (warnings.length === 0) return null;
+
+  return (
+    <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
+      {warnings.map((warning, index) => {
+        const colors = warningColors(warning.type);
+        return (
+          <div
+            key={`${warning.rule}-${index}`}
+            style={{
+              background: colors.background,
+              border: colors.border,
+              borderRadius: 8,
+              padding: "10px 12px",
+            }}
+          >
+            <div
+              style={{
+                color: colors.label,
+                fontSize: 10,
+                fontWeight: 800,
+                letterSpacing: 0.4,
+                textTransform: "uppercase",
+                marginBottom: 4,
+              }}
+            >
+              {warning.type} | {warning.rule}
+            </div>
+            <div style={{ color: colors.color, fontSize: 12, lineHeight: 1.5 }}>
+              {warning.message}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 function packagePenalty(count: number): number {
@@ -190,6 +272,7 @@ function EvalBar({
         <div style={{ width: `${sendPct}%`, background: "#ef4444" }} />
         <div style={{ flex: 1, background: "#22c55e" }} />
       </div>
+      <TradeHealthPanel warnings={result.healthCheck} />
     </div>
   );
 }
@@ -265,9 +348,22 @@ function TradePanel({
       {labels.map((label, idx) => {
         const asset = evaluated?.[idx];
         return (
-          <div key={`${label}-${idx}`} style={{ display: "flex", alignItems: "center", gap: 8, borderBottom: "1px solid var(--border)", padding: "7px 0" }}>
+          <div key={`${label}-${idx}`} style={{ display: "flex", alignItems: "flex-start", gap: 8, borderBottom: "1px solid var(--border)", padding: "7px 0" }}>
             {asset ? <EdgeScoreBadge score={Math.round(asset.edge_score)} size="sm" /> : <span style={{ width: 32 }} />}
-            <span style={{ flex: 1, fontSize: 12 }}>{asset?.label ?? label}</span>
+            <div style={{ flex: 1, display: "grid", gap: 4 }}>
+              {asset?.pick_breakdown ? (
+                <>
+                  <PickBadge pick={asset.pick_breakdown} compact />
+                  <div style={{ fontSize: 10, color: "var(--text-muted)", lineHeight: 1.4 }}>
+                    Slot {asset.pick_breakdown.round}.{String(asset.pick_breakdown.pickSlot).padStart(2, "0")} | Base {asset.pick_breakdown.baseEdgeValue.toFixed(1)} | x{asset.pick_breakdown.classStrengthModifier.toFixed(2)}
+                    {asset.pick_breakdown.projectedProspect ? ` | ${asset.pick_breakdown.projectedProspect}` : ""}
+                    {asset.pick_breakdown.prospectTier != null ? ` (Tier ${asset.pick_breakdown.prospectTier})` : ""}
+                  </div>
+                </>
+              ) : (
+                <span style={{ fontSize: 12 }}>{asset?.label ?? label}</span>
+              )}
+            </div>
             {asset && <span className="font-mono" style={{ fontSize: 11, color: "var(--text-dim)" }}>TP {Math.round(asset.trade_power)}</span>}
             <button type="button" onClick={() => onRemove(idx)} style={{ border: "1px solid var(--border)", background: "transparent", color: "var(--red)", borderRadius: 6, padding: "2px 8px", fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>X</button>
           </div>
@@ -520,10 +616,10 @@ function RosterGrid({
       <div>
         <div style={{ background: "var(--dark-base)", color: "#06b6d4", fontSize: 11, fontWeight: 800, padding: "8px 12px" }}>PICKS</div>
         {!picks.length && <div style={{ padding: "8px 12px", color: "var(--text-muted)", fontSize: 12 }}>No picks available.</div>}
-        {picks.map((pick, idx) => {
-          const used = usedPickKeys.has(assetKey(pickToAsset(pick)));
+        {picks.map((pick) => {
+          const used = usedPickKeys.has(pickKey(pick));
           return (
-            <button type="button" key={`${pick.season}-${pick.round}-${pick.original_owner_id}-${idx}`} onClick={() => onPickClick(pick)} style={{ width: "100%", border: "none", borderTop: "1px solid var(--border)", background: used ? "rgba(148,163,184,0.14)" : "transparent", color: "var(--text)", display: "flex", gap: 8, alignItems: "center", padding: "7px 12px", textAlign: "left", cursor: "pointer", fontFamily: "inherit", opacity: used ? 0.65 : 1 }}>
+            <button type="button" key={pickKey(pick)} onClick={() => onPickClick(pick)} style={{ width: "100%", border: "none", borderTop: "1px solid var(--border)", background: used ? "rgba(148,163,184,0.14)" : "transparent", color: "var(--text)", display: "flex", gap: 8, alignItems: "center", padding: "7px 12px", textAlign: "left", cursor: "pointer", fontFamily: "inherit", opacity: used ? 0.65 : 1 }}>
               <span style={{ fontSize: 9, width: 28, color: "#06b6d4", fontWeight: 700 }}>PICK</span>
               <span style={{ flex: 1, fontSize: 12 }}>{pickDisplay(pick)}</span>
               <EdgeScoreBadge score={Math.round(pick.edge_score)} size="sm" />
@@ -706,7 +802,8 @@ export default function TradeCalculator() {
     const pickTier = side === "send" ? sendPickTier : receivePickTier;
     const roundLabel = pickRound === 1 ? "1st" : pickRound === 2 ? "2nd" : pickRound === 3 ? "3rd" : `R${pickRound}`;
     const tierLabel = `${pickTier.charAt(0).toUpperCase()}${pickTier.slice(1)}`;
-    toggleAsset(side, { type: "pick", pick_season: pickSeason, pick_round: pickRound, pick_tier: pickTier }, `${pickSeason} ${tierLabel} ${roundLabel}`);
+    const label = `${pickSeason} ${tierLabel} ${roundLabel}`;
+    toggleAsset(side, { type: "pick", pick_season: pickSeason, pick_round: pickRound, pick_tier: pickTier, pick_label: label }, label);
   }
 
   const leagueColumns = isCompactLeagueLayout ? "1fr" : "minmax(0, 1fr) 320px minmax(0, 1fr)";

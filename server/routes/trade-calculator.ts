@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { evaluateTrade, searchTradeAssets } from "../services/trade-calculator.js";
 import { parseWeights } from "../lib/parse-weights.js";
+import { parseClassStrengths } from "../lib/parse-class-strengths.js";
 import { buildLeagueBehaviors, type OpponentContext } from "../services/manager-behavior.js";
 import { getPowerRankings } from "../services/power-rankings.js";
 import type { TradeAssetInput } from "../../shared/types.js";
@@ -33,7 +34,8 @@ router.post("/api/trade/evaluate", async (req, res) => {
       return res.status(400).json({ message: "sideA and sideB are required" });
     }
     const weights = parseWeights(req);
-    const data = await evaluateTrade(sideA, sideB, mode ?? "sf", weights, leagueId);
+    const classStrengths = parseClassStrengths(req);
+    const data = await evaluateTrade(sideA, sideB, mode ?? "sf", weights, leagueId, classStrengths);
     res.json(data);
   } catch (err) {
     console.error("[trade-calculator] Error:", err);

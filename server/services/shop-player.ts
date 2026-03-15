@@ -3,6 +3,8 @@ import type { ScoredPick } from "./draft-picks.js";
 import type { ShopPlayerResult, ShopOpportunity, EvaluatedAsset } from "../../shared/types.js";
 import { evaluateTradeValue } from "./trade-value.js";
 import { buildLeagueBehaviors, estimateAcceptance, type ManagerBehavior } from "./manager-behavior.js";
+import { loadTradeHealthPlayerInfo, tradeHealthCheck } from "./trade-calculator.js";
+import { enrichScoredPick, type ClassStrengthMap } from "./pick-values.js";
 
 const POSITIONS = ["QB", "RB", "WR", "TE"];
 const MIN_STARTERS: Record<string, number> = { QB: 1, RB: 2, WR: 2, TE: 1 };
@@ -15,6 +17,10 @@ const ARCHETYPE_BUY_MOTIVATION: Record<string, { wants_vets: number; wants_youth
   Rebuilder: { wants_vets: 10, wants_youth: 80, wants_picks: 95 },
   "Dead Zone": { wants_vets: 50, wants_youth: 60, wants_picks: 50 },
   Competitor: { wants_vets: 60, wants_youth: 50, wants_picks: 40 },
+};
+
+type EnrichedPick = ScoredPick & {
+  pick_breakdown: EvaluatedAsset["pick_breakdown"];
 };
 
 function toEval(a: CoreAsset): EvaluatedAsset {
@@ -33,7 +39,7 @@ function toEval(a: CoreAsset): EvaluatedAsset {
   };
 }
 
-function pickToEval(p: ScoredPick): EvaluatedAsset {
+function pickToEval(p: EnrichedPick): EvaluatedAsset {
   return {
     player_id: null,
     position: null,
@@ -46,6 +52,7 @@ function pickToEval(p: ScoredPick): EvaluatedAsset {
     league_adjusted_score: null,
     scoring_delta_ppg: null,
     source_agreement: "high",
+    pick_breakdown: p.pick_breakdown ?? null,
   };
 }
 
@@ -130,6 +137,8 @@ interface PackageContext {
   playerAsset: CoreAsset;
   leagueMedians: Record<string, number>;
   ambition: number;
+  userPicks: EnrichedPick[];
+  oppPicks: EnrichedPick[];
 }
 
 interface RawPackage {
@@ -146,7 +155,7 @@ interface RawPackage {
 }
 
 function generatePackages(ctx: PackageContext): RawPackage[] {
-  const { userRoster, opp, playerAsset, leagueMedians, ambition } = ctx;
+  const { userRoster, opp, playerAsset, leagueMedians, ambition, userPicks, oppPicks } = ctx;
   const packages: RawPackage[] = [];
 
   const oppSurplus: CoreAsset[] = [];
@@ -161,12 +170,6 @@ function generatePackages(ctx: PackageContext): RawPackage[] {
   }
 
   const userNeeds = computeNeeds(userRoster, leagueMedians);
-  const userPicks = (userRoster.draft_picks ?? [])
-    .filter((p) => p.edge_score > 0)
-    .sort((a, b) => b.edge_score - a.edge_score);
-  const oppPicks = (opp.draft_picks ?? [])
-    .filter((p) => p.edge_score > 0)
-    .sort((a, b) => b.edge_score - a.edge_score);
   const userDepth = userRoster.core_assets
     .filter((a) => a.player_id !== playerAsset.player_id && a.edge_score >= 40 && a.edge_score < 70)
     .sort((a, b) => b.edge_score - a.edge_score);
@@ -329,6 +332,80 @@ function generatePackages(ctx: PackageContext): RawPackage[] {
     }
   }
 
+  if (oppPicks.length > 0) {
+    for (const firstPick of oppPicks.slice(0, 4)) {
+      const solo = scorePackage([playerAsset.edge_score], [firstPick.edge_score]);
+      if (solo.fairness !== "lopsided") {
+        packages.push({
+          path: "sell_for_pieces",
+          path_label: "Sell for Picks",
+          you_send: fillTradePower([toEval(playerAsset)], solo.sendTPs),
+          you_receive: fillTradePower([pickToEval(firstPick)], solo.receiveTPs),
+          sendTotal: solo.sendTotal,
+          receiveTotal: solo.receiveTotal,
+          delta: solo.delta,
+          fairness: solo.fairness,
+          why_you_do_it: `Turn ${playerAsset.full_name} into direct draft capital`,
+          why_they_accept: "Converts picks into a lineup starter right now.",
+        });
+        continue;
+      }
+
+      const secondPick = oppPicks.find((pick) => pick.label !== firstPick.label);
+      if (!secondPick) continue;
+      const duo = scorePackage(
+        [playerAsset.edge_score],
+        [firstPick.edge_score, secondPick.edge_score]
+      );
+      if (duo.fairness === "lopsided" && duo.delta < 0) continue;
+      packages.push({
+        path: "sell_for_pieces",
+        path_label: "Sell for Picks",
+        you_send: fillTradePower([toEval(playerAsset)], duo.sendTPs),
+        you_receive: fillTradePower([pickToEval(firstPick), pickToEval(secondPick)], duo.receiveTPs),
+        sendTotal: duo.sendTotal,
+        receiveTotal: duo.receiveTotal,
+        delta: duo.delta,
+        fairness: duo.fairness,
+        why_you_do_it: `Cash out ${playerAsset.full_name} into multiple future darts`,
+        why_they_accept: "Consolidates pick surplus into a lineup upgrade.",
+      });
+    }
+  }
+
+  if (userPicks.length >= 2) {
+    for (const target of returnCandidates.filter((candidate) => candidate.edge_score >= playerAsset.edge_score + 8).slice(0, 4)) {
+      for (let i = 0; i < userPicks.length; i++) {
+        for (let j = i + 1; j < Math.min(userPicks.length, i + 4); j++) {
+          const offerA = userPicks[i];
+          const offerB = userPicks[j];
+          const firstRoundCount =
+            ((offerA.pick_breakdown?.round ?? offerA.round) === 1 ? 1 : 0) +
+            ((offerB.pick_breakdown?.round ?? offerB.round) === 1 ? 1 : 0);
+          if (firstRoundCount > 1) continue;
+
+          const scored = scorePackage(
+            [offerA.edge_score, offerB.edge_score],
+            [target.edge_score]
+          );
+          if (scored.fairness === "lopsided") continue;
+          packages.push({
+            path: "you_upgrade",
+            path_label: "Pick Package Upgrade",
+            you_send: fillTradePower([pickToEval(offerA), pickToEval(offerB)], scored.sendTPs),
+            you_receive: fillTradePower([toEval(target)], scored.receiveTPs),
+            sendTotal: scored.sendTotal,
+            receiveTotal: scored.receiveTotal,
+            delta: scored.delta,
+            fairness: scored.fairness,
+            why_you_do_it: `Buy ${target.full_name} with picks instead of a core player`,
+            why_they_accept: "Gets multiple future assets for one veteran cornerstone.",
+          });
+        }
+      }
+    }
+  }
+
   const unique = new Map<string, RawPackage>();
   for (const pkg of packages) {
     const key = `${pkg.path}|${pkg.you_send.map((a) => a.label).join("+")}|${pkg.you_receive.map((a) => a.label).join("+")}`;
@@ -344,7 +421,8 @@ function generatePackages(ctx: PackageContext): RawPackage[] {
 export async function shopPlayer(
   username: string,
   playerId: string,
-  ambition = 2
+  ambition = 2,
+  classStrengths?: ClassStrengthMap
 ): Promise<ShopPlayerResult | null> {
   const allLeagues = await getPowerRankings(username);
   if (allLeagues.length === 0) return null;
@@ -368,6 +446,19 @@ export async function shopPlayer(
   const clampedAmbition = Math.max(1, Math.min(3, ambition));
   const firstAsset = leaguesWithPlayer[0].playerAsset;
   const allOpportunities: ShopOpportunity[] = [];
+  const healthScoreMap = new Map<string, number>();
+  for (const { league } of leaguesWithPlayer) {
+    for (const roster of league.rosters) {
+      for (const asset of roster.core_assets) {
+        healthScoreMap.set(asset.player_id, asset.edge_score);
+      }
+    }
+  }
+  const tradeHealthData = await loadTradeHealthPlayerInfo(
+    [...healthScoreMap.keys()],
+    healthScoreMap
+  );
+  const pickMap = new Map<string, EnrichedPick[]>();
 
   for (const { league, userRoster, playerAsset } of leaguesWithPlayer) {
     const leagueMedians: Record<string, number> = {};
@@ -385,6 +476,22 @@ export async function shopPlayer(
 
     const behaviors = await buildLeagueBehaviors(league.league_id);
     const opponents = league.rosters.filter((r) => !r.is_user);
+    const getLeaguePicks = async (roster: RosterRanking) => {
+      const cacheKey = `${league.league_id}:${roster.roster_id}`;
+      if (pickMap.has(cacheKey)) return pickMap.get(cacheKey) ?? [];
+      const picks = await Promise.all(
+        (roster.draft_picks ?? []).map((pick) =>
+          enrichScoredPick(pick, {
+            leagueSize: league.rosters.length,
+            format: league.mode,
+            classStrengths,
+          })
+        )
+      );
+      picks.sort((a, b) => b.edge_score - a.edge_score);
+      pickMap.set(cacheKey, picks);
+      return picks;
+    };
 
     for (const opp of opponents) {
       const motivation = scoreBuyerMotivation(opp, playerAsset, leagueMedians);
@@ -399,6 +506,8 @@ export async function shopPlayer(
         playerAsset,
         leagueMedians,
         ambition: clampedAmbition,
+        userPicks: await getLeaguePicks(userRoster),
+        oppPicks: await getLeaguePicks(opp),
       });
 
       for (const pkg of packages) {
@@ -419,6 +528,15 @@ export async function shopPlayer(
 
         const acceptanceScore = acceptance?.probability ?? 0;
         const fillsNeed = pkg.you_send.some((a) => a.position && oppNeeds.includes(a.position));
+        const healthCheck = tradeHealthCheck(
+          pkg.you_send,
+          pkg.you_receive,
+          tradeHealthData,
+          pkg.fairness
+        );
+        if (healthCheck.some((warning) => warning.type === "block")) {
+          continue;
+        }
         const score = Math.round(
           motivation.score * 0.2 +
           acceptanceScore * 0.4 +
@@ -452,6 +570,7 @@ export async function shopPlayer(
             accept_reasons: [],
             reject_reasons: ["No acceptance signal available"],
           },
+          healthCheck,
         });
       }
     }

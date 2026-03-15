@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import AppShell from "../components/AppShell";
+import ClassStrengthSettings from "../components/ClassStrengthSettings";
 
 interface Weights {
   fc: number;
@@ -154,6 +155,8 @@ export default function Settings() {
           Power Rankings and Dashboard use the default equal weighting for cache efficiency.
         </div>
       </div>
+
+      <ClassStrengthSettings />
     </AppShell>
   );
 }

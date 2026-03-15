@@ -2,6 +2,7 @@ import { Router } from "express";
 import { findTrades } from "../services/trade-finder.js";
 import { findAcquisitionPackages } from "../services/acquisition-finder.js";
 import { shopPlayer } from "../services/shop-player.js";
+import { parseClassStrengths } from "../lib/parse-class-strengths.js";
 
 const router = Router();
 
@@ -12,7 +13,8 @@ router.get("/api/trade/find/:username/:leagueId", async (req, res) => {
     if (!username || !leagueId) {
       return res.status(400).json({ message: "username and leagueId are required" });
     }
-    const data = await findTrades(username, leagueId);
+    const classStrengths = parseClassStrengths(req);
+    const data = await findTrades(username, leagueId, classStrengths);
     res.json(data);
   } catch (err) {
     console.error("[trade-finder] Error:", err);
@@ -43,7 +45,8 @@ router.get("/api/trade/shop/:username/:playerId", async (req, res) => {
       return res.status(400).json({ message: "username and playerId are required" });
     }
     const ambition = Number(req.query.ambition ?? 2);
-    const data = await shopPlayer(username, playerId, ambition);
+    const classStrengths = parseClassStrengths(req);
+    const data = await shopPlayer(username, playerId, ambition, classStrengths);
     if (!data) {
       return res.status(404).json({ message: "Player not found in any league" });
     }
