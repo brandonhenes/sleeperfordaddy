@@ -1,7 +1,21 @@
 import { db } from "../db/connection.js";
 import { sql } from "drizzle-orm";
-import { getPowerRankings, type LeaguePowerRanking } from "./power-rankings.js";
+import {
+  getPowerRankings,
+  type CoreAsset,
+  type LeaguePowerRanking,
+  type RosterRanking,
+} from "./power-rankings.js";
 import { getScoreMovers, type Mover } from "./snapshot-scores.js";
+import type { LeagueScope } from "./dynasty-leagues.js";
+import { optimizeLineup } from "./lineup-optimizer.js";
+import { computeEdgeScores } from "./edge-score.js";
+import {
+  computeScoringDelta,
+  estimateBaselineFPPG,
+  loadPlayerUsageStats,
+  parseLeagueScoring,
+} from "./scoring-adjustment.js";
 
 const DASHBOARD_TTL_MS = 30_000;
 const dashboardCache = new Map<string, { data: DashboardData | null; expires: number }>();
@@ -9,9 +23,13 @@ const dashboardInFlight = new Map<string, Promise<DashboardData | null>>();
 
 export function clearDashboardCache(username?: string) {
   if (username) {
-    const key = username.toLowerCase();
-    dashboardCache.delete(key);
-    dashboardInFlight.delete(key);
+    const prefix = `${username.toLowerCase()}:`;
+    for (const key of dashboardCache.keys()) {
+      if (key.startsWith(prefix)) dashboardCache.delete(key);
+    }
+    for (const key of dashboardInFlight.keys()) {
+      if (key.startsWith(prefix)) dashboardInFlight.delete(key);
+    }
     return;
   }
   dashboardCache.clear();
@@ -112,8 +130,144 @@ function d1(n: number): number {
 
 // ─── Main ───
 
-export async function getDashboardData(username: string): Promise<DashboardData | null> {
-  const cacheKey = username.toLowerCase();
+const DEFAULT_ROSTER_POSITIONS = [
+  "QB",
+  "RB",
+  "RB",
+  "WR",
+  "WR",
+  "WR",
+  "TE",
+  "FLEX",
+  "BN",
+  "BN",
+  "BN",
+  "BN",
+  "BN",
+  "BN",
+  "BN",
+];
+
+type DashboardUserRoster = {
+  league: LeaguePowerRanking;
+  roster: RosterRanking;
+};
+
+function blendRedraftScore(edgeScore: number, ppgScore: number): number {
+  return d1(edgeScore * 0.45 + ppgScore * 0.55);
+}
+
+async function applyRedraftMultiSourcePpg(
+  userRosters: DashboardUserRoster[]
+): Promise<DashboardUserRoster[]> {
+  if (userRosters.length === 0) return userRosters;
+
+  const leagueIds = [...new Set(userRosters.map((x) => x.league.league_id))];
+  const inClause = sql.join(leagueIds.map((id) => sql`${id}`), sql`, `);
+
+  const leagueRows = await db.execute(sql`
+    SELECT league_id, roster_positions, scoring_settings
+    FROM leagues
+    WHERE league_id IN (${inClause})
+  `);
+
+  type LeagueRow = {
+    league_id: string;
+    roster_positions: string[] | null;
+    scoring_settings: Record<string, unknown> | null;
+  };
+
+  const leagueConfig = new Map<string, LeagueRow>();
+  for (const row of leagueRows as unknown as LeagueRow[]) {
+    leagueConfig.set(row.league_id, row);
+  }
+
+  const allPlayerIds = [
+    ...new Set(
+      userRosters.flatMap((x) =>
+        x.roster.core_assets.map((asset) => asset.player_id)
+      )
+    ),
+  ];
+  const usageMap = await loadPlayerUsageStats(allPlayerIds);
+
+  const ppgInputs: Array<{
+    sleeper_id: string;
+    fc_value: number | null;
+    ktc_value: null;
+    dp_value: null;
+  }> = [];
+
+  for (const x of userRosters) {
+    const config = leagueConfig.get(x.league.league_id);
+    const scoring = parseLeagueScoring(config?.scoring_settings ?? null);
+
+    for (const asset of x.roster.core_assets) {
+      const usage = usageMap.get(asset.player_id);
+      if (!usage) continue;
+
+      const { delta_ppg } = computeScoringDelta(usage, asset.position, scoring);
+      const leaguePpg = estimateBaselineFPPG(usage, asset.position) + delta_ppg;
+      if (leaguePpg <= 0) continue;
+
+      ppgInputs.push({
+        sleeper_id: `${x.league.league_id}:${asset.player_id}`,
+        fc_value: leaguePpg,
+        ktc_value: null,
+        dp_value: null,
+      });
+    }
+  }
+
+  if (ppgInputs.length === 0) return userRosters;
+
+  const ppgScoreMap = computeEdgeScores(ppgInputs);
+
+  return userRosters.map((x) => {
+    const config = leagueConfig.get(x.league.league_id);
+    const rosterPositions = config?.roster_positions ?? DEFAULT_ROSTER_POSITIONS;
+
+    const coreAssets: CoreAsset[] = x.roster.core_assets.map((asset) => {
+      const ppgScore =
+        ppgScoreMap.get(`${x.league.league_id}:${asset.player_id}`)?.fc_score ??
+        null;
+
+      if (ppgScore == null) return asset;
+
+      return {
+        ...asset,
+        edge_score: blendRedraftScore(asset.edge_score, ppgScore),
+      };
+    });
+
+    const lineup = optimizeLineup(coreAssets, rosterPositions);
+    const avgStarterScore =
+      lineup.starters.length > 0
+        ? d1(
+            lineup.starters.reduce(
+              (sum, starter) => sum + starter.edge_score,
+              0
+            ) / lineup.starters.length
+          )
+        : 0;
+
+    return {
+      ...x,
+      roster: {
+        ...x.roster,
+        core_assets: coreAssets,
+        lineup,
+        avg_starter_score: avgStarterScore,
+      },
+    };
+  });
+}
+
+export async function getDashboardData(
+  username: string,
+  scope: LeagueScope = "dynasty"
+): Promise<DashboardData | null> {
+  const cacheKey = `${username.toLowerCase()}:${scope}`;
   const now = Date.now();
   const hit = dashboardCache.get(cacheKey);
   if (hit && hit.expires > now) return hit.data;
@@ -122,16 +276,28 @@ export async function getDashboardData(username: string): Promise<DashboardData 
   if (pending) return pending;
 
   const work = (async () => {
-  const rankings = await getPowerRankings(username);
-  if (rankings.length === 0) return null;
+    const rankings = await getPowerRankings(username, scope);
+    if (rankings.length === 0) return null;
 
-  const totalLeagues = rankings.length;
+    const totalLeagues = rankings.length;
 
-  // Extract user roster from each league
-  const userRosters = rankings.map((l) => ({
-    league: l,
-    roster: l.rosters.find((r) => r.is_user),
-  })).filter((x): x is { league: LeaguePowerRanking; roster: NonNullable<typeof x.roster> } => x.roster != null);
+    // Extract user roster from each league
+    const rawUserRosters = rankings
+      .map((l) => ({
+        league: l,
+        roster: l.rosters.find((r) => r.is_user),
+      }))
+      .filter(
+        (
+          x
+        ): x is { league: LeaguePowerRanking; roster: NonNullable<typeof x.roster> } =>
+          x.roster != null
+      );
+
+    const userRosters =
+      scope === "redraft"
+        ? await applyRedraftMultiSourcePpg(rawUserRosters)
+        : rawUserRosters;
 
   // ─── Empire Overview ───
   const avgScores = userRosters.map((x) => x.roster.avg_starter_score);

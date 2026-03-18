@@ -11,7 +11,8 @@ import {
   type ScoredPick, type DraftPick, type TieredPick,
 } from "./draft-picks.js";
 import { optimizeLineup, type OptimizedLineup } from "./lineup-optimizer.js";
-import { getDynastyLeagueIdsForUserLatestSeason } from "./dynasty-leagues.js";
+import { enrichScoredPick } from "./pick-values.js";
+import { getLeagueIdsForUserLatestSeason, type LeagueScope } from "./dynasty-leagues.js";
 import { enrichScoredPick } from "./pick-values.js";
 import { parseLeagueScoring, scoringLabel } from "./scoring-adjustment.js";
 
@@ -21,7 +22,10 @@ const PR_DB_ONLY = process.env.POWER_RANKINGS_DB_ONLY === "true";
 
 export function clearPowerRankingsCache(username?: string) {
   if (username) {
-    prCache.delete(username.toLowerCase());
+    const prefix = `${username.toLowerCase()}:`;
+    for (const key of prCache.keys()) {
+      if (key.startsWith(prefix)) prCache.delete(key);
+    }
   } else {
     prCache.clear();
   }
@@ -107,8 +111,11 @@ function scoreAgreement(scores: (number | null)[]): "high" | "medium" | "low" {
 
 // ─── Main ───
 
-export async function getPowerRankings(username: string): Promise<LeaguePowerRanking[]> {
-  const cacheKey = username.toLowerCase();
+export async function getPowerRankings(
+  username: string,
+  scope: LeagueScope = "dynasty"
+): Promise<LeaguePowerRanking[]> {
+  const cacheKey = `${username.toLowerCase()}:${scope}`;
   const now = Date.now();
   const hit = prCache.get(cacheKey);
   if (hit && hit.expires > now) {
@@ -121,12 +128,12 @@ export async function getPowerRankings(username: string): Promise<LeaguePowerRan
   const userId = (userRows as unknown as { user_id: string }[])[0]?.user_id;
   if (!userId) return [];
 
-  const dynastyLeagueIds = await getDynastyLeagueIdsForUserLatestSeason(userId);
-  if (dynastyLeagueIds.length === 0) return [];
+  const leagueIds = await getLeagueIdsForUserLatestSeason(userId, scope);
+  if (leagueIds.length === 0) return [];
 
   if (PR_DB_ONLY) {
     try {
-      const dbOnly = await getPowerRankingsDbOnly(username, userId, dynastyLeagueIds);
+      const dbOnly = await getPowerRankingsDbOnly(username, userId, leagueIds);
       prCache.set(cacheKey, { data: dbOnly, expires: Date.now() + PR_TTL_MS });
       return dbOnly;
     } catch (err) {
@@ -134,7 +141,7 @@ export async function getPowerRankings(username: string): Promise<LeaguePowerRan
     }
   }
 
-  const leagueIdFrags = dynastyLeagueIds.map((id) => sql`${id}`);
+  const leagueIdFrags = leagueIds.map((id) => sql`${id}`);
   const leagueInClause = sql.join(leagueIdFrags, sql`, `);
 
   const leagueRows = await db.execute(sql`
@@ -495,9 +502,9 @@ function buildDraftPicksFromDB(
 async function getPowerRankingsDbOnly(
   _username: string,
   userId: string,
-  dynastyLeagueIds: string[]
+  leagueIds: string[]
 ): Promise<LeaguePowerRanking[]> {
-  const leagueIdFrags = dynastyLeagueIds.map((id) => sql`${id}`);
+  const leagueIdFrags = leagueIds.map((id) => sql`${id}`);
   const leagueInClause = sql.join(leagueIdFrags, sql`, `);
 
   const leagueRows = await db.execute(sql`

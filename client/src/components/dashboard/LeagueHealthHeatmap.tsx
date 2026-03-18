@@ -27,7 +27,13 @@ function GradeCell({ grade }: { grade: SlotGradeInfo }) {
   );
 }
 
-export default function LeagueHealthHeatmap({ leagues }: { leagues: LeagueHealth[] }) {
+export default function LeagueHealthHeatmap({
+  leagues,
+  showArchetype = true,
+}: {
+  leagues: LeagueHealth[];
+  showArchetype?: boolean;
+}) {
   if (leagues.length === 0) {
     return (
       <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: 40, textAlign: "center", color: "var(--text-muted)" }}>
@@ -46,7 +52,9 @@ export default function LeagueHealthHeatmap({ leagues }: { leagues: LeagueHealth
             <th style={{ textAlign: "center", padding: "10px 6px", fontWeight: 600, color: "var(--text-muted)", fontSize: 11 }}>RB</th>
             <th style={{ textAlign: "center", padding: "10px 6px", fontWeight: 600, color: "var(--text-muted)", fontSize: 11 }}>WR</th>
             <th style={{ textAlign: "center", padding: "10px 6px", fontWeight: 600, color: "var(--text-muted)", fontSize: 11 }}>TE</th>
-            <th style={{ textAlign: "center", padding: "10px 6px", fontWeight: 600, color: "var(--text-muted)", fontSize: 11 }}>Type</th>
+            {showArchetype && (
+              <th style={{ textAlign: "center", padding: "10px 6px", fontWeight: 600, color: "var(--text-muted)", fontSize: 11 }}>Type</th>
+            )}
           </tr>
         </thead>
         <tbody>
@@ -59,11 +67,13 @@ export default function LeagueHealthHeatmap({ leagues }: { leagues: LeagueHealth
               <GradeCell grade={l.rb_grade} />
               <GradeCell grade={l.wr_grade} />
               <GradeCell grade={l.te_grade} />
-              <td style={{ textAlign: "center", padding: "8px 6px" }}>
-                <span style={{ fontSize: 11, fontWeight: 600, color: ARCH_COLORS[l.archetype] ?? "#94a3b8" }}>
-                  {l.archetype}
-                </span>
-              </td>
+              {showArchetype && (
+                <td style={{ textAlign: "center", padding: "8px 6px" }}>
+                  <span style={{ fontSize: 11, fontWeight: 600, color: ARCH_COLORS[l.archetype] ?? "#94a3b8" }}>
+                    {l.archetype}
+                  </span>
+                </td>
+              )}
             </tr>
           ))}
         </tbody>

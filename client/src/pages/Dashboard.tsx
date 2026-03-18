@@ -1,7 +1,11 @@
+import { useEffect, useState } from "react";
 import { useParams } from "wouter";
 import AppShell from "../components/AppShell";
 import { SectionHeader } from "../components/ui";
-import { useDashboard } from "../hooks/use-dashboard";
+import {
+  useDashboard,
+  type DashboardLeagueScope,
+} from "../hooks/use-dashboard";
 import { useEnsureUser } from "../hooks/use-ensure-user";
 import FreshnessBar from "../components/FreshnessBar";
 import EmpireOverview from "../components/dashboard/EmpireOverview";
@@ -28,20 +32,139 @@ function today(): string {
   });
 }
 
+function initialLeagueScope(): DashboardLeagueScope {
+  if (typeof window === "undefined") return "dynasty";
+  const raw = new URLSearchParams(window.location.search).get("leagueScope");
+  return raw === "redraft" ? "redraft" : "dynasty";
+}
+
+function ScopeToggle({
+  leagueScope,
+  onChange,
+}: {
+  leagueScope: DashboardLeagueScope;
+  onChange: (scope: DashboardLeagueScope) => void;
+}) {
+  return (
+    <div>
+      <div
+        style={{
+          fontSize: 10,
+          fontWeight: 700,
+          color: "var(--text-muted)",
+          marginBottom: 6,
+          letterSpacing: "0.06em",
+          textTransform: "uppercase",
+        }}
+      >
+        League View
+      </div>
+      <div
+        style={{
+          display: "flex",
+          border: "1px solid var(--border)",
+          borderRadius: 8,
+          overflow: "hidden",
+        }}
+      >
+        {([
+          { key: "dynasty" as const, label: "Dynasty" },
+          { key: "redraft" as const, label: "Redraft" },
+        ]).map((option) => {
+          const active = leagueScope === option.key;
+          return (
+            <button
+              key={option.key}
+              onClick={() => onChange(option.key)}
+              style={{
+                background: active ? "var(--amber)" : "var(--card)",
+                color: active ? "var(--dark-base)" : "var(--text-muted)",
+                border: "none",
+                padding: "8px 14px",
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: "pointer",
+                fontFamily: "inherit",
+              }}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function HeaderBlock({
+  title,
+  subtitle,
+  leagueScope,
+  onScopeChange,
+}: {
+  title: string;
+  subtitle?: string;
+  leagueScope: DashboardLeagueScope;
+  onScopeChange: (scope: DashboardLeagueScope) => void;
+}) {
+  return (
+    <div style={{ padding: "28px 0 8px" }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+          gap: 12,
+          flexWrap: "wrap",
+        }}
+      >
+        <div>
+          <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>{title}</h1>
+          {subtitle && (
+            <p
+              style={{
+                color: "var(--text-muted)",
+                fontSize: 13,
+                marginTop: 4,
+              }}
+            >
+              {subtitle}
+            </p>
+          )}
+        </div>
+        <ScopeToggle leagueScope={leagueScope} onChange={onScopeChange} />
+      </div>
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const { username } = useParams<{ username: string }>();
+  const [leagueScope, setLeagueScope] =
+    useState<DashboardLeagueScope>(initialLeagueScope);
   const { phase, syncProgress, errorMsg, retry } = useEnsureUser(username);
   const { data, isLoading, error } = useDashboard(
-    phase === "ready" ? username : undefined
+    phase === "ready" ? username : undefined,
+    leagueScope
   );
+  const isRedraft = leagueScope === "redraft";
 
-  // Show sync progress while ensuring user data exists
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    if (leagueScope === "dynasty") url.searchParams.delete("leagueScope");
+    else url.searchParams.set("leagueScope", leagueScope);
+    window.history.replaceState({}, "", url.toString());
+  }, [leagueScope]);
+
   if (phase === "checking" || phase === "syncing") {
     return (
       <AppShell>
-        <div style={{ padding: "28px 0 8px" }}>
-          <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>Dashboard</h1>
-        </div>
+        <HeaderBlock
+          title="Dashboard"
+          leagueScope={leagueScope}
+          onScopeChange={setLeagueScope}
+        />
         <div
           style={{
             background: "var(--card)",
@@ -61,7 +184,7 @@ export default function Dashboard() {
               gap: 8,
             }}
           >
-            <span className="animate-pulse">●</span>
+            <span className="animate-pulse">*</span>
             {phase === "checking"
               ? `Looking up ${username}...`
               : `Syncing ${username}'s leagues${
@@ -80,13 +203,14 @@ export default function Dashboard() {
     );
   }
 
-  // Show error with retry
   if (phase === "error") {
     return (
       <AppShell>
-        <div style={{ padding: "28px 0 8px" }}>
-          <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>Dashboard</h1>
-        </div>
+        <HeaderBlock
+          title="Dashboard"
+          leagueScope={leagueScope}
+          onScopeChange={setLeagueScope}
+        />
         <div
           style={{
             background: "var(--card)",
@@ -103,7 +227,8 @@ export default function Dashboard() {
             onClick={retry}
             style={{
               marginTop: 16,
-              background: "linear-gradient(135deg, var(--amber), var(--amber-dark))",
+              background:
+                "linear-gradient(135deg, var(--amber), var(--amber-dark))",
               color: "var(--dark-base)",
               border: "none",
               borderRadius: 8,
@@ -120,75 +245,143 @@ export default function Dashboard() {
     );
   }
 
-  // Normal dashboard loading (data fetch after sync is confirmed)
-  if (isLoading) return <AppShell><LoadingSkeleton username={username} /></AppShell>;
+  if (isLoading) {
+    return (
+      <AppShell>
+        <LoadingSkeleton
+          username={username}
+          leagueScope={leagueScope}
+          onScopeChange={setLeagueScope}
+        />
+      </AppShell>
+    );
+  }
+
   if (error || !data) {
     return (
       <AppShell>
-        <div style={{ padding: "28px 0 8px" }}>
-          <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>Dashboard</h1>
-        </div>
-        <EmptyCard label={error ? (error as Error).message : "No data found. Try syncing first."} />
+        <HeaderBlock
+          title="Dashboard"
+          leagueScope={leagueScope}
+          onScopeChange={setLeagueScope}
+        />
+        <EmptyCard
+          label={
+            error
+              ? (error as Error).message
+              : `No ${leagueScope} data found. Try syncing first.`
+          }
+        />
       </AppShell>
     );
   }
 
   return (
     <AppShell>
-      {/* Greeting */}
-      <div style={{ padding: "28px 0 8px" }}>
-        <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>
-          {greeting()}, {username}
-        </h1>
-        <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 4 }}>{today()}</p>
-        <FreshnessBar />
-      </div>
+      <HeaderBlock
+        title={`${greeting()}, ${username}`}
+        subtitle={today()}
+        leagueScope={leagueScope}
+        onScopeChange={setLeagueScope}
+      />
+      <FreshnessBar />
 
-      {/* Actions Feed */}
-      {data.actions_feed && data.actions_feed.length > 0 && (
+      {isRedraft && (
+        <div
+          style={{
+            marginTop: 16,
+            background: "rgba(59,130,246,0.08)",
+            border: "1px solid rgba(59,130,246,0.22)",
+            borderRadius: 10,
+            padding: "12px 16px",
+            fontSize: 12,
+            color: "var(--text-muted)",
+            lineHeight: 1.5,
+          }}
+        >
+          Redraft view uses your latest non-dynasty leagues, including keeper
+          formats. Starter scores blend multi-source market signal with
+          scoring-adjusted PPG, and dynasty-only strategy cards stay hidden
+          here.
+        </div>
+      )}
+
+      {!isRedraft && data.actions_feed.length > 0 && (
         <div style={{ marginTop: 16 }}>
           <ActionsFeed items={data.actions_feed} />
         </div>
       )}
 
-      {/* Section 1: Empire Overview */}
       <div style={{ marginTop: 16 }}>
-        <EmpireOverview empire={data.empire} />
+        <EmpireOverview empire={data.empire} showArchetypes={!isRedraft} />
       </div>
 
-      {/* Section 2: Roster Holes */}
-      <SectionHeader icon="🕳️" title="ROSTER HOLES" subtitle="Weakest starting slots across your leagues" />
+      <SectionHeader
+        icon="RH"
+        title="ROSTER HOLES"
+        subtitle="Weakest starting slots across your leagues"
+      />
       <RosterHoles holes={data.roster_holes} />
 
-      {/* Section 3: Source Movers */}
-      <SectionHeader icon="📈" title="SOURCE MOVERS" subtitle="Biggest Edge Score changes on your rosters" />
-      <SourceMovers movers={data.source_movers} />
+      {!isRedraft && (
+        <>
+          <SectionHeader
+            icon="MV"
+            title="SOURCE MOVERS"
+            subtitle="Biggest Edge Score changes on your rosters"
+          />
+          <SourceMovers movers={data.source_movers} />
+        </>
+      )}
 
-      {/* Section 4: League Health Heatmap */}
-      <SectionHeader icon="🏥" title="LEAGUE HEALTH" subtitle="Position strength across all leagues" />
-      <LeagueHealthHeatmap leagues={data.league_health} />
+      <SectionHeader
+        icon="LH"
+        title="LEAGUE HEALTH"
+        subtitle="Position strength across all leagues"
+      />
+      <LeagueHealthHeatmap
+        leagues={data.league_health}
+        showArchetype={!isRedraft}
+      />
 
-      {/* Section 5: Exposure Chart */}
-      <SectionHeader icon="📊" title="EXPOSURE" subtitle="Most-owned players across your leagues" />
+      <SectionHeader
+        icon="EX"
+        title="EXPOSURE"
+        subtitle="Most-owned players across your leagues"
+      />
       <ExposureChart players={data.exposure} />
 
-      {/* Section 6: Archetype Actions */}
-      <SectionHeader icon="🎯" title="STRATEGIC POSITIONS" subtitle="Recommended approach by league archetype" />
-      <ArchetypeActions actions={data.archetype_actions} />
+      {!isRedraft && (
+        <>
+          <SectionHeader
+            icon="SP"
+            title="STRATEGIC POSITIONS"
+            subtitle="Recommended approach by league archetype"
+          />
+          <ArchetypeActions actions={data.archetype_actions} />
+        </>
+      )}
     </AppShell>
   );
 }
 
-/** Skeleton loader */
-function LoadingSkeleton({ username }: { username: string | undefined }) {
+function LoadingSkeleton({
+  username,
+  leagueScope,
+  onScopeChange,
+}: {
+  username: string | undefined;
+  leagueScope: DashboardLeagueScope;
+  onScopeChange: (scope: DashboardLeagueScope) => void;
+}) {
   return (
     <>
-      <div style={{ padding: "28px 0 8px" }}>
-        <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>
-          {greeting()}, {username}
-        </h1>
-        <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 4 }}>{today()}</p>
-      </div>
+      <HeaderBlock
+        title={`${greeting()}, ${username}`}
+        subtitle={today()}
+        leagueScope={leagueScope}
+        onScopeChange={onScopeChange}
+      />
       {[1, 2, 3].map((i) => (
         <div
           key={i}
@@ -206,7 +399,6 @@ function LoadingSkeleton({ username }: { username: string | undefined }) {
   );
 }
 
-/** Empty state card */
 function EmptyCard({ label }: { label: string }) {
   return (
     <div

@@ -1,6 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "../lib/api";
 
+export type DashboardLeagueScope = "dynasty" | "redraft";
+
 export interface SlotGradeInfo {
   avg_score: number;
   grade: "elite" | "strong" | "average" | "weak" | "hole";
@@ -81,11 +83,16 @@ export interface DashboardData {
   archetype_actions: ArchetypeAction[];
 }
 
-export function useDashboard(username: string | undefined) {
+export function useDashboard(
+  username: string | undefined,
+  leagueScope: DashboardLeagueScope = "dynasty"
+) {
   return useQuery<DashboardData>({
-    queryKey: ["dashboard", username],
+    queryKey: ["dashboard", username, leagueScope],
     queryFn: () =>
-      apiFetch(`/api/dashboard/${encodeURIComponent(username!)}`),
+      apiFetch(
+        `/api/dashboard/${encodeURIComponent(username!)}?leagueScope=${encodeURIComponent(leagueScope)}`
+      ),
     enabled: !!username,
     staleTime: 10 * 60 * 1000,
   });

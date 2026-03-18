@@ -6,26 +6,37 @@ const DYNASTY_TYPE = 2;
 const DYNASTY_IDS_TTL_MS = 5 * 60 * 1000;
 const LEAGUE_TYPE_TTL_MS = 6 * 60 * 60 * 1000;
 
-const latestDynastyCache = new Map<string, { ids: string[]; expires: number }>();
-const latestDynastyInFlight = new Map<string, Promise<string[]>>();
-const allSeasonsDynastyCache = new Map<string, { ids: string[]; expires: number }>();
-const allSeasonsDynastyInFlight = new Map<string, Promise<string[]>>();
+export type LeagueScope = "dynasty" | "redraft";
+
+const latestLeagueCache = new Map<string, { ids: string[]; expires: number }>();
+const latestLeagueInFlight = new Map<string, Promise<string[]>>();
+const allSeasonsLeagueCache = new Map<string, { ids: string[]; expires: number }>();
+const allSeasonsLeagueInFlight = new Map<string, Promise<string[]>>();
 const leagueTypeCache = new Map<string, { type: number | null; expires: number }>();
 
 export function clearDynastyLeagueCache(userId?: string) {
   if (!userId) {
-    latestDynastyCache.clear();
-    latestDynastyInFlight.clear();
-    allSeasonsDynastyCache.clear();
-    allSeasonsDynastyInFlight.clear();
+    latestLeagueCache.clear();
+    latestLeagueInFlight.clear();
+    allSeasonsLeagueCache.clear();
+    allSeasonsLeagueInFlight.clear();
     leagueTypeCache.clear();
     return;
   }
 
-  latestDynastyCache.delete(userId);
-  latestDynastyInFlight.delete(userId);
-  allSeasonsDynastyCache.delete(userId);
-  allSeasonsDynastyInFlight.delete(userId);
+  const prefix = `${userId}:`;
+  for (const key of latestLeagueCache.keys()) {
+    if (key.startsWith(prefix)) latestLeagueCache.delete(key);
+  }
+  for (const key of latestLeagueInFlight.keys()) {
+    if (key.startsWith(prefix)) latestLeagueInFlight.delete(key);
+  }
+  for (const key of allSeasonsLeagueCache.keys()) {
+    if (key.startsWith(prefix)) allSeasonsLeagueCache.delete(key);
+  }
+  for (const key of allSeasonsLeagueInFlight.keys()) {
+    if (key.startsWith(prefix)) allSeasonsLeagueInFlight.delete(key);
+  }
 }
 
 function toNumber(value: unknown): number | null {
@@ -51,6 +62,16 @@ function isDynastyType(type: number | null): boolean {
   return type === DYNASTY_TYPE;
 }
 
+function cacheKey(userId: string, scope: LeagueScope): string {
+  return `${userId}:${scope}`;
+}
+
+function isLeagueInScope(type: number | null, scope: LeagueScope): boolean {
+  if (type == null) return false;
+  if (scope === "dynasty") return isDynastyType(type);
+  return type !== DYNASTY_TYPE;
+}
+
 async function fetchAndCacheLeagueType(leagueId: string): Promise<number | null> {
   const now = Date.now();
   const hit = leagueTypeCache.get(leagueId);
@@ -73,36 +94,41 @@ async function fetchAndCacheLeagueType(leagueId: string): Promise<number | null>
   }
 }
 
-async function resolveDynastyLeagueIds(
-  rows: Array<{ league_id: string; raw_json: string | null; league_type: number | null }>
+async function resolveLeagueIdsForScope(
+  rows: Array<{ league_id: string; raw_json: string | null; league_type: number | null }>,
+  scope: LeagueScope
 ): Promise<string[]> {
-  const dynasty: string[] = [];
+  const matches: string[] = [];
   const unknown: string[] = [];
 
   for (const r of rows) {
     const type = r.league_type ?? typeFromRawJson(r.raw_json);
     if (type == null) unknown.push(r.league_id);
-    else if (isDynastyType(type)) dynasty.push(r.league_id);
+    else if (isLeagueInScope(type, scope)) matches.push(r.league_id);
   }
 
-  if (unknown.length === 0) return dynasty;
+  if (unknown.length === 0) return matches;
 
   const resolved = await Promise.all(
     unknown.map(async (leagueId) => ({ leagueId, type: await fetchAndCacheLeagueType(leagueId) }))
   );
   for (const r of resolved) {
-    if (isDynastyType(r.type)) dynasty.push(r.leagueId);
+    if (isLeagueInScope(r.type, scope)) matches.push(r.leagueId);
   }
 
-  return dynasty;
+  return matches;
 }
 
-export async function getDynastyLeagueIdsForUserLatestSeason(userId: string): Promise<string[]> {
+export async function getLeagueIdsForUserLatestSeason(
+  userId: string,
+  scope: LeagueScope = "dynasty"
+): Promise<string[]> {
   const now = Date.now();
-  const hit = latestDynastyCache.get(userId);
+  const key = cacheKey(userId, scope);
+  const hit = latestLeagueCache.get(key);
   if (hit && hit.expires > now) return hit.ids;
 
-  const pending = latestDynastyInFlight.get(userId);
+  const pending = latestLeagueInFlight.get(key);
   if (pending) return pending;
 
   const work = (async () => {
@@ -118,27 +144,32 @@ export async function getDynastyLeagueIdsForUserLatestSeason(userId: string): Pr
           WHERE ul2.user_id = ${userId}
         )
     `);
-    const ids = await resolveDynastyLeagueIds(
-      rows as unknown as Array<{ league_id: string; raw_json: string | null; league_type: number | null }>
+    const ids = await resolveLeagueIdsForScope(
+      rows as unknown as Array<{ league_id: string; raw_json: string | null; league_type: number | null }>,
+      scope
     );
-    latestDynastyCache.set(userId, { ids, expires: Date.now() + DYNASTY_IDS_TTL_MS });
+    latestLeagueCache.set(key, { ids, expires: Date.now() + DYNASTY_IDS_TTL_MS });
     return ids;
   })();
 
-  latestDynastyInFlight.set(userId, work);
+  latestLeagueInFlight.set(key, work);
   try {
     return await work;
   } finally {
-    latestDynastyInFlight.delete(userId);
+    latestLeagueInFlight.delete(key);
   }
 }
 
-export async function getDynastyLeagueIdsForUserAllSeasons(userId: string): Promise<string[]> {
+export async function getLeagueIdsForUserAllSeasons(
+  userId: string,
+  scope: LeagueScope = "dynasty"
+): Promise<string[]> {
   const now = Date.now();
-  const hit = allSeasonsDynastyCache.get(userId);
+  const key = cacheKey(userId, scope);
+  const hit = allSeasonsLeagueCache.get(key);
   if (hit && hit.expires > now) return hit.ids;
 
-  const pending = allSeasonsDynastyInFlight.get(userId);
+  const pending = allSeasonsLeagueInFlight.get(key);
   if (pending) return pending;
 
   const work = (async () => {
@@ -148,19 +179,28 @@ export async function getDynastyLeagueIdsForUserAllSeasons(userId: string): Prom
       JOIN leagues l ON ul.league_id = l.league_id
       WHERE ul.user_id = ${userId}
     `);
-    const ids = await resolveDynastyLeagueIds(
-      rows as unknown as Array<{ league_id: string; raw_json: string | null; league_type: number | null }>
+    const ids = await resolveLeagueIdsForScope(
+      rows as unknown as Array<{ league_id: string; raw_json: string | null; league_type: number | null }>,
+      scope
     );
-    allSeasonsDynastyCache.set(userId, { ids, expires: Date.now() + DYNASTY_IDS_TTL_MS });
+    allSeasonsLeagueCache.set(key, { ids, expires: Date.now() + DYNASTY_IDS_TTL_MS });
     return ids;
   })();
 
-  allSeasonsDynastyInFlight.set(userId, work);
+  allSeasonsLeagueInFlight.set(key, work);
   try {
     return await work;
   } finally {
-    allSeasonsDynastyInFlight.delete(userId);
+    allSeasonsLeagueInFlight.delete(key);
   }
+}
+
+export async function getDynastyLeagueIdsForUserLatestSeason(userId: string): Promise<string[]> {
+  return getLeagueIdsForUserLatestSeason(userId, "dynasty");
+}
+
+export async function getDynastyLeagueIdsForUserAllSeasons(userId: string): Promise<string[]> {
+  return getLeagueIdsForUserAllSeasons(userId, "dynasty");
 }
 
 export function isDynastyLeagueFromSleeperSettings(

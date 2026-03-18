@@ -12,7 +12,13 @@ const ARCHETYPE_INLINE_COLORS: Record<string, string> = {
   Competitor: "#64748b",
 };
 
-export default function EmpireOverview({ empire }: { empire: DashboardData["empire"] }) {
+export default function EmpireOverview({
+  empire,
+  showArchetypes = true,
+}: {
+  empire: DashboardData["empire"];
+  showArchetypes?: boolean;
+}) {
   return (
     <div>
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
@@ -35,7 +41,7 @@ export default function EmpireOverview({ empire }: { empire: DashboardData["empi
           accent="var(--red)"
         />
       </div>
-      {empire.archetypes.length > 0 && (
+      {showArchetypes && empire.archetypes.length > 0 && (
         <div style={{ marginTop: 12, fontSize: 13, display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
           {empire.archetypes.map((a, i) => (
             <span key={a.name}>
