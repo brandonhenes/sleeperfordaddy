@@ -13,7 +13,6 @@ import {
 import { optimizeLineup, type OptimizedLineup } from "./lineup-optimizer.js";
 import { enrichScoredPick } from "./pick-values.js";
 import { getLeagueIdsForUserLatestSeason, type LeagueScope } from "./dynasty-leagues.js";
-import { enrichScoredPick } from "./pick-values.js";
 import { parseLeagueScoring, scoringLabel } from "./scoring-adjustment.js";
 
 const prCache = new Map<string, { data: LeaguePowerRanking[]; expires: number }>();
