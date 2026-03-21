@@ -35,7 +35,16 @@ router.post("/api/trade/evaluate", async (req, res) => {
     }
     const weights = parseWeights(req);
     const classStrengths = parseClassStrengths(req);
-    const data = await evaluateTrade(sideA, sideB, mode ?? "sf", weights, leagueId, classStrengths);
+    const valueType = req.query.redraft === "true" ? "redraft" as const : "dynasty" as const;
+    const data = await evaluateTrade(
+      sideA,
+      sideB,
+      mode ?? "sf",
+      valueType,
+      weights,
+      leagueId,
+      classStrengths
+    );
     res.json(data);
   } catch (err) {
     console.error("[trade-calculator] Error:", err);
@@ -49,7 +58,8 @@ router.get("/api/trade/opponent-context/:username/:leagueId", async (req, res) =
     const { username, leagueId } = req.params;
     if (!username || !leagueId) return res.status(400).json({ message: "username and leagueId required" });
 
-    const allLeagues = await getPowerRankings(username);
+    const valueType = req.query.redraft === "true" ? "redraft" as const : "dynasty" as const;
+    const allLeagues = await getPowerRankings(username, valueType);
     const league = allLeagues.find((l) => l.league_id === leagueId);
     if (!league) return res.status(404).json({ message: "League not found" });
 

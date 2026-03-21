@@ -28,12 +28,17 @@ export interface GlobalScaleParams {
   dp: Scale;
 }
 
+export type ValueType = "dynasty" | "redraft";
+
 const GLOBAL_SCALE_TTL_MS = 10 * 60 * 1000;
 const globalScaleCache = new Map<
-  "sf" | "1qb",
+  `${"sf" | "1qb"}:${ValueType}`,
   { value: GlobalScaleParams; expires: number }
 >();
-const globalScaleInFlight = new Map<"sf" | "1qb", Promise<GlobalScaleParams>>();
+const globalScaleInFlight = new Map<
+  `${"sf" | "1qb"}:${ValueType}`,
+  Promise<GlobalScaleParams>
+>();
 
 export function clearGlobalScaleCache() {
   globalScaleCache.clear();
@@ -74,22 +79,27 @@ function isDpScaleUsable(scale: Scale): boolean {
  * This prevents score inflation when caller passes small subsets.
  */
 export async function getGlobalScaleParams(
-  mode: "sf" | "1qb"
+  mode: "sf" | "1qb",
+  valueType: ValueType = "dynasty"
 ): Promise<GlobalScaleParams> {
+  const cacheKey = `${mode}:${valueType}` as const;
   const now = Date.now();
-  const hit = globalScaleCache.get(mode);
+  const hit = globalScaleCache.get(cacheKey);
   if (hit && hit.expires > now) return hit.value;
 
-  const pending = globalScaleInFlight.get(mode);
+  const pending = globalScaleInFlight.get(cacheKey);
   if (pending) return pending;
 
   const work = (async () => {
+    const fcColumn = valueType === "redraft"
+      ? sql.raw("redraft_value")
+      : sql.raw("dynasty_value");
     const [fcRows, marketRows] = await Promise.all([
       db.execute(sql`
         SELECT
-          percentile_cont(0.05) WITHIN GROUP (ORDER BY dynasty_value)
-            FILTER (WHERE dynasty_value > 0)::real AS fc_floor,
-          max(dynasty_value) FILTER (WHERE dynasty_value > 0)::real AS fc_max
+          percentile_cont(0.05) WITHIN GROUP (ORDER BY ${fcColumn})
+            FILTER (WHERE ${fcColumn} > 0)::real AS fc_floor,
+          max(${fcColumn}) FILTER (WHERE ${fcColumn} > 0)::real AS fc_max
         FROM fantasycalc_daily
         WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM fantasycalc_daily)
           AND is_pick = false
@@ -97,12 +107,14 @@ export async function getGlobalScaleParams(
       mode === "sf"
         ? db.execute(sql`
             SELECT
-              percentile_cont(0.05) WITHIN GROUP (ORDER BY ktc.value_sf)
-                FILTER (WHERE ktc.value_sf > 0)::real AS ktc_floor,
-              max(ktc.value_sf) FILTER (WHERE ktc.value_sf > 0)::real AS ktc_max,
-              percentile_cont(0.05) WITHIN GROUP (ORDER BY dp.value_2qb)
-                FILTER (WHERE dp.value_2qb > 0)::real AS dp_floor,
-              max(dp.value_2qb) FILTER (WHERE dp.value_2qb > 0)::real AS dp_max
+              percentile_cont(0.05) WITHIN GROUP (ORDER BY ${valueType === "redraft" ? sql.raw("ktc.redraft_sf") : sql.raw("ktc.value_sf")})
+                FILTER (WHERE ${valueType === "redraft" ? sql.raw("ktc.redraft_sf") : sql.raw("ktc.value_sf")} > 0)::real AS ktc_floor,
+              max(${valueType === "redraft" ? sql.raw("ktc.redraft_sf") : sql.raw("ktc.value_sf")})
+                FILTER (WHERE ${valueType === "redraft" ? sql.raw("ktc.redraft_sf") : sql.raw("ktc.value_sf")} > 0)::real AS ktc_max,
+              percentile_cont(0.05) WITHIN GROUP (ORDER BY ${valueType === "redraft" ? sql.raw("dp.redraft_2qb") : sql.raw("dp.value_2qb")})
+                FILTER (WHERE ${valueType === "redraft" ? sql.raw("dp.redraft_2qb") : sql.raw("dp.value_2qb")} > 0)::real AS dp_floor,
+              max(${valueType === "redraft" ? sql.raw("dp.redraft_2qb") : sql.raw("dp.value_2qb")})
+                FILTER (WHERE ${valueType === "redraft" ? sql.raw("dp.redraft_2qb") : sql.raw("dp.value_2qb")} > 0)::real AS dp_max
             FROM players_master pm
             LEFT JOIN ktc_values ktc ON ktc.sleeper_id = pm.player_id
             LEFT JOIN dynastyprocess_values dp ON dp.sleeper_id = pm.player_id
@@ -110,12 +122,14 @@ export async function getGlobalScaleParams(
           `)
         : db.execute(sql`
             SELECT
-              percentile_cont(0.05) WITHIN GROUP (ORDER BY ktc.value_1qb)
-                FILTER (WHERE ktc.value_1qb > 0)::real AS ktc_floor,
-              max(ktc.value_1qb) FILTER (WHERE ktc.value_1qb > 0)::real AS ktc_max,
-              percentile_cont(0.05) WITHIN GROUP (ORDER BY dp.value_1qb)
-                FILTER (WHERE dp.value_1qb > 0)::real AS dp_floor,
-              max(dp.value_1qb) FILTER (WHERE dp.value_1qb > 0)::real AS dp_max
+              percentile_cont(0.05) WITHIN GROUP (ORDER BY ${valueType === "redraft" ? sql.raw("ktc.redraft_1qb") : sql.raw("ktc.value_1qb")})
+                FILTER (WHERE ${valueType === "redraft" ? sql.raw("ktc.redraft_1qb") : sql.raw("ktc.value_1qb")} > 0)::real AS ktc_floor,
+              max(${valueType === "redraft" ? sql.raw("ktc.redraft_1qb") : sql.raw("ktc.value_1qb")})
+                FILTER (WHERE ${valueType === "redraft" ? sql.raw("ktc.redraft_1qb") : sql.raw("ktc.value_1qb")} > 0)::real AS ktc_max,
+              percentile_cont(0.05) WITHIN GROUP (ORDER BY ${valueType === "redraft" ? sql.raw("dp.redraft_1qb") : sql.raw("dp.value_1qb")})
+                FILTER (WHERE ${valueType === "redraft" ? sql.raw("dp.redraft_1qb") : sql.raw("dp.value_1qb")} > 0)::real AS dp_floor,
+              max(${valueType === "redraft" ? sql.raw("dp.redraft_1qb") : sql.raw("dp.value_1qb")})
+                FILTER (WHERE ${valueType === "redraft" ? sql.raw("dp.redraft_1qb") : sql.raw("dp.value_1qb")} > 0)::real AS dp_max
             FROM players_master pm
             LEFT JOIN ktc_values ktc ON ktc.sleeper_id = pm.player_id
             LEFT JOIN dynastyprocess_values dp ON dp.sleeper_id = pm.player_id
@@ -141,15 +155,15 @@ export async function getGlobalScaleParams(
       ktc: safeScale(r?.ktc_floor ?? null, r?.ktc_max ?? null),
       dp: safeScale(r?.dp_floor ?? null, r?.dp_max ?? null),
     };
-    globalScaleCache.set(mode, { value, expires: Date.now() + GLOBAL_SCALE_TTL_MS });
+    globalScaleCache.set(cacheKey, { value, expires: Date.now() + GLOBAL_SCALE_TTL_MS });
     return value;
   })();
 
-  globalScaleInFlight.set(mode, work);
+  globalScaleInFlight.set(cacheKey, work);
   try {
     return await work;
   } finally {
-    globalScaleInFlight.delete(mode);
+    globalScaleInFlight.delete(cacheKey);
   }
 }
 
@@ -250,6 +264,7 @@ async function readFromDailySnapshot(
 async function computeCompositeRuntime(
   playerIds: string[],
   mode: "sf" | "1qb",
+  valueType: ValueType,
   weights?: SourceWeights
 ): Promise<Map<string, CompositeValue>> {
   const result = new Map<string, CompositeValue>();
@@ -258,23 +273,29 @@ async function computeCompositeRuntime(
   const idFragments = playerIds.map((id) => sql`${id}`);
   const inClause = sql.join(idFragments, sql`, `);
 
+  const fcColumn = valueType === "redraft" ? sql.raw("redraft_value") : sql.raw("dynasty_value");
+  const ktc1qbColumn = valueType === "redraft" ? sql.raw("ktc.redraft_1qb") : sql.raw("ktc.value_1qb");
+  const ktcSfColumn = valueType === "redraft" ? sql.raw("ktc.redraft_sf") : sql.raw("ktc.value_sf");
+  const dp1qbColumn = valueType === "redraft" ? sql.raw("dp.redraft_1qb") : sql.raw("dp.value_1qb");
+  const dp2qbColumn = valueType === "redraft" ? sql.raw("dp.redraft_2qb") : sql.raw("dp.value_2qb");
+
   const rows = await db.execute(sql`
     WITH latest_fc AS (
-      SELECT player_name, sleeper_id, dynasty_value
+      SELECT player_name, sleeper_id, ${fcColumn} AS source_value
       FROM fantasycalc_daily
       WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM fantasycalc_daily)
         AND is_pick = false
     )
     SELECT
       pm.player_id AS sleeper_id,
-      fc.dynasty_value AS fc_value,
-      ktc.value_1qb AS ktc_1qb,
-      ktc.value_sf AS ktc_sf,
-      dp.value_1qb AS dp_1qb,
-      dp.value_2qb AS dp_2qb
+      fc.source_value AS fc_value,
+      ${ktc1qbColumn} AS ktc_1qb,
+      ${ktcSfColumn} AS ktc_sf,
+      ${dp1qbColumn} AS dp_1qb,
+      ${dp2qbColumn} AS dp_2qb
     FROM players_master pm
     LEFT JOIN LATERAL (
-      SELECT lf.dynasty_value
+      SELECT lf.source_value
       FROM latest_fc lf
       WHERE
         lf.sleeper_id = pm.player_id
@@ -299,7 +320,7 @@ async function computeCompositeRuntime(
              = LOWER(REGEXP_REPLACE(pm.full_name, '\\s+(Jr\\.?|Sr\\.?|II|III|IV|V)$', '', 'i')) THEN 1
           ELSE 2
         END,
-        lf.dynasty_value DESC NULLS LAST
+        lf.source_value DESC NULLS LAST
       LIMIT 1
     ) fc ON true
     LEFT JOIN ktc_values ktc ON ktc.sleeper_id = pm.player_id
@@ -316,7 +337,7 @@ async function computeCompositeRuntime(
     dp_2qb: number | null;
   };
   const rawRows = rows as unknown as Row[];
-  const globalScale = await getGlobalScaleParams(mode);
+  const globalScale = await getGlobalScaleParams(mode, valueType);
   // If DP max is tiny, crosswalk coverage is bad and DP is on an incompatible scale.
   // Disable DP contribution to avoid inflated edge scores from low-value artifacts.
   const dpUsable = isDpScaleUsable(globalScale.dp);
@@ -362,16 +383,19 @@ async function computeCompositeRuntime(
 export async function getCompositeValues(
   playerIds: string[],
   mode: "sf" | "1qb",
-  weights?: SourceWeights
+  valueTypeOrWeights?: ValueType | SourceWeights,
+  maybeWeights?: SourceWeights
 ): Promise<Map<string, CompositeValue>> {
   if (playerIds.length === 0) return new Map();
+  const valueType = typeof valueTypeOrWeights === "string" ? valueTypeOrWeights : "dynasty";
+  const weights = typeof valueTypeOrWeights === "string" ? maybeWeights : valueTypeOrWeights;
 
   // Always compute fresh until a new snapshot is generated with full source coverage.
   // The player_scores_daily snapshot was written before the FC/DP pipeline fixes
   // and contains stale sources_used values. Re-enable snapshot reads after
   // running a fresh snapshot post-fix.
   // TODO: Re-enable snapshot reads:
-  return computeCompositeRuntime(playerIds, mode, weights);
+  return computeCompositeRuntime(playerIds, mode, valueType, weights);
 
   /*
   const snapshotMap = await readFromDailySnapshot(playerIds, mode);

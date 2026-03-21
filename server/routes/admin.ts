@@ -5,6 +5,11 @@ import { syncKtcValues } from "../services/sync-ktc.js";
 import { syncDynastyProcessValues } from "../services/sync-dynastyprocess.js";
 import { syncFpEliteValues } from "../services/sync-fp-elite.js";
 import { snapshotEdgeScores } from "../services/snapshot-scores.js";
+import { syncKtcRedraftValues } from "../services/sync-ktc-redraft.js";
+import { syncFpRedraftValues } from "../services/sync-fp-redraft.js";
+import { syncSleeperStats } from "../services/sync-sleeper-stats.js";
+import { clearGlobalScaleCache } from "../services/composite-values.js";
+import { clearPowerRankingsCache } from "../services/power-rankings.js";
 import {
   backfillFantasyCalcSleeperIds,
   backfillKtcSleeperIds,
@@ -123,6 +128,46 @@ router.post("/api/admin/sync-fp-elite", async (_req, res) => {
     res.json(stats);
   } catch (err) {
     console.error("[admin/sync-fp-elite] Error:", err);
+    res.status(500).json({ message: (err as Error).message ?? "Internal server error" });
+  }
+});
+
+/** POST /api/admin/sync-ktc-redraft */
+router.post("/api/admin/sync-ktc-redraft", async (_req, res) => {
+  try {
+    const stats = await syncKtcRedraftValues();
+    clearGlobalScaleCache();
+    clearPowerRankingsCache();
+    res.json(stats);
+  } catch (err) {
+    console.error("[admin/sync-ktc-redraft] Error:", err);
+    res.status(500).json({ message: (err as Error).message ?? "Internal server error" });
+  }
+});
+
+/** POST /api/admin/sync-fp-redraft */
+router.post("/api/admin/sync-fp-redraft", async (_req, res) => {
+  try {
+    const stats = await syncFpRedraftValues();
+    clearGlobalScaleCache();
+    clearPowerRankingsCache();
+    res.json(stats);
+  } catch (err) {
+    console.error("[admin/sync-fp-redraft] Error:", err);
+    res.status(500).json({ message: (err as Error).message ?? "Internal server error" });
+  }
+});
+
+/** POST /api/admin/sync-sleeper-stats */
+router.post("/api/admin/sync-sleeper-stats", async (req, res) => {
+  try {
+    const season = Number(req.query.season ?? 2025);
+    const stats = await syncSleeperStats(season);
+    clearGlobalScaleCache();
+    clearPowerRankingsCache();
+    res.json(stats);
+  } catch (err) {
+    console.error("[admin/sync-sleeper-stats] Error:", err);
     res.status(500).json({ message: (err as Error).message ?? "Internal server error" });
   }
 });

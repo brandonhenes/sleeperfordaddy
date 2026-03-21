@@ -1,6 +1,7 @@
 import { db } from "../db/connection.js";
 import { sql } from "drizzle-orm";
 import { getDynastyLeagueIdsForUserLatestSeason } from "./dynasty-leagues.js";
+import { getCompositeValues, type ValueType } from "./composite-values.js";
 
 // ─── Types ───
 
@@ -64,7 +65,10 @@ function computeFlags(players: { value: number }[], pos: string, grade: string):
 
 // ─── Main Query ───
 
-export async function getRosterGrades(username: string): Promise<RosterGradesResult> {
+export async function getRosterGrades(
+  username: string,
+  valueType: ValueType = "dynasty"
+): Promise<RosterGradesResult> {
   const userRows = await db.execute(sql`
     SELECT user_id FROM users WHERE LOWER(username) = LOWER(${username}) LIMIT 1
   `);
@@ -101,13 +105,11 @@ export async function getRosterGrades(username: string): Promise<RosterGradesRes
     SELECT
       rp.league_id,
       rp.owner_id,
+      rp.player_id,
       pm.position,
-      COALESCE(fc.dynasty_value, 0)::int AS dynasty_value
+      pm.age
     FROM roster_players rp
     JOIN players_master pm ON rp.player_id = pm.player_id
-    LEFT JOIN fantasycalc_daily fc
-      ON fc.sleeper_id = pm.player_id
-      AND fc.snapshot_date = (SELECT MAX(snapshot_date) FROM fantasycalc_daily)
     WHERE rp.league_id IN (${inClause})
       AND pm.position IN ('QB', 'RB', 'WR', 'TE')
   `);
@@ -115,10 +117,45 @@ export async function getRosterGrades(username: string): Promise<RosterGradesRes
   type RosterRow = {
     league_id: string;
     owner_id: string;
+    player_id: string;
     position: string;
-    dynasty_value: number;
+    age: number | null;
   };
   const rows = rosterRows as unknown as RosterRow[];
+
+  const leagueModes = new Map<string, "sf" | "1qb">();
+  const leagueModeRows = await db.execute(sql`
+    SELECT league_id, roster_positions
+    FROM leagues
+    WHERE league_id IN (${inClause})
+  `);
+  for (const row of leagueModeRows as unknown as { league_id: string; roster_positions: string[] | null }[]) {
+    const rosterPositions = row.roster_positions ?? [];
+    const qbCount = rosterPositions.filter((p) => p === "QB").length;
+    leagueModes.set(
+      row.league_id,
+      rosterPositions.includes("SUPER_FLEX") || qbCount >= 2 ? "sf" : "1qb"
+    );
+  }
+
+  const compByLeagueMode = new Map<string, Map<string, number>>();
+  const modeBuckets = new Map<"sf" | "1qb", Set<string>>();
+  for (const row of rows) {
+    const mode = leagueModes.get(row.league_id) ?? "sf";
+    const bucket = modeBuckets.get(mode) ?? new Set<string>();
+    bucket.add(row.player_id);
+    modeBuckets.set(mode, bucket);
+  }
+  await Promise.all(
+    [...modeBuckets.entries()].map(async ([mode, ids]) => {
+      const comp = await getCompositeValues([...ids], mode, valueType);
+      const scoreMap = new Map<string, number>();
+      for (const [playerId, value] of comp) {
+        scoreMap.set(playerId, value.edge_score);
+      }
+      compByLeagueMode.set(mode, scoreMap);
+    })
+  );
 
   // Group: league -> team -> position -> values[]
   const nested: Record<string, Record<string, Record<string, number[]>>> = {};
@@ -126,7 +163,10 @@ export async function getRosterGrades(username: string): Promise<RosterGradesRes
     nested[r.league_id] ??= {};
     nested[r.league_id][r.owner_id] ??= {};
     nested[r.league_id][r.owner_id][r.position] ??= [];
-    nested[r.league_id][r.owner_id][r.position].push(r.dynasty_value);
+    const mode = leagueModes.get(r.league_id) ?? "sf";
+    nested[r.league_id][r.owner_id][r.position].push(
+      compByLeagueMode.get(mode)?.get(r.player_id) ?? 0
+    );
   }
 
   // Compute grades per league

@@ -10,7 +10,8 @@ router.get("/api/roster-grades", async (req, res) => {
     if (!username) {
       return res.status(400).json({ message: "username is required" });
     }
-    const data = await getRosterGrades(username);
+    const valueType = req.query.redraft === "true" ? "redraft" as const : "dynasty" as const;
+    const data = await getRosterGrades(username, valueType);
     res.json(data);
   } catch (err) {
     console.error("[roster-grades] Error:", err);

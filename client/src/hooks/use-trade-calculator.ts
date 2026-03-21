@@ -9,6 +9,7 @@ interface EvaluateTradeInput {
   sideB: TradeAssetInput[];
   mode?: "sf" | "1qb";
   leagueId?: string;
+  redraft?: boolean;
 }
 
 export function useEvaluateTrade() {
@@ -18,7 +19,7 @@ export function useEvaluateTrade() {
   const suffix = query ? `?${query.slice(1)}` : "";
   return useMutation<TradeEvaluation, Error, EvaluateTradeInput>({
     mutationFn: (input) =>
-      apiFetch(`/api/trade/evaluate${suffix}`, {
+      apiFetch(`/api/trade/evaluate${suffix ? `${suffix}&redraft=${input.redraft ? "true" : "false"}` : `?redraft=${input.redraft ? "true" : "false"}`}`, {
         method: "POST",
         body: JSON.stringify(input),
       }),

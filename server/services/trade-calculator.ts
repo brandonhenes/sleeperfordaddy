@@ -11,6 +11,8 @@ import { getCompositeValues, getGlobalScaleParams } from "./composite-values.js"
 import { computeEdgeScores } from "./edge-score.js";
 import { evaluateTradeValue } from "./trade-value.js";
 import { getAgeCurveStatus } from "./age-curves.js";
+import { computeLeaguePPG } from "./league-ppg.js";
+import type { ValueType } from "./composite-values.js";
 import {
   getTradePickBreakdown,
   type ClassStrengthMap,
@@ -396,6 +398,7 @@ export function tradeHealthCheck(
 async function evaluateAssets(
   assets: TradeAssetInput[],
   mode: "sf" | "1qb",
+  valueType: ValueType,
   leagueId?: string,
   classStrengths?: ClassStrengthMap
 ): Promise<RawEval[]> {
@@ -407,7 +410,7 @@ async function evaluateAssets(
 
   const uniquePlayerIds = [...new Set(playerIds)];
   const [compMap, nameRows, pickMaps] = await Promise.all([
-    getCompositeValues(uniquePlayerIds, mode),
+    getCompositeValues(uniquePlayerIds, mode, valueType),
     uniquePlayerIds.length > 0
       ? db.execute(sql`
           SELECT player_id, full_name, position
@@ -519,6 +522,7 @@ function toEvaluatedAsset(raw: RawEval, edge: { score: number; fc_score: number 
     dp_score: edge.dp_score,
     league_adjusted_score: null,
     scoring_delta_ppg: null,
+    ppg: null,
     source_agreement: agreementFromScores([edge.fc_score, edge.ktc_score, edge.dp_score]),
     pick_breakdown: raw.pick_breakdown ?? null,
   };
@@ -528,14 +532,15 @@ export async function evaluateTrade(
   sideA: TradeAssetInput[],
   sideB: TradeAssetInput[],
   mode: "sf" | "1qb",
+  valueType: ValueType = "dynasty",
   weights?: SourceWeights,
   leagueId?: string,
   classStrengths?: ClassStrengthMap
 ): Promise<TradeEvaluation> {
   const [rawA, rawB, globalScale] = await Promise.all([
-    evaluateAssets(sideA, mode, leagueId, classStrengths),
-    evaluateAssets(sideB, mode, leagueId, classStrengths),
-    getGlobalScaleParams(mode),
+    evaluateAssets(sideA, mode, valueType, leagueId, classStrengths),
+    evaluateAssets(sideB, mode, valueType, leagueId, classStrengths),
+    getGlobalScaleParams(mode, valueType),
   ]);
 
   const allRaw = [...rawA, ...rawB];
@@ -568,10 +573,14 @@ export async function evaluateTrade(
 
     const allPlayerIds = [...new Set([...evalA, ...evalB].map((a) => a.player_id).filter((id): id is string => !!id))];
     const usageMap = await loadPlayerUsageStats(allPlayerIds);
+    const ppgMap = valueType === "redraft"
+      ? await computeLeaguePPG(allPlayerIds, settings)
+      : new Map<string, { ppg: number }>();
 
     for (const asset of [...evalA, ...evalB]) {
       if (!asset.player_id || !asset.position) continue;
       const usage = usageMap.get(asset.player_id);
+      asset.ppg = ppgMap.get(asset.player_id)?.ppg ?? null;
       if (!usage) continue;
       const { delta_ppg } = computeScoringDelta(usage, asset.position, settings);
       const baselineFPPG = estimateBaselineFPPG(usage, asset.position);

@@ -336,6 +336,7 @@ export interface EvaluatedAsset {
   dp_score: number | null;
   league_adjusted_score: number | null;
   scoring_delta_ppg: number | null;
+  ppg?: number | null;
   source_agreement: "high" | "medium" | "low";
   pick_breakdown?: TradePickBreakdown | null;
 }
@@ -402,6 +403,7 @@ export interface TradePackageAsset {
   dp_score: number | null;
   league_adjusted_score: number | null;
   scoring_delta_ppg: number | null;
+  ppg?: number | null;
   source_agreement: "high" | "medium" | "low";
   pick_breakdown?: TradePickBreakdown | null;
 }

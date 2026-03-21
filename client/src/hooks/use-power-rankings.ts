@@ -27,6 +27,7 @@ export interface CoreAsset {
   fc_score: number | null;
   ktc_score: number | null;
   dp_score: number | null;
+  ppg?: number | null;
   sources_available: number;
   source_agreement: "high" | "medium" | "low";
 }
@@ -99,11 +100,13 @@ export interface LeaguePowerRanking {
   rosters: RosterRanking[];
 }
 
-export function usePowerRankings(username: string) {
+export function usePowerRankings(username: string, showRedraft = false) {
   return useQuery<LeaguePowerRanking[]>({
-    queryKey: ["power-rankings", username],
+    queryKey: ["power-rankings", username, showRedraft],
     queryFn: () =>
-      apiFetch(`/api/power-rankings/${encodeURIComponent(username)}`),
+      apiFetch(
+        `/api/power-rankings/${encodeURIComponent(username)}${showRedraft ? "?redraft=true" : ""}`
+      ),
     enabled: !!username,
   });
 }

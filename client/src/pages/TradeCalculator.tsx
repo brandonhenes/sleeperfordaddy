@@ -633,6 +633,7 @@ function RosterGrid({
 }
 
 export default function TradeCalculator() {
+  const [showRedraft, setShowRedraft] = useState(false);
   const [selectedLeague, setSelectedLeague] = useState("");
   const [selectedOpponent, setSelectedOpponent] = useState<number | null>(null);
   const [sendAssets, setSendAssets] = useState<TradeAssetInput[]>([]);
@@ -653,14 +654,14 @@ export default function TradeCalculator() {
   ));
 
   const storedUsername = typeof window !== "undefined" ? localStorage.getItem("edge_username") ?? "" : "";
-  const { data: leagues = [] } = usePowerRankings(storedUsername);
+  const { data: leagues = [] } = usePowerRankings(storedUsername, showRedraft);
   const selectedLeagueData = leagues.find((l) => l.league_id === selectedLeague);
   const userRoster = selectedLeagueData?.rosters.find((r) => r.is_user) ?? null;
   const oppRoster = selectedLeagueData?.rosters.find((r) => r.roster_id === selectedOpponent) ?? null;
 
   const { data: opponentData } = useQuery<OpponentContextResponse>({
-    queryKey: ["opponent-context", storedUsername, selectedLeague],
-    queryFn: () => apiFetch(`/api/trade/opponent-context/${encodeURIComponent(storedUsername)}/${encodeURIComponent(selectedLeague)}`),
+    queryKey: ["opponent-context", storedUsername, selectedLeague, showRedraft],
+    queryFn: () => apiFetch(`/api/trade/opponent-context/${encodeURIComponent(storedUsername)}/${encodeURIComponent(selectedLeague)}${showRedraft ? "?redraft=true" : ""}`),
     enabled: !!storedUsername && !!selectedLeague,
     staleTime: 5 * 60 * 1000,
   });
@@ -717,10 +718,16 @@ export default function TradeCalculator() {
     }
     const mode = selectedLeagueData?.mode ?? "sf";
     const timer = setTimeout(() => {
-      evalMutation.mutate({ sideA: sendAssets, sideB: receiveAssets, mode, leagueId: selectedLeague || undefined });
-    }, 400);
-    return () => clearTimeout(timer);
-  }, [sendAssets, receiveAssets, selectedLeague, selectedLeagueData?.mode]);
+      evalMutation.mutate({
+        sideA: sendAssets,
+        sideB: receiveAssets,
+        mode,
+        leagueId: selectedLeague || undefined,
+        redraft: showRedraft,
+      });
+      }, 400);
+      return () => clearTimeout(timer);
+  }, [sendAssets, receiveAssets, selectedLeague, selectedLeagueData?.mode, showRedraft]);
 
   const result = evalMutation.data;
   const userCoreAssetMap = useMemo(() => new Map((userRoster?.core_assets ?? []).map((asset) => [asset.player_id, asset])), [userRoster]);
@@ -826,6 +833,24 @@ export default function TradeCalculator() {
       <div style={{ padding: "28px 0 8px" }}>
         <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>Trade Calculator</h1>
         <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 4 }}>Click your roster and your opponent roster. Evaluation and acceptance update live.</p>
+        <button
+          type="button"
+          onClick={() => setShowRedraft((current) => !current)}
+          style={{
+            marginTop: 10,
+            borderRadius: 999,
+            padding: "7px 12px",
+            border: `1px solid ${showRedraft ? "#60a5fa" : "var(--border)"}`,
+            background: showRedraft ? "rgba(96,165,250,0.14)" : "transparent",
+            color: showRedraft ? "#93c5fd" : "var(--text-muted)",
+            fontSize: 12,
+            fontWeight: 700,
+            cursor: "pointer",
+            fontFamily: "inherit",
+          }}
+        >
+          {showRedraft ? "Redraft On" : "Redraft Off"}
+        </button>
         <FreshnessBar leagueId={selectedLeague || undefined} />
       </div>
 

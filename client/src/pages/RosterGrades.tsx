@@ -151,7 +151,8 @@ function SummaryCards({ leagues }: { leagues: LeagueGrades[] }) {
 
 export default function RosterGrades() {
   const { username } = useParams<{ username: string }>();
-  const { data, isLoading, error } = useRosterGrades(username ?? "");
+  const [showRedraft, setShowRedraft] = useState(false);
+  const { data, isLoading, error } = useRosterGrades(username ?? "", showRedraft);
   const [sortKey, setSortKey] = useState<SortKey>("overall");
 
   const gradeVal: Record<string, number> = { A: 4, B: 3, C: 2, D: 1, F: 0 };
@@ -173,6 +174,24 @@ export default function RosterGrades() {
         <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 4 }}>
           Position strength across all leagues
         </p>
+        <button
+          type="button"
+          onClick={() => setShowRedraft((current) => !current)}
+          style={{
+            marginTop: 10,
+            borderRadius: 999,
+            padding: "7px 12px",
+            border: `1px solid ${showRedraft ? "#60a5fa" : "var(--border)"}`,
+            background: showRedraft ? "rgba(96,165,250,0.14)" : "transparent",
+            color: showRedraft ? "#93c5fd" : "var(--text-muted)",
+            fontSize: 12,
+            fontWeight: 700,
+            cursor: "pointer",
+            fontFamily: "inherit",
+          }}
+        >
+          {showRedraft ? "Redraft On" : "Redraft Off"}
+        </button>
       </div>
 
       {error ? (

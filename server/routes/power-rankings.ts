@@ -10,7 +10,8 @@ router.get("/api/power-rankings/:username", async (req, res) => {
     if (!username) {
       return res.status(400).json({ message: "username is required" });
     }
-    const data = await getPowerRankings(username);
+    const valueType = req.query.redraft === "true" ? "redraft" as const : "dynasty" as const;
+    const data = await getPowerRankings(username, valueType);
     res.json(data);
   } catch (err) {
     console.error("[power-rankings] Error:", err);

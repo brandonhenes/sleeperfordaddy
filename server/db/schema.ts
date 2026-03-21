@@ -291,7 +291,10 @@ export const player_seasonal_stats = pgTable(
     total_rushing_tds: integer("total_rushing_tds").default(0),
     total_receiving_tds: integer("total_receiving_tds").default(0),
   },
-  (table) => [index("idx_seasonal_stats_season").on(table.season)]
+  (table) => [
+    primaryKey({ columns: [table.sleeper_id, table.season] }),
+    index("idx_seasonal_stats_season").on(table.season),
+  ]
 );
 
 export const fantasycalc_daily = pgTable(
@@ -308,9 +311,48 @@ export const fantasycalc_daily = pgTable(
     is_rookie: pgBoolean("is_rookie"),
     is_pick: pgBoolean("is_pick"),
     sleeper_id: text("sleeper_id"),
+    redraft_value: integer("redraft_value"),
   },
   (table) => [index("idx_fc_sleeper_id").on(table.sleeper_id)]
 );
+
+export const ktc_values = pgTable("ktc_values", {
+  sleeper_id: text("sleeper_id").primaryKey(),
+  player_name: text("player_name"),
+  position: text("position"),
+  team: text("team"),
+  age_decimal: real("age_decimal"),
+  value_1qb: integer("value_1qb"),
+  value_sf: integer("value_sf"),
+  rank_1qb: integer("rank_1qb"),
+  rank_sf: integer("rank_sf"),
+  redraft_1qb: integer("redraft_1qb"),
+  redraft_sf: integer("redraft_sf"),
+  is_pick: pgBoolean("is_pick"),
+  pick_season: integer("pick_season"),
+  pick_round: integer("pick_round"),
+  pick_tier: text("pick_tier"),
+  scraped_at: timestamp("scraped_at", { withTimezone: true }),
+});
+
+export const dynastyprocess_values = pgTable("dynastyprocess_values", {
+  sleeper_id: text("sleeper_id").primaryKey(),
+  player_name: text("player_name"),
+  position: text("position"),
+  team: text("team"),
+  age: integer("age"),
+  value_1qb: integer("value_1qb"),
+  value_2qb: integer("value_2qb"),
+  ecr_1qb: real("ecr_1qb"),
+  ecr_2qb: real("ecr_2qb"),
+  redraft_1qb: integer("redraft_1qb"),
+  redraft_2qb: integer("redraft_2qb"),
+  redraft_ecr_1qb: real("redraft_ecr_1qb"),
+  redraft_ecr_2qb: real("redraft_ecr_2qb"),
+  is_pick: pgBoolean("is_pick"),
+  scrape_date: text("scrape_date"),
+  synced_at: timestamp("synced_at", { withTimezone: true }),
+});
 
 export const player_aliases = pgTable(
   "player_aliases",

@@ -5,6 +5,7 @@ import { evaluateTradeValue } from "./trade-value.js";
 import { buildLeagueBehaviors, estimateAcceptance, type ManagerBehavior } from "./manager-behavior.js";
 import { loadTradeHealthPlayerInfo, tradeHealthCheck } from "./trade-calculator.js";
 import { enrichScoredPick, type ClassStrengthMap } from "./pick-values.js";
+import type { ValueType } from "./composite-values.js";
 
 const POSITIONS = ["QB", "RB", "WR", "TE"];
 const MIN_STARTERS: Record<string, number> = { QB: 1, RB: 2, WR: 2, TE: 1 };
@@ -35,6 +36,7 @@ function toEval(a: CoreAsset): EvaluatedAsset {
     dp_score: a.dp_score,
     league_adjusted_score: null,
     scoring_delta_ppg: null,
+    ppg: a.ppg ?? null,
     source_agreement: a.source_agreement,
   };
 }
@@ -422,9 +424,10 @@ export async function shopPlayer(
   username: string,
   playerId: string,
   ambition = 2,
-  classStrengths?: ClassStrengthMap
+  classStrengths?: ClassStrengthMap,
+  valueType: ValueType = "dynasty"
 ): Promise<ShopPlayerResult | null> {
-  const allLeagues = await getPowerRankings(username);
+  const allLeagues = await getPowerRankings(username, valueType);
   if (allLeagues.length === 0) return null;
 
   const leaguesWithPlayer: Array<{

@@ -752,10 +752,11 @@ export default function TradeFinder() {
   const [selectedTarget, setSelectedTarget] = useState<{ name: string; id: string } | null>(null);
   const [selectedPlayer, setSelectedPlayer] = useState("");
   const [shopAmbition, setShopAmbition] = useState(2);
+  const [showShopRedraft, setShowShopRedraft] = useState(false);
   const [shopPathFilter, setShopPathFilter] = useState<string | null>(null);
   const [selectedScoutRosterId, setSelectedScoutRosterId] = useState<number | null>(null);
 
-  const { data: leagues, isLoading: leaguesLoading } = usePowerRankings(phase === "ready" ? username : "");
+  const { data: leagues, isLoading: leaguesLoading } = usePowerRankings(phase === "ready" ? username : "", showShopRedraft);
   const { data: suggestions, isLoading: suggestionsLoading, error: suggestionsError } = useTradeSuggestions(phase === "ready" ? username : "", selectedLeague);
   const { data: portfolio } = usePortfolio(phase === "ready" ? username : undefined);
   const selectedLeagueData = leagues?.find((league) => league.league_id === selectedLeague);
@@ -790,7 +791,8 @@ export default function TradeFinder() {
   const { data: shopResult, isLoading: shopLoading } = useShopPlayer(
     phase === "ready" ? username ?? "" : "",
     mode === "shop" ? selectedPlayer : "",
-    shopAmbition
+    shopAmbition,
+    showShopRedraft
   );
   const filteredShopResults = shopResult?.opportunities.filter((o) => !shopPathFilter || o.path === shopPathFilter) ?? [];
   const scoutProfilesWithScores = (scoutProfilesQuery.data?.profiles ?? [])
@@ -977,11 +979,29 @@ export default function TradeFinder() {
       )}
 
       {mode === "shop" && (
-        <div>
-          <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: 16, marginTop: 8 }}>
-            <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 0.5 }}>
-              Select a Player to Shop
-            </label>
+          <div>
+            <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: 16, marginTop: 8 }}>
+              <button
+                type="button"
+                onClick={() => setShowShopRedraft((current) => !current)}
+                style={{
+                  marginBottom: 12,
+                  borderRadius: 999,
+                  padding: "7px 12px",
+                  border: `1px solid ${showShopRedraft ? "#60a5fa" : "var(--border)"}`,
+                  background: showShopRedraft ? "rgba(96,165,250,0.14)" : "transparent",
+                  color: showShopRedraft ? "#93c5fd" : "var(--text-muted)",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                }}
+              >
+                {showShopRedraft ? "Redraft On" : "Redraft Off"}
+              </button>
+              <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                Select a Player to Shop
+              </label>
             <select
               value={selectedPlayer}
               onChange={(e) => { setSelectedPlayer(e.target.value); setShopPathFilter(null); }}

@@ -47,6 +47,14 @@ function AgeLabel({ asset }: { asset: CoreAsset }) {
 
 // ─── Archetype Badge ───
 
+function PpgBadge({ ppg }: { ppg: number }) {
+  return (
+    <span className="font-mono" style={{ fontSize: 10, fontWeight: 700, color: "#fff", background: "#111827", borderRadius: 999, padding: "3px 8px", whiteSpace: "nowrap" }}>
+      {ppg.toFixed(1)} ppg
+    </span>
+  );
+}
+
 const ARCHETYPE_COLORS: Record<string, string> = {
   "Dynasty Juggernaut": "bg-amber-500 text-black",
   "All-In Contender": "bg-blue-500 text-white",
@@ -128,7 +136,7 @@ function formatPickLabel(pk: ScoredPick): string {
   return pk.label;
 }
 
-function PlayerRow({ p, slotLabel }: { p: SlottedPlayer | CoreAsset; slotLabel?: string }) {
+function PlayerRow({ p, slotLabel, showRedraft }: { p: SlottedPlayer | CoreAsset; slotLabel?: string; showRedraft: boolean }) {
   const label = slotLabel ?? ("slot_label" in p ? (p as SlottedPlayer).slot : p.position);
   const labelColor = slotLabel ? posColor(p.position) : slotColor(p.edge_score);
   const opacity = p.sources_available === 0 ? 0.4 : 1;
@@ -143,6 +151,7 @@ function PlayerRow({ p, slotLabel }: { p: SlottedPlayer | CoreAsset; slotLabel?:
         fc_score={p.fc_score} ktc_score={p.ktc_score} dp_score={p.dp_score}
         sources_available={p.sources_available} source_agreement={p.source_agreement}
       />
+      {showRedraft && p.ppg != null && <PpgBadge ppg={p.ppg} />}
       <AgeLabel asset={p} />
     </div>
   );
@@ -160,7 +169,7 @@ function rosterTextSummary(roster: RosterRanking): string {
   return lines.join("\n");
 }
 
-function ExpandedRosterView({ roster }: { roster: RosterRanking }) {
+function ExpandedRosterView({ roster, showRedraft }: { roster: RosterRanking; showRedraft: boolean }) {
   const [showBench, setShowBench] = useState(false);
   const picks = roster.draft_picks ?? [];
   const lineup = roster.lineup;
@@ -198,6 +207,7 @@ function ExpandedRosterView({ roster }: { roster: RosterRanking }) {
               fc_score={p.fc_score} ktc_score={p.ktc_score} dp_score={p.dp_score}
               sources_available={p.sources_available} source_agreement={p.source_agreement}
             />
+            {showRedraft && p.ppg != null && <PpgBadge ppg={p.ppg} />}
             <AgeLabel asset={p} />
           </div>
         ))}
@@ -220,7 +230,7 @@ function ExpandedRosterView({ roster }: { roster: RosterRanking }) {
           {showBench && (
             <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
               {bench.map((p) => (
-                <PlayerRow key={p.player_id} p={p} slotLabel={p.position} />
+                <PlayerRow key={p.player_id} p={p} slotLabel={p.position} showRedraft={showRedraft} />
               ))}
             </div>
           )}
@@ -262,7 +272,7 @@ function ExpandedRosterView({ roster }: { roster: RosterRanking }) {
 
 // ─── Roster Row ───
 
-function RosterRow({ roster, rank }: { roster: RosterRanking; rank: number }) {
+function RosterRow({ roster, rank, showRedraft }: { roster: RosterRanking; rank: number; showRedraft: boolean }) {
   const [open, setOpen] = useState(false);
   const border = roster.is_user ? "2px solid var(--amber)" : "1px solid var(--border)";
   const btnStyle = { width: "100%", display: "flex" as const, alignItems: "center" as const, gap: 12,
@@ -302,7 +312,7 @@ function RosterRow({ roster, rank }: { roster: RosterRanking; rank: number }) {
           {open ? "\u25B2" : "\u25BC"}
         </span>
       </button>
-      {open && <ExpandedRosterView roster={roster} />}
+      {open && <ExpandedRosterView roster={roster} showRedraft={showRedraft} />}
     </div>
   );
 }
@@ -378,7 +388,7 @@ function LeagueSyncButton({
   );
 }
 
-function LeagueCard({ league, username }: { league: LeaguePowerRanking; username: string }) {
+function LeagueCard({ league, username, showRedraft }: { league: LeaguePowerRanking; username: string; showRedraft: boolean }) {
   const [expanded, setExpanded] = useState(false);
   const userRoster = league.rosters.find((r) => r.is_user);
 
@@ -421,7 +431,7 @@ function LeagueCard({ league, username }: { league: LeaguePowerRanking; username
       {expanded && (
         <div style={{ padding: "0 16px 16px", display: "grid", gap: 6 }}>
           {league.rosters.map((r, i) => (
-            <RosterRow key={r.owner_id ?? i} roster={r} rank={i + 1} />
+            <RosterRow key={r.owner_id ?? i} roster={r} rank={i + 1} showRedraft={showRedraft} />
           ))}
         </div>
       )}
@@ -450,7 +460,8 @@ function SummaryCards({ leagues }: { leagues: LeaguePowerRanking[] }) {
 
 export default function PowerRankings() {
   const { username } = useParams<{ username: string }>();
-  const { data, isLoading, error } = usePowerRankings(username ?? "");
+  const [showRedraft, setShowRedraft] = useState(false);
+  const { data, isLoading, error } = usePowerRankings(username ?? "", showRedraft);
   const [archetypeFilter, setArchetypeFilter] = useState<Set<string>>(new Set());
 
   const leagues = useMemo(() => data ?? [], [data]);
@@ -497,8 +508,26 @@ export default function PowerRankings() {
       <div style={{ padding: "28px 0 8px" }}>
         <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>Power Rankings</h1>
         <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 4 }}>
-          Edge Score dynasty ratings across all leagues (39-99 scale)
+          Edge Score {showRedraft ? "redraft" : "dynasty"} ratings across all leagues (39-99 scale)
         </p>
+        <button
+          type="button"
+          onClick={() => setShowRedraft((current) => !current)}
+          style={{
+            marginTop: 10,
+            borderRadius: 999,
+            padding: "7px 12px",
+            border: `1px solid ${showRedraft ? "#60a5fa" : "var(--border)"}`,
+            background: showRedraft ? "rgba(96,165,250,0.14)" : "transparent",
+            color: showRedraft ? "#93c5fd" : "var(--text-muted)",
+            fontSize: 12,
+            fontWeight: 700,
+            cursor: "pointer",
+            fontFamily: "inherit",
+          }}
+        >
+          {showRedraft ? "Redraft On" : "Redraft Off"}
+        </button>
         <FreshnessBar />
       </div>
 
@@ -560,7 +589,7 @@ export default function PowerRankings() {
           </div>
           <div style={{ display: "grid", gap: 12 }}>
             {filteredLeagues.map((l) => (
-              <LeagueCard key={l.league_id} league={l} username={username ?? ""} />
+              <LeagueCard key={l.league_id} league={l} username={username ?? ""} showRedraft={showRedraft} />
             ))}
           </div>
         </>

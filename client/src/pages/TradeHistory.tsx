@@ -265,8 +265,8 @@ export default function TradeHistory() {
                 <YAxis dataKey="position" type="category" tick={{ fill: "var(--text-muted)", fontSize: 11 }} width={36} />
                 <Tooltip
                   contentStyle={{ background: "var(--dark-base)", border: "1px solid var(--border)", borderRadius: 8 }}
-                  formatter={(value: number) => [`${value.toFixed(1)} edge`, "Net Value"]}
-                />
+                  formatter={(value) => [`${Number(value ?? 0).toFixed(1)} edge`, "Net Value"]}
+                  />
                 <Bar dataKey="net_value" radius={[0, 4, 4, 0]}>
                   {data.stats.by_position.map((row) => (
                     <Cell key={row.position} fill={row.net_value >= 0 ? "#22c55e" : "#ef4444"} />

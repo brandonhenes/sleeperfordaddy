@@ -46,7 +46,8 @@ router.get("/api/trade/shop/:username/:playerId", async (req, res) => {
     }
     const ambition = Number(req.query.ambition ?? 2);
     const classStrengths = parseClassStrengths(req);
-    const data = await shopPlayer(username, playerId, ambition, classStrengths);
+    const valueType = req.query.redraft === "true" ? "redraft" as const : "dynasty" as const;
+    const data = await shopPlayer(username, playerId, ambition, classStrengths, valueType);
     if (!data) {
       return res.status(404).json({ message: "Player not found in any league" });
     }

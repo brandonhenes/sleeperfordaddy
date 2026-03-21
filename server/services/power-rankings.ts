@@ -14,6 +14,8 @@ import { optimizeLineup, type OptimizedLineup } from "./lineup-optimizer.js";
 import { enrichScoredPick } from "./pick-values.js";
 import { getLeagueIdsForUserLatestSeason, type LeagueScope } from "./dynasty-leagues.js";
 import { parseLeagueScoring, scoringLabel } from "./scoring-adjustment.js";
+import { computeLeaguePPG } from "./league-ppg.js";
+import type { ValueType } from "./composite-values.js";
 
 const prCache = new Map<string, { data: LeaguePowerRanking[]; expires: number }>();
 const PR_TTL_MS = 5 * 60 * 1000;
@@ -45,6 +47,7 @@ export interface CoreAsset {
   fc_score: number | null;
   ktc_score: number | null;
   dp_score: number | null;
+  ppg?: number | null;
   sources_available: number;
   source_agreement: "high" | "medium" | "low";
 }
@@ -112,9 +115,12 @@ function scoreAgreement(scores: (number | null)[]): "high" | "medium" | "low" {
 
 export async function getPowerRankings(
   username: string,
-  scope: LeagueScope = "dynasty"
+  scopeOrValueType: LeagueScope | ValueType = "dynasty",
+  maybeValueType: ValueType = "dynasty"
 ): Promise<LeaguePowerRanking[]> {
-  const cacheKey = `${username.toLowerCase()}:${scope}`;
+  const scope: LeagueScope = scopeOrValueType === "redraft" ? "dynasty" : scopeOrValueType;
+  const valueType: ValueType = scopeOrValueType === "redraft" ? "redraft" : maybeValueType;
+  const cacheKey = `${username.toLowerCase()}:${valueType}`;
   const now = Date.now();
   const hit = prCache.get(cacheKey);
   if (hit && hit.expires > now) {
@@ -132,7 +138,7 @@ export async function getPowerRankings(
 
   if (PR_DB_ONLY) {
     try {
-      const dbOnly = await getPowerRankingsDbOnly(username, userId, leagueIds);
+      const dbOnly = await getPowerRankingsDbOnly(username, userId, leagueIds, valueType);
       prCache.set(cacheKey, { data: dbOnly, expires: Date.now() + PR_TTL_MS });
       return dbOnly;
     } catch (err) {
@@ -203,7 +209,15 @@ export async function getPowerRankings(
   }
 
   // Fetch league settings, draft picks, and draft order
-  const settingsMap = new Map<string, { sf: boolean; slots: number; rosterPositions: string[] }>();
+  const settingsMap = new Map<
+    string,
+    {
+      sf: boolean;
+      slots: number;
+      rosterPositions: string[];
+      scoring: Record<string, unknown> | null;
+    }
+  >();
   const dpMap = new Map<string, DraftPick[]>();
   const draftOrderMap = new Map<string, Map<number, number>>(); // league_id → roster_id → position
   await Promise.all(leagues.map(async (l) => {
@@ -239,7 +253,12 @@ export async function getPowerRankings(
         }
       }
 
-      if (detail?.roster_positions) settingsMap.set(l.league_id, { sf: detectSF(detail.roster_positions), slots: countStarterSlots(detail.roster_positions), rosterPositions: detail.roster_positions });
+      if (detail?.roster_positions) settingsMap.set(l.league_id, {
+        sf: detectSF(detail.roster_positions),
+        slots: countStarterSlots(detail.roster_positions),
+        rosterPositions: detail.roster_positions,
+        scoring: (detail.scoring_settings as Record<string, unknown> | null) ?? null,
+      });
       if (draftOrder) draftOrderMap.set(l.league_id, draftOrder);
       const totalRosters = detail?.total_rosters ?? l.total_rosters;
       const draftRounds = Number(detail?.settings?.draft_rounds) || 4;
@@ -253,13 +272,22 @@ export async function getPowerRankings(
   for (const league of leagues) {
     const lid = league.league_id;
     const teams = nested[lid] ?? {};
-    const { sf, slots, rosterPositions } = settingsMap.get(lid) ?? { sf: false, slots: 9, rosterPositions: DEFAULT_POS };
+    const { sf, slots, rosterPositions, scoring } = settingsMap.get(lid) ?? {
+      sf: false,
+      slots: 9,
+      rosterPositions: DEFAULT_POS,
+      scoring: null,
+    };
     const mode = sf ? "sf" : "1qb";
     const owners = Object.entries(teams);
 
     // Step 1: Player composite values
     const playerIds = [...new Set(owners.flatMap(([, ps]) => ps.map((p) => p.player_id)))];
-    const compMap = await getCompositeValues(playerIds, mode);
+    const compMap = await getCompositeValues(playerIds, mode, valueType);
+    const leagueScoring = parseLeagueScoring(scoring);
+    const ppgMap = valueType === "redraft"
+      ? await computeLeaguePPG(playerIds, leagueScoring)
+      : new Map<string, { ppg: number }>();
 
     // Step 2: Initial power for tier estimation
     const initSV = owners.map(([oid, ps]) => {
@@ -325,6 +353,7 @@ export async function getPowerRankings(
         edge_score: p.es, age: p.age, age_curve: p.ac,
         fc_value: p.cv?.fc_value ?? null, ktc_value: p.cv?.ktc_value ?? null, dp_value: p.cv?.dp_value ?? null,
         fc_score: p.cv?.fc_score ?? null, ktc_score: p.cv?.ktc_score ?? null, dp_score: p.cv?.dp_score ?? null,
+        ppg: ppgMap.get(p.player_id)?.ppg ?? null,
         sources_available: p.cv?.sources_available ?? 0, source_agreement: p.cv?.source_agreement ?? "high",
       }));
       const srcAvg = wc.length > 0 ? Math.round((wc.reduce((s, p) => s + (p.cv?.sources_available ?? 0), 0) / wc.length) * 10) / 10 : 0;
@@ -501,7 +530,8 @@ function buildDraftPicksFromDB(
 async function getPowerRankingsDbOnly(
   _username: string,
   userId: string,
-  leagueIds: string[]
+  leagueIds: string[],
+  valueType: ValueType = "dynasty"
 ): Promise<LeaguePowerRanking[]> {
   const leagueIdFrags = leagueIds.map((id) => sql`${id}`);
   const leagueInClause = sql.join(leagueIdFrags, sql`, `);
@@ -612,8 +642,9 @@ async function getPowerRankingsDbOnly(
   >();
   await Promise.all(
     [...modePlayerIds.entries()].map(async ([mode, ids]) => {
-      const [comp, pickLookups] = await Promise.all([
-        getCompositeValues([...ids], mode),
+        const [comp, pickLookups] = await Promise.all([
+        getCompositeValues([...ids], mode, valueType),
+        // loadPickValueLookups stays dynasty-based for picks
         loadPickValueLookups(mode),
       ]);
       baseCompByMode.set(mode, comp as Map<string, any>);
@@ -633,6 +664,9 @@ async function getPowerRankingsDbOnly(
       const cv = baseComp.get(pid);
       if (cv) compMap.set(pid, { ...cv });
     }
+    const ppgMap = valueType === "redraft"
+      ? await computeLeaguePPG(playerIds, leagueScoring)
+      : new Map<string, { ppg: number }>();
 
     const initSV = owners.map(([oid, ps]) => {
       const s = ps.map((p) => compMap.get(p.player_id)?.edge_score ?? 0).sort((a, b) => b - a);
@@ -708,6 +742,7 @@ async function getPowerRankingsDbOnly(
         edge_score: p.es, age: p.age, age_curve: p.ac,
         fc_value: p.cv?.fc_value ?? null, ktc_value: p.cv?.ktc_value ?? null, dp_value: p.cv?.dp_value ?? null,
         fc_score: p.cv?.fc_score ?? null, ktc_score: p.cv?.ktc_score ?? null, dp_score: p.cv?.dp_score ?? null,
+        ppg: ppgMap.get(p.player_id)?.ppg ?? null,
         sources_available: p.cv?.sources_available ?? 0, source_agreement: p.cv?.source_agreement ?? "high",
       }));
       const srcAvg = wc.length > 0 ? Math.round((wc.reduce((s, p) => s + (p.cv?.sources_available ?? 0), 0) / wc.length) * 10) / 10 : 0;

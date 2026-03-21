@@ -20,12 +20,12 @@ export interface RosterGradesResult {
   leagues: LeagueGrades[];
 }
 
-export function useRosterGrades(username: string) {
+export function useRosterGrades(username: string, showRedraft = false) {
   return useQuery<RosterGradesResult>({
-    queryKey: ["roster-grades", username],
+    queryKey: ["roster-grades", username, showRedraft],
     queryFn: () =>
       apiFetch(
-        `/api/roster-grades?username=${encodeURIComponent(username)}`
+        `/api/roster-grades?username=${encodeURIComponent(username)}${showRedraft ? "&redraft=true" : ""}`
       ),
     enabled: !!username,
   });
