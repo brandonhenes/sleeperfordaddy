@@ -510,6 +510,11 @@ export interface ProspectProfile {
   nflPick?: number | null;
   status?: string | null;
   last_updated?: string | null;
+  zoneRoutePff?: string | null;
+  manRoutePff?: string | null;
+  slotRate?: string | null;
+  outsideRate?: string | null;
+  disagreementFlag?: string | null;
 }
 
 export interface InjuryRecoveryBaseline {

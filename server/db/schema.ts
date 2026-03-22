@@ -618,5 +618,10 @@ export const prospectProfiles = pgTable("prospect_profiles", {
   leagueAdp: numeric("league_adp"),
   status: text("status"),
   lastUpdated: text("last_updated"),
+  zoneRoutePff: numeric("zone_route_pff"),
+  manRoutePff: numeric("man_route_pff"),
+  slotRate: numeric("slot_rate"),
+  outsideRate: numeric("outside_rate"),
+  disagreementFlag: text("disagreement_flag"),
 });
 

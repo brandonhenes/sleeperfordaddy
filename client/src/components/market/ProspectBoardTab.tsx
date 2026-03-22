@@ -26,6 +26,13 @@ const TIER_ORDER = ["ELITE", "DAY1", "DAY2", "DAY3", "FLIER"] as const;
 
 type SortKey = typeof SORT_OPTIONS[number]["key"];
 type DisagreementType = "SLEEPER" | "FADING";
+type ProspectBoardExtras = Prospect & {
+  zone_route_pff?: string | null;
+  man_route_pff?: string | null;
+  slot_rate?: string | null;
+  outside_rate?: string | null;
+  disagreement_flag?: "SLEEPER" | "FADING" | null;
+};
 
 function cleanText(value: string | null | undefined): string | null {
   if (value == null) return null;
@@ -91,6 +98,28 @@ function getAdpTier(rank: number | null | undefined): string | null {
   return "FLIER";
 }
 
+function getCoverageTone(value: string | null | undefined) {
+  const score = Number(value);
+  if (!Number.isFinite(score)) return { bg: "rgba(148,163,184,0.12)", color: "var(--text-dim)", border: "rgba(148,163,184,0.28)" };
+  if (score >= 80) return { bg: "rgba(34,197,94,0.12)", color: "#86efac", border: "rgba(34,197,94,0.32)" };
+  if (score >= 70) return { bg: "rgba(245,158,11,0.14)", color: "#fcd34d", border: "rgba(245,158,11,0.34)" };
+  return { bg: "rgba(239,68,68,0.12)", color: "#fca5a5", border: "rgba(239,68,68,0.32)" };
+}
+
+function getAlignmentLabel(prospect: ProspectBoardExtras): "SLOT" | "X/Z" | "FLEX" {
+  const slotRate = Number(prospect.slot_rate);
+  const outsideRate = Number(prospect.outside_rate);
+  if (Number.isFinite(slotRate) && slotRate >= 70) return "SLOT";
+  if (Number.isFinite(outsideRate) && outsideRate >= 70) return "X/Z";
+  return "FLEX";
+}
+
+function getFlagTone(flag: "SLEEPER" | "FADING") {
+  return flag === "SLEEPER"
+    ? { bg: "rgba(34,197,94,0.12)", color: "#86efac", border: "rgba(34,197,94,0.32)", icon: "↑" }
+    : { bg: "rgba(239,68,68,0.12)", color: "#fca5a5", border: "rgba(239,68,68,0.32)", icon: "↓" };
+}
+
 function compareProspects(a: Prospect, b: Prospect, sortKey: SortKey) {
   if (sortKey === "adp") {
     const aValue = a.consensus_adp_rank ?? Number.MAX_SAFE_INTEGER;
@@ -112,23 +141,18 @@ function compareProspects(a: Prospect, b: Prospect, sortKey: SortKey) {
 function computeDisagreements(data: Prospect[]) {
   return data
     .map((prospect) => {
-      const tier = normalizeTier(prospect.tier);
-      const adpTier = getAdpTier(prospect.consensus_adp_rank);
-      if (!tier || !adpTier) return null;
-      const tierIndex = TIER_ORDER.indexOf(tier as typeof TIER_ORDER[number]);
-      const adpIndex = TIER_ORDER.indexOf(adpTier as typeof TIER_ORDER[number]);
-      if (tierIndex === -1 || adpIndex === -1 || tierIndex === adpIndex) return null;
-
+      const extras = prospect as ProspectBoardExtras;
+      const flag = extras.disagreement_flag;
+      if (!flag) return null;
       return {
         prospect,
-        type: tierIndex < adpIndex ? "SLEEPER" as DisagreementType : "FADING" as DisagreementType,
-        delta: Math.abs(tierIndex - adpIndex),
-        adpTier,
+        type: flag,
+        delta: 0,
+        adpTier: getAdpTier(prospect.consensus_adp_rank) ?? "-",
       };
     })
     .filter((entry): entry is { prospect: Prospect; type: DisagreementType; delta: number; adpTier: string } => !!entry)
     .sort((a, b) => {
-      if (b.delta !== a.delta) return b.delta - a.delta;
       const aRank = a.prospect.consensus_adp_rank ?? Number.MAX_SAFE_INTEGER;
       const bRank = b.prospect.consensus_adp_rank ?? Number.MAX_SAFE_INTEGER;
       return aRank - bRank;
@@ -263,6 +287,7 @@ export default function ProspectBoardTab() {
 }
 
 function ProspectRow({ prospect: p }: { prospect: Prospect }) {
+  const prospect = p as ProspectBoardExtras;
   const [expanded, setExpanded] = useState(false);
   const report = scoutingReport(p);
   const strengths = (p.key_strengths ?? []).map((s) => cleanText(s)).filter((s): s is string => !!s);
@@ -289,6 +314,12 @@ function ProspectRow({ prospect: p }: { prospect: Prospect }) {
         <td style={{ padding: "10px 14px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <PlayerLink name={p.player_name} />
+            {prospect.disagreement_flag && (
+              <Badge
+                label={`${getFlagTone(prospect.disagreement_flag).icon} ${prospect.disagreement_flag}`}
+                tone={getFlagTone(prospect.disagreement_flag)}
+              />
+            )}
             {p.age != null && <span style={{ fontSize: 11, color: "var(--text-dim)" }}>({p.age})</span>}
             {hasDetail && <span style={{ fontSize: 10, color: "var(--text-dim)" }}>{expanded ? "?" : "?"}</span>}
           </div>
@@ -429,9 +460,10 @@ function ExpandedDetail({
 }
 
 function AnalyticsRow({ prospect }: { prospect: Prospect }) {
+  const prospectExtras = prospect as ProspectBoardExtras;
   const pffGrade = formatDecimal(prospect.pff_grade_2025, 1);
   const dolittleScore = formatDecimal(prospect.dolittle_score, 2);
-  const items = [
+  const analyticsItems = [
     prospect.pff_rank != null && pffGrade
       ? (
           <Badge
@@ -453,9 +485,33 @@ function AnalyticsRow({ prospect }: { prospect: Prospect }) {
       : null,
   ].filter(Boolean);
 
-  if (items.length === 0) return null;
+  const coverageItems = [
+    prospectExtras.zone_route_pff
+      ? <Badge key="zone" label={`Zone ${prospectExtras.zone_route_pff}`} tone={getCoverageTone(prospectExtras.zone_route_pff)} />
+      : null,
+    prospectExtras.man_route_pff
+      ? <Badge key="man" label={`Man ${prospectExtras.man_route_pff}`} tone={getCoverageTone(prospectExtras.man_route_pff)} />
+      : null,
+    <Badge
+      key="alignment"
+      label={getAlignmentLabel(prospectExtras)}
+      tone={{ bg: "rgba(96,165,250,0.12)", color: "#93c5fd", border: "rgba(96,165,250,0.30)" }}
+    />,
+  ].filter(Boolean);
 
-  return <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>{items}</div>;
+  if (analyticsItems.length === 0 && coverageItems.length === 0) return null;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
+      {analyticsItems.length > 0 && <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{analyticsItems}</div>}
+      {coverageItems.length > 0 && (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+          <span style={{ fontSize: 10, color: "var(--text-dim)", fontWeight: 700 }}>Coverage</span>
+          {coverageItems}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function Badge({

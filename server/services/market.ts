@@ -63,6 +63,11 @@ export interface Prospect {
   nfl_pick: number | null;
   status: string | null;
   last_updated: string | null;
+  zone_route_pff: string | null;
+  man_route_pff: string | null;
+  slot_rate: string | null;
+  outside_rate: string | null;
+  disagreement_flag: "SLEEPER" | "FADING" | null;
 }
 
 export interface Mover {
@@ -169,7 +174,12 @@ export async function getProspects(): Promise<Prospect[]> {
       pp.nfl_team,
       pp.nfl_pick,
       pp.status,
-      pp.last_updated::text AS last_updated
+      pp.last_updated::text AS last_updated,
+      pp.zone_route_pff::text AS zone_route_pff,
+      pp.man_route_pff::text AS man_route_pff,
+      pp.slot_rate::text AS slot_rate,
+      pp.outside_rate::text AS outside_rate,
+      pp.disagreement_flag
     FROM prospect_profiles pp
     ORDER BY
       pp.consensus_adp_rank ASC NULLS LAST,
