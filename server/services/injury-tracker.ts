@@ -1,7 +1,5 @@
 import { db } from "../db/connection.js";
 import { sql } from "drizzle-orm";
-import { getCompositeValues } from "./composite-values.js";
-import { getDynastyLeagueIdsForUserLatestSeason } from "./dynasty-leagues.js";
 import type { InjuredPlayerView, BuyingWindow } from "../../shared/types.js";
 
 // ─── Helpers ───
@@ -65,303 +63,217 @@ function severityOrder(status: string): number {
   return 3;
 }
 
-async function getInjuryColumnSupport(): Promise<{
-  hasStatus: boolean;
-  hasBodyPart: boolean;
-  hasStartDate: boolean;
-}> {
+async function resolveUserId(userIdOrUsername: string): Promise<string | null> {
   const rows = await db.execute(sql`
-    SELECT column_name
-    FROM information_schema.columns
-    WHERE table_schema = 'public'
-      AND table_name = 'players_master'
-      AND column_name IN ('injury_status', 'injury_body_part', 'injury_start_date')
+    SELECT user_id
+    FROM users
+    WHERE user_id = ${userIdOrUsername}
+       OR LOWER(username) = LOWER(${userIdOrUsername})
+    LIMIT 1
   `);
-  const set = new Set(
-    (rows as unknown as { column_name: string }[]).map((r) => r.column_name)
-  );
-  return {
-    hasStatus: set.has("injury_status"),
-    hasBodyPart: set.has("injury_body_part"),
-    hasStartDate: set.has("injury_start_date"),
-  };
+  return (rows as unknown as { user_id: string }[])[0]?.user_id ?? null;
+}
+
+async function ensureFcAtInjuryPopulated(): Promise<void> {
+  await db.execute(sql`
+    UPDATE injury_tracker it
+    SET fc_at_injury = (
+      SELECT fc.dynasty_value
+      FROM fantasycalc_daily fc
+      WHERE fc.player_name = it.player_name
+        AND fc.snapshot_date <= it.injury_date
+      ORDER BY fc.snapshot_date DESC
+      LIMIT 1
+    )
+    WHERE fc_at_injury IS NULL
+  `);
 }
 
 // ─── Main ───
 
 export async function getInjuredPlayers(
-  username: string
+  userIdOrUsername: string
 ): Promise<InjuredPlayerView[]> {
-  const userRows = await db.execute(sql`
-    SELECT user_id FROM users WHERE LOWER(username) = LOWER(${username}) LIMIT 1
-  `);
-  const userId = (userRows as unknown as { user_id: string }[])[0]?.user_id;
+  const userId = await resolveUserId(userIdOrUsername);
   if (!userId) return [];
-
-  const dynastyLeagueIds = await getDynastyLeagueIdsForUserLatestSeason(userId);
-  if (dynastyLeagueIds.length === 0) return [];
-  const injuryCols = await getInjuryColumnSupport();
-  if (!injuryCols.hasStatus) return [];
-
-  const leagueIdFrags = dynastyLeagueIds.map((id) => sql`${id}`);
-  const leagueInClause = sql.join(leagueIdFrags, sql`, `);
-  const bodyCol = injuryCols.hasBodyPart ? sql`pm.injury_body_part` : sql`NULL::text`;
-  const startCol = injuryCols.hasStartDate ? sql`pm.injury_start_date` : sql`NULL::text`;
-  const bodyGroup = injuryCols.hasBodyPart ? sql`, pm.injury_body_part` : sql``;
-  const startGroup = injuryCols.hasStartDate ? sql`, pm.injury_start_date` : sql``;
-
-  // Find injured players the user owns across their dynasty leagues
   const rows = await db.execute(sql`
     SELECT
+      it.player_name AS full_name,
+      it.position,
+      COALESCE(pm.team, it.team, '') AS team,
+      it.injury_type,
+      it.injury_date::text AS injury_date,
+      it.expected_return_weeks,
+      it.notes,
+      it.status,
       pm.player_id,
-      pm.full_name,
-      pm.position,
-      pm.team,
-      pm.injury_status,
-      ${bodyCol} AS injury_body_part,
-      ${startCol} AS injury_start_date,
+      pm.team AS current_team,
       COUNT(DISTINCT rp.league_id)::int AS league_count
-    FROM roster_players rp
-    JOIN players_master pm ON rp.player_id = pm.player_id
-    WHERE rp.owner_id = ${userId}
-      AND rp.league_id IN (${leagueInClause})
-      AND pm.injury_status IS NOT NULL
-      AND pm.injury_status != ''
-      AND pm.team IS NOT NULL
-      AND pm.position IN ('QB', 'RB', 'WR', 'TE')
-    GROUP BY pm.player_id, pm.full_name, pm.position, pm.team,
-             pm.injury_status${bodyGroup}${startGroup}
+    FROM injury_tracker it
+    JOIN players_master pm
+      ON LOWER(pm.full_name) = LOWER(it.player_name)
+     AND pm.position = it.position
+    JOIN roster_players rp ON rp.player_id = pm.player_id
+    JOIN user_leagues ul
+      ON ul.league_id = rp.league_id
+     AND ul.user_id = ${userId}
+    WHERE it.status = 'active'
+    GROUP BY it.id, it.player_name, it.position, it.team, it.injury_type,
+             it.injury_date, it.expected_return_weeks, it.notes, it.status,
+             pm.player_id, pm.team
   `);
 
   type Row = {
-    player_id: string;
     full_name: string;
     position: string;
     team: string;
-    injury_status: string;
-    injury_body_part: string | null;
-    injury_start_date: string | null;
+    injury_type: string | null;
+    injury_date: string | null;
+    expected_return_weeks: number | null;
+    notes: string | null;
+    status: string;
+    player_id: string;
+    current_team: string | null;
     league_count: number;
   };
   const rawRows = rows as unknown as Row[];
   if (rawRows.length === 0) return [];
 
-  const totalLeagues = dynastyLeagueIds.length;
-  const playerIds = rawRows.map((r) => r.player_id);
-  const compMap = await getCompositeValues(playerIds, "sf");
-
-  // Get pre-injury snapshots (most recent snapshot before injury started)
-  const snapshotRows = await db.execute(sql`
-    SELECT DISTINCT ON (player_id) player_id, edge_score
-    FROM player_value_snapshots
-    WHERE player_id IN (${sql.join(playerIds.map((id) => sql`${id}`), sql`, `)})
-    ORDER BY player_id, snapshot_date DESC
-  `);
-  const preInjuryMap = new Map<string, number>();
-  for (const r of snapshotRows as unknown as { player_id: string; edge_score: number | null }[]) {
-    if (r.edge_score != null) preInjuryMap.set(r.player_id, r.edge_score);
-  }
-
   const result: InjuredPlayerView[] = rawRows.map((r) => {
-    const comp = compMap.get(r.player_id);
-    const currentEdge = comp?.edge_score ?? 0;
-    const preInjury = preInjuryMap.get(r.player_id) ?? null;
-    const avgWeeks = avgWeeksFromBodyPart(r.injury_body_part);
-    const valueChangePct = preInjury && preInjury > 0
-      ? Math.round(((currentEdge - preInjury) / preInjury) * 1000) / 10
-      : null;
-
     return {
       player_id: r.player_id,
       full_name: r.full_name,
       position: r.position,
-      team: r.team,
-      injury_status: r.injury_status,
-      injury_body_part: r.injury_body_part,
-      injury_start_date: r.injury_start_date,
-      estimated_return_week: estimateReturnWeek(r.injury_start_date, avgWeeks),
-      estimated_return_date: estimateReturnDate(r.injury_start_date, avgWeeks),
+      team: r.current_team ?? r.team,
+      injury_type: r.injury_type,
+      injury_date: r.injury_date,
+      expected_return_weeks: r.expected_return_weeks,
+      notes: r.notes,
+      status: r.status,
+      injury_status: r.status,
+      injury_body_part: r.injury_type,
+      injury_start_date: r.injury_date,
+      estimated_return_week: r.expected_return_weeks,
+      estimated_return_date: estimateReturnDate(r.injury_date, r.expected_return_weeks ?? DEFAULT_AVG_WEEKS),
       league_count: r.league_count,
-      total_leagues: totalLeagues,
-      exposure_pct: Math.round((r.league_count / totalLeagues) * 1000) / 10,
-      current_edge_score: currentEdge,
-      pre_injury_edge_score: preInjury,
-      value_change_pct: valueChangePct,
+      total_leagues: r.league_count,
+      exposure_pct: 100,
+      current_edge_score: 0,
+      pre_injury_edge_score: null,
+      value_change_pct: null,
     };
   });
 
-  result.sort((a, b) => severityOrder(a.injury_status) - severityOrder(b.injury_status)
+  result.sort((a, b) => severityOrder(a.status ?? a.injury_status) - severityOrder(b.status ?? b.injury_status)
     || b.league_count - a.league_count);
 
   return result;
 }
 
 export async function getBuyingWindows(
-  username: string
+  userIdOrUsername: string
 ): Promise<BuyingWindow[]> {
-  const userRows = await db.execute(sql`
-    SELECT user_id FROM users WHERE LOWER(username) = LOWER(${username}) LIMIT 1
-  `);
-  const userId = (userRows as unknown as { user_id: string }[])[0]?.user_id;
+  const userId = await resolveUserId(userIdOrUsername);
   if (!userId) return [];
-
-  const dynastyLeagueIds = await getDynastyLeagueIdsForUserLatestSeason(userId);
-  if (dynastyLeagueIds.length === 0) return [];
-  const injuryCols = await getInjuryColumnSupport();
-  if (!injuryCols.hasStatus) return [];
-
-  const leagueIdFrags = dynastyLeagueIds.map((id) => sql`${id}`);
-  const leagueInClause = sql.join(leagueIdFrags, sql`, `);
-  const bodyCol = injuryCols.hasBodyPart ? sql`pm.injury_body_part` : sql`NULL::text`;
-  const startCol = injuryCols.hasStartDate ? sql`pm.injury_start_date` : sql`NULL::text`;
-  const bodyGroup = injuryCols.hasBodyPart ? sql`, pm.injury_body_part` : sql``;
-  const startGroup = injuryCols.hasStartDate ? sql`, pm.injury_start_date` : sql``;
-
-  // Find injured players on OTHER teams in the user's leagues that the user does NOT own
+  await ensureFcAtInjuryPopulated();
   const rows = await db.execute(sql`
     SELECT
+      it.player_name AS full_name,
+      it.position,
+      COALESCE(pm.team, it.team, '') AS team,
+      it.injury_type,
+      it.injury_date::text AS injury_date,
+      it.expected_return_weeks,
+      it.notes,
+      it.status,
       pm.player_id,
-      pm.full_name,
-      pm.position,
-      pm.team,
-      pm.injury_status,
-      ${bodyCol} AS injury_body_part,
-      ${startCol} AS injury_start_date
-    FROM players_master pm
-    JOIN roster_players rp ON rp.player_id = pm.player_id
-    WHERE rp.league_id IN (${leagueInClause})
-      AND rp.owner_id != ${userId}
-      AND pm.injury_status IS NOT NULL
-      AND pm.injury_status != ''
-      AND pm.team IS NOT NULL
-      AND pm.position IN ('QB', 'RB', 'WR', 'TE')
-      AND NOT EXISTS (
-        SELECT 1 FROM roster_players rp2
-        WHERE rp2.player_id = pm.player_id
-          AND rp2.owner_id = ${userId}
-          AND rp2.league_id IN (${leagueInClause})
-      )
-    GROUP BY pm.player_id, pm.full_name, pm.position, pm.team,
-             pm.injury_status${bodyGroup}${startGroup}
+      fc.dynasty_value::int AS fc_current,
+      it.fc_at_injury::int AS fc_at_injury,
+      CASE
+        WHEN fc.dynasty_value IS NOT NULL
+         AND it.fc_at_injury IS NOT NULL
+         AND fc.dynasty_value < it.fc_at_injury * 0.7
+        THEN true
+        ELSE false
+      END AS is_buying_window
+    FROM injury_tracker it
+    JOIN players_master pm
+      ON LOWER(pm.full_name) = LOWER(it.player_name)
+     AND pm.position = it.position
+    LEFT JOIN fantasycalc_daily fc
+      ON fc.player_name = it.player_name
+     AND fc.snapshot_date = (SELECT MAX(snapshot_date) FROM fantasycalc_daily)
+    WHERE it.status = 'active'
+      AND it.expected_return_weeks IS NOT NULL
+    ORDER BY it.expected_return_weeks ASC
   `);
 
   type Row = {
-    player_id: string;
     full_name: string;
     position: string;
     team: string;
-    injury_status: string;
-    injury_body_part: string | null;
-    injury_start_date: string | null;
+    injury_type: string | null;
+    injury_date: string | null;
+    expected_return_weeks: number | null;
+    notes: string | null;
+    status: string;
+    player_id: string;
+    fc_current: number | null;
+    fc_at_injury: number | null;
+    is_buying_window: boolean;
   };
   const rawRows = rows as unknown as Row[];
   if (rawRows.length === 0) return [];
 
-  const playerIds = rawRows.map((r) => r.player_id);
-  const compMap = await getCompositeValues(playerIds, "sf");
-
-  // Get pre-injury snapshots
-  const snapshotRows = await db.execute(sql`
-    SELECT DISTINCT ON (player_id) player_id, edge_score
-    FROM player_value_snapshots
-    WHERE player_id IN (${sql.join(playerIds.map((id) => sql`${id}`), sql`, `)})
-    ORDER BY player_id, snapshot_date DESC
-  `);
-  const preInjuryMap = new Map<string, number>();
-  for (const r of snapshotRows as unknown as { player_id: string; edge_score: number | null }[]) {
-    if (r.edge_score != null) preInjuryMap.set(r.player_id, r.edge_score);
-  }
-
-  // Find which leagues/owners have each player (for targeting)
-  const ownerRows = await db.execute(sql`
-    SELECT rp.player_id, rp.league_id, l.name AS league_name,
-           COALESCE(lu.display_name, rp.owner_id) AS owner_display_name
-    FROM roster_players rp
-    JOIN leagues l ON rp.league_id = l.league_id
-    LEFT JOIN league_users lu ON lu.league_id = rp.league_id AND lu.user_id = rp.owner_id
-    WHERE rp.player_id IN (${sql.join(playerIds.map((id) => sql`${id}`), sql`, `)})
-      AND rp.league_id IN (${leagueInClause})
-      AND rp.owner_id != ${userId}
-  `);
-  type OwnerRow = { player_id: string; league_id: string; league_name: string; owner_display_name: string };
-  const targetMap = new Map<string, { league_id: string; league_name: string; owner_display_name: string }[]>();
-  for (const r of ownerRows as unknown as OwnerRow[]) {
-    const list = targetMap.get(r.player_id) ?? [];
-    list.push({ league_id: r.league_id, league_name: r.league_name, owner_display_name: r.owner_display_name });
-    targetMap.set(r.player_id, list);
-  }
-
-  const totalLeagues = dynastyLeagueIds.length;
-
   const windows: BuyingWindow[] = [];
 
   for (const r of rawRows) {
-    const comp = compMap.get(r.player_id);
-    const currentEdge = comp?.edge_score ?? 0;
-    const preInjury = preInjuryMap.get(r.player_id) ?? null;
-    const avgWeeks = avgWeeksFromBodyPart(r.injury_body_part);
-
-    const valueChangePct = preInjury && preInjury > 0
-      ? Math.round(((currentEdge - preInjury) / preInjury) * 1000) / 10
+    const valueChangePct = r.fc_at_injury && r.fc_at_injury > 0 && r.fc_current != null
+      ? Math.round(((r.fc_current - r.fc_at_injury) / r.fc_at_injury) * 1000) / 10
       : null;
 
-    // Filter: value dropped >10% AND estimated return within 8 weeks
-    if (valueChangePct === null || valueChangePct >= -10) continue;
-
-    const estReturnDate = estimateReturnDate(r.injury_start_date, avgWeeks);
-    if (estReturnDate) {
-      const weeksUntilReturn = (new Date(estReturnDate).getTime() - Date.now()) / (7 * 24 * 60 * 60 * 1000);
-      if (weeksUntilReturn > 8) continue; // too far out
-    }
-
-    // Score: bigger drop + sooner return = higher score
-    const dropScore = Math.min(50, Math.abs(valueChangePct ?? 0) * 2);
-    const returnScore = estReturnDate
-      ? Math.max(0, 50 - ((new Date(estReturnDate).getTime() - Date.now()) / (7 * 24 * 60 * 60 * 1000)) * 6)
-      : 25;
-    const opportunityScore = Math.round(Math.min(100, dropScore + returnScore));
-
     const buyReasons: string[] = [];
-    if (valueChangePct !== null) buyReasons.push(`Value dropped ${Math.abs(valueChangePct).toFixed(1)}% since injury`);
-    if (estReturnDate) buyReasons.push(`Estimated return: ${estReturnDate}`);
-    if (currentEdge >= 60) buyReasons.push(`Still a strong asset (edge score ${currentEdge})`);
+    if (r.fc_current != null) buyReasons.push(`Current FC value: ${r.fc_current}`);
+    if (r.fc_at_injury != null) buyReasons.push(`FC at injury: ${r.fc_at_injury}`);
+    if (valueChangePct != null) buyReasons.push(`Value moved ${valueChangePct.toFixed(1)}% since injury`);
 
     const riskFactors: string[] = [];
-    if (r.injury_body_part) {
-      const severe = ["acl", "achilles"];
-      if (severe.includes(r.injury_body_part.toLowerCase())) {
-        riskFactors.push("Season-ending injury type");
-      }
-    }
-    if (avgWeeks > 12) riskFactors.push(`Recovery could take around ${avgWeeks} weeks`);
+    if (r.notes) riskFactors.push(r.notes);
 
     const player: InjuredPlayerView = {
       player_id: r.player_id,
       full_name: r.full_name,
       position: r.position,
       team: r.team,
-      injury_status: r.injury_status,
-      injury_body_part: r.injury_body_part,
-      injury_start_date: r.injury_start_date,
-      estimated_return_week: estimateReturnWeek(r.injury_start_date, avgWeeks),
-      estimated_return_date: estReturnDate,
+      injury_type: r.injury_type,
+      injury_date: r.injury_date,
+      expected_return_weeks: r.expected_return_weeks,
+      notes: r.notes,
+      status: r.status,
+      fc_current: r.fc_current,
+      fc_at_injury: r.fc_at_injury,
+      is_buying_window: r.is_buying_window,
+      injury_status: r.status,
+      injury_body_part: r.injury_type,
+      injury_start_date: r.injury_date,
+      estimated_return_week: r.expected_return_weeks,
+      estimated_return_date: estimateReturnDate(r.injury_date, r.expected_return_weeks ?? DEFAULT_AVG_WEEKS),
       league_count: 0,
-      total_leagues: totalLeagues,
+      total_leagues: 0,
       exposure_pct: 0,
-      current_edge_score: currentEdge,
-      pre_injury_edge_score: preInjury,
+      current_edge_score: 0,
+      pre_injury_edge_score: null,
       value_change_pct: valueChangePct,
     };
 
     windows.push({
       player,
-      opportunity_score: opportunityScore,
+      opportunity_score: r.expected_return_weeks ?? 0,
       buy_reasons: buyReasons,
       risk_factors: riskFactors,
-      leagues_to_target: targetMap.get(r.player_id) ?? [],
+      leagues_to_target: [],
     });
   }
 
-  windows.sort((a, b) => b.opportunity_score - a.opportunity_score);
   return windows;
 }

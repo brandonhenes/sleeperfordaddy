@@ -450,6 +450,14 @@ export interface InjuredPlayerView {
   full_name: string;
   position: string;
   team: string;
+  injury_type?: string | null;
+  injury_date?: string | null;
+  expected_return_weeks?: number | null;
+  notes?: string | null;
+  status?: string | null;
+  fc_current?: number | null;
+  fc_at_injury?: number | null;
+  is_buying_window?: boolean | null;
   injury_status: string; // "Out", "Doubtful", "Questionable", "IR", "PUP"
   injury_body_part: string | null;
   injury_start_date: string | null;

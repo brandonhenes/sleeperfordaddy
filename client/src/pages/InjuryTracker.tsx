@@ -27,6 +27,17 @@ function statusLabel(status: string): string {
   return status.charAt(0).toUpperCase() + status.slice(1);
 }
 
+function formatReturnTimeline(player: InjuredPlayerView): string {
+  if (player.expected_return_weeks != null) return `Week ${player.expected_return_weeks}`;
+  if (player.estimated_return_date) {
+    const date = new Date(player.estimated_return_date);
+    if (!isNaN(date.getTime())) {
+      return date.toLocaleDateString("en-US", { month: "short", year: "numeric" });
+    }
+  }
+  return "Unknown";
+}
+
 // ─── Risk Summary ───
 
 function RiskSummary({ injuries }: { injuries: InjuredPlayerView[] }) {
@@ -91,7 +102,7 @@ function InjuryTable({ injuries }: { injuries: InjuredPlayerView[] }) {
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
         <thead>
           <tr style={{ borderBottom: "1px solid var(--border)" }}>
-            {["Player", "Pos", "Team", "Status", "Injury", "Edge", "Value Change", "Leagues", "Est. Return"].map((h) => (
+            {["Player", "Pos", "Team", "Injury", "Date", "Return", "Leagues", "Notes"].map((h) => (
               <th
                 key={h}
                 style={{
@@ -118,41 +129,16 @@ function InjuryTable({ injuries }: { injuries: InjuredPlayerView[] }) {
                 {p.position}
               </td>
               <td style={{ padding: "10px 12px", color: "var(--text-muted)" }}>{p.team}</td>
-              <td style={{ padding: "10px 12px" }}>
-                <span
-                  style={{
-                    display: "inline-block",
-                    padding: "2px 8px",
-                    borderRadius: 4,
-                    fontSize: 11,
-                    fontWeight: 700,
-                    background: statusColor(p.injury_status) + "22",
-                    color: statusColor(p.injury_status),
-                  }}
-                >
-                  {statusLabel(p.injury_status)}
-                </span>
-              </td>
               <td style={{ padding: "10px 12px", color: "var(--text-dim)" }}>
-                {p.injury_body_part ?? "Unknown"}
+                {p.injury_type ?? p.injury_body_part ?? "Unknown"}
               </td>
-              <td style={{ padding: "10px 12px" }}>
-                <EdgeScoreBadge score={p.current_edge_score} />
-              </td>
-              <td style={{ padding: "10px 12px" }}>
-                {p.value_change_pct != null ? (
-                  <span style={{ color: p.value_change_pct < 0 ? "#ef4444" : "#22c55e", fontWeight: 600 }}>
-                    {p.value_change_pct > 0 ? "+" : ""}{p.value_change_pct.toFixed(1)}%
-                  </span>
-                ) : (
-                  <span style={{ color: "var(--text-muted)" }}>--</span>
-                )}
-              </td>
+              <td style={{ padding: "10px 12px", color: "var(--text-dim)" }}>{p.injury_date ?? p.injury_start_date ?? "Unknown"}</td>
+              <td style={{ padding: "10px 12px", color: "var(--text-dim)" }}>{formatReturnTimeline(p)}</td>
               <td style={{ padding: "10px 12px", fontWeight: 600 }}>
-                {p.league_count}/{p.total_leagues}
+                {p.league_count}
               </td>
-              <td style={{ padding: "10px 12px", color: "var(--text-dim)" }}>
-                {p.estimated_return_date ?? "Unknown"}
+              <td style={{ padding: "10px 12px", color: "var(--text-dim)", maxWidth: 320 }}>
+                {p.notes ?? "-"}
               </td>
             </tr>
           ))}
@@ -202,28 +188,36 @@ function WindowCard({ window }: { window: BuyingWindow }) {
             color: statusColor(p.injury_status),
           }}
         >
-          {statusLabel(p.injury_status)} - {p.injury_body_part ?? "Unknown"}
+          {p.is_buying_window ? "BUY WINDOW" : statusLabel(p.status ?? p.injury_status)} - {p.injury_type ?? p.injury_body_part ?? "Unknown"}
         </span>
       </div>
 
       {/* Stats row */}
       <div style={{ display: "flex", gap: 20, fontSize: 13, flexWrap: "wrap" }}>
-        <div>
-          <span style={{ color: "var(--text-muted)" }}>Edge Score: </span>
-          <EdgeScoreBadge score={p.current_edge_score} />
-        </div>
+        {p.fc_current != null && (
+          <div>
+            <span style={{ color: "var(--text-muted)" }}>Current FC: </span>
+            <span style={{ fontWeight: 700 }}>{p.fc_current}</span>
+          </div>
+        )}
+        {p.fc_at_injury != null && (
+          <div>
+            <span style={{ color: "var(--text-muted)" }}>FC at Injury: </span>
+            <span style={{ fontWeight: 700 }}>{p.fc_at_injury}</span>
+          </div>
+        )}
         {p.value_change_pct != null && (
           <div>
-            <span style={{ color: "var(--text-muted)" }}>Value Drop: </span>
-            <span style={{ color: "#ef4444", fontWeight: 700 }}>{p.value_change_pct.toFixed(1)}%</span>
+            <span style={{ color: "var(--text-muted)" }}>Value Change: </span>
+            <span style={{ color: p.value_change_pct <= -30 ? "#ef4444" : "var(--text)", fontWeight: 700 }}>
+              {p.value_change_pct > 0 ? "+" : ""}{p.value_change_pct.toFixed(1)}%
+            </span>
           </div>
         )}
-        {p.estimated_return_date && (
-          <div>
-            <span style={{ color: "var(--text-muted)" }}>Return: </span>
-            <span style={{ fontWeight: 600 }}>{p.estimated_return_date}</span>
-          </div>
-        )}
+        <div>
+          <span style={{ color: "var(--text-muted)" }}>Return: </span>
+          <span style={{ fontWeight: 600 }}>{formatReturnTimeline(p)}</span>
+        </div>
       </div>
 
       {/* Reasons */}
