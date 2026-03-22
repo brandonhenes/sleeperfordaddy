@@ -61,6 +61,7 @@ export interface Prospect {
   consensus_adp_rank: number | null;
   nfl_team: string | null;
   nfl_pick: number | null;
+  disagreement_flag: "SLEEPER" | "FADING" | null;
   status: string | null;
   last_updated: string | null;
 }

@@ -319,39 +319,10 @@ export default function RookieDraft() {
 
   const disagreements = useMemo(() => {
     if (!data) return [];
-    const tierExpectedRange: Record<string, [number, number]> = {
-      elite: [1, 1],
-      day1: [2, 4],
-      day2: [3, 7],
-      day3: [5, 12],
-      flier: [8, 99],
-    };
-
-    return data
-      .map((p) => {
-        const tier = (p.tier ?? "flier").toLowerCase();
-        const posRank = p.fp_rank ?? p.fantasypros_rank ?? null;
-        if (!posRank) return null;
-        const expected = tierExpectedRange[tier] ?? [1, 99];
-        const isHigherThanExpected = posRank < expected[0];
-        const isLowerThanExpected = posRank > expected[1];
-        if (!isHigherThanExpected && !isLowerThanExpected) return null;
-
-        return {
-          prospect: p,
-          posRank,
-          tier,
-          direction: isHigherThanExpected ? "undervalued" as const : "overvalued" as const,
-          note: isHigherThanExpected
-            ? `Ranked ${p.position}${posRank} but only in ${(TIER_CONFIG[tier]?.label ?? tier).toUpperCase()} tier. May be a steal.`
-            : `In ${(TIER_CONFIG[tier]?.label ?? tier).toUpperCase()} tier but ranked ${p.position}${posRank}. Possibly overranked.`,
-        };
-      })
-      .filter((d): d is NonNullable<typeof d> => d !== null)
-      .sort((a, b) => {
-        if (a.direction !== b.direction) return a.direction === "undervalued" ? -1 : 1;
-        return a.posRank - b.posRank;
-      });
+    const disagreements = data.filter((p) => p.disagreement_flag != null);
+    const sleepers = disagreements.filter((p) => p.disagreement_flag === "SLEEPER");
+    const fading = disagreements.filter((p) => p.disagreement_flag === "FADING");
+    return [...sleepers, ...fading];
   }, [data]);
 
   if (isLoading) return <AppShell><div className="animate-pulse" style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, height: 400, marginTop: 28 }} /></AppShell>;
@@ -447,23 +418,26 @@ export default function RookieDraft() {
             RANKING DISAGREEMENTS ({disagreements.length})
           </div>
           <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4 }}>
-            {disagreements.slice(0, 8).map((d) => (
-              <div key={d.prospect.player_name} style={{
-                background: "var(--dark-base)", border: "1px solid var(--border)",
+            {disagreements.slice(0, 8).map((prospect) => (
+              <div key={prospect.player_name} style={{
+                background: "var(--dark-base)", border: `1px solid ${prospect.disagreement_flag === "SLEEPER" ? "rgba(34,197,94,0.35)" : "rgba(239,68,68,0.35)"}`,
                 borderRadius: 8, padding: "8px 12px", minWidth: 200, flexShrink: 0,
               }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   <span style={{
                     fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 3,
-                    background: d.direction === "undervalued" ? "rgba(34,197,94,0.15)" : "rgba(239,68,68,0.15)",
-                    color: d.direction === "undervalued" ? "#86efac" : "#fca5a5",
+                    background: prospect.disagreement_flag === "SLEEPER" ? "rgba(34,197,94,0.15)" : "rgba(239,68,68,0.15)",
+                    color: prospect.disagreement_flag === "SLEEPER" ? "#86efac" : "#fca5a5",
                   }}>
-                    {d.direction === "undervalued" ? "SLEEPER" : "FADING"}
+                    {prospect.disagreement_flag}
                   </span>
-                  <span style={{ fontSize: 12, fontWeight: 700 }}>{d.prospect.player_name}</span>
+                  <span style={{ fontSize: 12, fontWeight: 700 }}>{prospect.player_name}</span>
                 </div>
                 <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 4, lineHeight: 1.4 }}>
-                  {d.note}
+                  {(TIER_CONFIG[prospect.tier ?? "flier"]?.label ?? (prospect.tier ?? "FLIER")).toUpperCase()} tier.{" "}
+                  {prospect.disagreement_flag === "SLEEPER"
+                    ? "PFF/market data suggests undervalued"
+                    : "PFF/market data suggests overvalued"}
                 </div>
               </div>
             ))}
