@@ -50,6 +50,19 @@ export interface Prospect {
   combine_vertical: string | null;
   combine_shuttle: string | null;
   combine_bench: string | null;
+  pff_rank: number | null;
+  pff_grade_2025: number | null;
+  pff_grade_2024: number | null;
+  pff_waa_2025: number | null;
+  dolittle_score: number | null;
+  dolittle_games: number | null;
+  dolittle_confidence: "HIGH" | "MED" | "LOW" | null;
+  consensus_adp: string | null;
+  consensus_adp_rank: number | null;
+  nfl_team: string | null;
+  nfl_pick: number | null;
+  status: string | null;
+  last_updated: string | null;
 }
 
 export interface Mover {

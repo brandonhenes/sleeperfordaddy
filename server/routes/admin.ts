@@ -4,6 +4,7 @@ import { syncPlayerIdCrosswalk } from "../services/sync-crosswalk.js";
 import { syncKtcValues } from "../services/sync-ktc.js";
 import { syncDynastyProcessValues } from "../services/sync-dynastyprocess.js";
 import { syncFpEliteValues } from "../services/sync-fp-elite.js";
+import { syncFcRedraftValues } from "../services/sync-fc-redraft.js";
 import { snapshotEdgeScores } from "../services/snapshot-scores.js";
 import { syncKtcRedraftValues } from "../services/sync-ktc-redraft.js";
 import { syncFpRedraftValues } from "../services/sync-fp-redraft.js";
@@ -179,6 +180,17 @@ router.post("/api/admin/sync-dynastyprocess", async (_req, res) => {
     res.json(stats);
   } catch (err) {
     console.error("[admin/sync-dynastyprocess] Error:", err);
+    res.status(500).json({ message: (err as Error).message ?? "Internal server error" });
+  }
+});
+
+/** POST /api/admin/sync-fc-redraft */
+router.post("/api/admin/sync-fc-redraft", async (_req, res) => {
+  try {
+    const stats = await syncFcRedraftValues();
+    res.json(stats);
+  } catch (err) {
+    console.error("[admin/sync-fc-redraft] Error:", err);
     res.status(500).json({ message: (err as Error).message ?? "Internal server error" });
   }
 });

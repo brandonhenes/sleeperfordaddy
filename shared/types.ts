@@ -471,6 +471,47 @@ export interface BuyingWindow {
   leagues_to_target: { league_id: string; league_name: string; owner_display_name: string }[];
 }
 
+export interface ProspectProfile {
+  player_name: string;
+  position: string | null;
+  school: string | null;
+  tier: string | null;
+  fp_rank: number | null;
+  fantasypros_rank: number | null;
+  consensus_comp: string | null;
+  all_comps: Array<{ comp: string; date: string; source: string }> | null;
+  key_strengths: string[] | null;
+  key_concerns: string[] | null;
+  scouting_notes: string | null;
+  fp_scouting_notes: string | null;
+  total_mentions: number | null;
+  last_update_summary: string | null;
+  age: number | null;
+  notes: string | null;
+  height: string | null;
+  weight: string | null;
+  draft_capital: string | null;
+  landing_spot: string | null;
+  current_adp: string | null;
+  combine_40: string | null;
+  combine_vertical: string | null;
+  combine_shuttle: string | null;
+  combine_bench: string | null;
+  pffRank?: number | null;
+  pffGrade2025?: number | null;
+  pffGrade2024?: number | null;
+  pffWaa2025?: number | null;
+  dolittleScore?: number | null;
+  dolittleGames?: number | null;
+  dolittleConfidence?: "HIGH" | "MED" | "LOW" | null;
+  consensusAdp?: string | null;
+  consensusAdpRank?: number | null;
+  nflTeam?: string | null;
+  nflPick?: number | null;
+  status?: string | null;
+  last_updated?: string | null;
+}
+
 export interface InjuryRecoveryBaseline {
   injury_type: string;
   position: string;

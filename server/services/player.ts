@@ -55,6 +55,16 @@ export interface ProspectInfo {
   key_strengths: string[] | null;
   draft_capital: string | null;
   notes: string | null;
+  pffRank?: number | null;
+  pffGrade2025?: number | null;
+  pffWaa2025?: number | null;
+  dolittleScore?: number | null;
+  dolittleGames?: number | null;
+  dolittleConfidence?: "HIGH" | "MED" | "LOW" | null;
+  consensusAdp?: string | null;
+  consensusAdpRank?: number | null;
+  nflTeam?: string | null;
+  nflPick?: number | null;
 }
 
 export interface RecInfo {

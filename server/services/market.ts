@@ -50,6 +50,19 @@ export interface Prospect {
   combine_vertical: string | null;
   combine_shuttle: string | null;
   combine_bench: string | null;
+  pff_rank: number | null;
+  pff_grade_2025: number | null;
+  pff_grade_2024: number | null;
+  pff_waa_2025: number | null;
+  dolittle_score: number | null;
+  dolittle_games: number | null;
+  dolittle_confidence: "HIGH" | "MED" | "LOW" | null;
+  consensus_adp: string | null;
+  consensus_adp_rank: number | null;
+  nfl_team: string | null;
+  nfl_pick: number | null;
+  status: string | null;
+  last_updated: string | null;
 }
 
 export interface Mover {
@@ -109,14 +122,14 @@ export async function getRecommendations(): Promise<Recommendation[]> {
 export async function getProspects(): Promise<Prospect[]> {
   const rows = await db.execute(sql`
     SELECT
-      p26.player_name,
-      p26.position,
-      p26.school,
-      p26.tier,
-      p26.fantasypros_rank AS fp_rank,
-      p26.fantasypros_rank,
-      p26.age,
-      p26.notes,
+      pp.player_name,
+      pp.position,
+      pp.school,
+      UPPER(pp.tier) AS tier,
+      pp.fantasypros_rank AS fp_rank,
+      pp.fantasypros_rank,
+      pp.age,
+      pp.notes,
       pp.consensus_comp,
       pp.all_comps,
       pp.key_strengths,
@@ -133,11 +146,25 @@ export async function getProspects(): Promise<Prospect[]> {
       pp.combine_40,
       pp.combine_vertical,
       pp.combine_shuttle,
-      pp.combine_bench
-    FROM prospects_2026 p26
-    LEFT JOIN prospect_profiles pp
-      ON LOWER(p26.player_name) = LOWER(pp.player_name)
-    ORDER BY p26.fantasypros_rank ASC NULLS LAST
+      pp.combine_bench,
+      pp.pff_rank,
+      pp.pff_grade_2025,
+      pp.pff_grade_2024,
+      pp.pff_waa_2025,
+      pp.dolittle_score,
+      pp.dolittle_games,
+      pp.dolittle_confidence,
+      pp.consensus_adp,
+      pp.consensus_adp_rank,
+      pp.nfl_team,
+      pp.nfl_pick,
+      pp.status,
+      pp.last_updated::text AS last_updated
+    FROM prospect_profiles pp
+    ORDER BY
+      pp.fantasypros_rank ASC NULLS LAST,
+      pp.consensus_adp_rank ASC NULLS LAST,
+      pp.player_name ASC
   `);
   return rows as unknown as Prospect[];
 }
