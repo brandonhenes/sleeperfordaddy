@@ -103,6 +103,10 @@ export async function getInjuredPlayers(
       COALESCE(pm.team, it.team, '') AS team,
       it.injury_type,
       it.injury_date::text AS injury_date,
+      it.expected_return_date::text AS expected_return_date,
+      it.return_label,
+      it.avg_recovery_weeks,
+      it.recovery_pace,
       it.expected_return_weeks,
       it.notes,
       it.status,
@@ -129,6 +133,10 @@ export async function getInjuredPlayers(
     team: string;
     injury_type: string | null;
     injury_date: string | null;
+    expected_return_date: string | null;
+    return_label: string | null;
+    avg_recovery_weeks: number | null;
+    recovery_pace: string | null;
     expected_return_weeks: number | null;
     notes: string | null;
     status: string;
@@ -147,6 +155,10 @@ export async function getInjuredPlayers(
       team: r.current_team ?? r.team,
       injury_type: r.injury_type,
       injury_date: r.injury_date,
+      expected_return_date: r.expected_return_date,
+      return_label: r.return_label,
+      avg_recovery_weeks: r.avg_recovery_weeks,
+      recovery_pace: r.recovery_pace,
       expected_return_weeks: r.expected_return_weeks,
       notes: r.notes,
       status: r.status,
@@ -183,6 +195,10 @@ export async function getBuyingWindows(
       COALESCE(pm.team, it.team, '') AS team,
       it.injury_type,
       it.injury_date::text AS injury_date,
+      it.expected_return_date::text AS expected_return_date,
+      it.return_label,
+      it.avg_recovery_weeks,
+      it.recovery_pace,
       it.expected_return_weeks,
       it.notes,
       it.status,
@@ -214,6 +230,10 @@ export async function getBuyingWindows(
     team: string;
     injury_type: string | null;
     injury_date: string | null;
+    expected_return_date: string | null;
+    return_label: string | null;
+    avg_recovery_weeks: number | null;
+    recovery_pace: string | null;
     expected_return_weeks: number | null;
     notes: string | null;
     status: string;
@@ -247,6 +267,10 @@ export async function getBuyingWindows(
       team: r.team,
       injury_type: r.injury_type,
       injury_date: r.injury_date,
+      expected_return_date: r.expected_return_date,
+      return_label: r.return_label,
+      avg_recovery_weeks: r.avg_recovery_weeks,
+      recovery_pace: r.recovery_pace,
       expected_return_weeks: r.expected_return_weeks,
       notes: r.notes,
       status: r.status,

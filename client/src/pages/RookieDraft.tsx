@@ -324,6 +324,8 @@ export default function RookieDraft() {
     const fading = disagreements.filter((p) => p.disagreement_flag === "FADING");
     return [...sleepers, ...fading];
   }, [data]);
+  const sleeperDisagreements = disagreements.filter((p) => p.disagreement_flag === "SLEEPER");
+  const fadingDisagreements = disagreements.filter((p) => p.disagreement_flag === "FADING");
 
   if (isLoading) return <AppShell><div className="animate-pulse" style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, height: 400, marginTop: 28 }} /></AppShell>;
   if (error) return <AppShell><div style={{ padding: "28px 0", color: "var(--red)" }}>Error loading prospects</div></AppShell>;
@@ -417,27 +419,28 @@ export default function RookieDraft() {
           <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-muted)", letterSpacing: 0.5, marginBottom: 10 }}>
             RANKING DISAGREEMENTS ({disagreements.length})
           </div>
-          <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4 }}>
-            {disagreements.slice(0, 8).map((prospect) => (
-              <div key={prospect.player_name} style={{
-                background: "var(--dark-base)", border: `1px solid ${prospect.disagreement_flag === "SLEEPER" ? "rgba(34,197,94,0.35)" : "rgba(239,68,68,0.35)"}`,
-                borderRadius: 8, padding: "8px 12px", minWidth: 200, flexShrink: 0,
-              }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <span style={{
-                    fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 3,
-                    background: prospect.disagreement_flag === "SLEEPER" ? "rgba(34,197,94,0.15)" : "rgba(239,68,68,0.15)",
-                    color: prospect.disagreement_flag === "SLEEPER" ? "#86efac" : "#fca5a5",
-                  }}>
-                    {prospect.disagreement_flag}
-                  </span>
-                  <span style={{ fontSize: 12, fontWeight: 700 }}>{prospect.player_name}</span>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
+            {[
+              { title: "SLEEPER", arrow: "↑", color: "#22c55e", bg: "rgba(34,197,94,0.08)", border: "rgba(34,197,94,0.25)", items: sleeperDisagreements, label: "PFF/market data suggests undervalued" },
+              { title: "FADING", arrow: "↓", color: "#ef4444", bg: "rgba(239,68,68,0.08)", border: "rgba(239,68,68,0.25)", items: fadingDisagreements, label: "PFF/market data suggests overvalued" },
+            ].filter((section) => section.items.length > 0).map((section) => (
+              <div key={section.title} style={{ background: "var(--dark-base)", border: `1px solid ${section.border}`, borderRadius: 8, padding: "10px 12px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8, color: section.color, fontSize: 11, fontWeight: 700 }}>
+                  <span>{section.arrow}</span>
+                  <span>{section.title}</span>
                 </div>
-                <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 4, lineHeight: 1.4 }}>
-                  {(TIER_CONFIG[prospect.tier ?? "flier"]?.label ?? (prospect.tier ?? "FLIER")).toUpperCase()} tier.{" "}
-                  {prospect.disagreement_flag === "SLEEPER"
-                    ? "PFF/market data suggests undervalued"
-                    : "PFF/market data suggests overvalued"}
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {section.items.map((prospect) => (
+                    <div key={prospect.player_name} style={{ background: section.bg, border: `1px solid ${section.border}`, borderRadius: 8, padding: "8px 10px" }}>
+                      <div style={{ fontSize: 12, fontWeight: 700 }}>{prospect.player_name}</div>
+                      <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 4, lineHeight: 1.4 }}>
+                        {(TIER_CONFIG[prospect.tier ?? "flier"]?.label ?? (prospect.tier ?? "FLIER")).toUpperCase()} tier
+                      </div>
+                      <div style={{ fontSize: 10, color: section.color, marginTop: 2, lineHeight: 1.4 }}>
+                        {prospect.player_name} -- {section.label}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             ))}

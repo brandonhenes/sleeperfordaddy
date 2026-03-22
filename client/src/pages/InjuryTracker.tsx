@@ -28,7 +28,13 @@ function statusLabel(status: string): string {
 }
 
 function formatReturnTimeline(player: InjuredPlayerView): string {
-  if (player.expected_return_weeks != null) return `Week ${player.expected_return_weeks}`;
+  if (player.return_label) return player.return_label;
+  if (player.expected_return_date) {
+    const date = new Date(player.expected_return_date);
+    if (!isNaN(date.getTime())) {
+      return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    }
+  }
   if (player.estimated_return_date) {
     const date = new Date(player.estimated_return_date);
     if (!isNaN(date.getTime())) {
@@ -41,9 +47,7 @@ function formatReturnTimeline(player: InjuredPlayerView): string {
 // ─── Risk Summary ───
 
 function RiskSummary({ injuries }: { injuries: InjuredPlayerView[] }) {
-  const outCount = injuries.filter((p) =>
-    ["out", "ir", "pup"].includes(p.injury_status.toLowerCase())
-  ).length;
+  const activeCount = injuries.length;
   const totalSlots = injuries.reduce((s, p) => s + p.league_count, 0);
   const highest = injuries.length > 0
     ? injuries.reduce((a, b) => (b.league_count > a.league_count ? b : a))
@@ -63,8 +67,8 @@ function RiskSummary({ injuries }: { injuries: InjuredPlayerView[] }) {
       }}
     >
       <div>
-        <div style={{ fontSize: 22, fontWeight: 800, color: "#ef4444" }}>{outCount}</div>
-        <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Players OUT/IR</div>
+        <div style={{ fontSize: 22, fontWeight: 800, color: "#ef4444" }}>{activeCount}</div>
+        <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Active injuries</div>
       </div>
       <div>
         <div style={{ fontSize: 22, fontWeight: 800, color: "var(--amber)" }}>{totalSlots}</div>
@@ -102,7 +106,7 @@ function InjuryTable({ injuries }: { injuries: InjuredPlayerView[] }) {
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
         <thead>
           <tr style={{ borderBottom: "1px solid var(--border)" }}>
-            {["Player", "Pos", "Team", "Injury", "Date", "Return", "Leagues", "Notes"].map((h) => (
+            {["Player", "Pos", "Team", "Injury", "Date", "Return", "Pace", "Leagues", "Notes"].map((h) => (
               <th
                 key={h}
                 style={{
@@ -134,6 +138,16 @@ function InjuryTable({ injuries }: { injuries: InjuredPlayerView[] }) {
               </td>
               <td style={{ padding: "10px 12px", color: "var(--text-dim)" }}>{p.injury_date ?? p.injury_start_date ?? "Unknown"}</td>
               <td style={{ padding: "10px 12px", color: "var(--text-dim)" }}>{formatReturnTimeline(p)}</td>
+              <td style={{ padding: "10px 12px" }}>
+                <div style={{ color: p.recovery_pace === "Ahead" ? "#22c55e" : p.recovery_pace === "Behind" ? "#ef4444" : "var(--text-muted)", fontWeight: 600 }}>
+                  {p.recovery_pace ?? "-"}
+                </div>
+                {p.avg_recovery_weeks != null && (
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
+                    (avg {p.avg_recovery_weeks} wks)
+                  </div>
+                )}
+              </td>
               <td style={{ padding: "10px 12px", fontWeight: 600 }}>
                 {p.league_count}
               </td>
