@@ -104,6 +104,7 @@ export async function getInjuredPlayers(
       it.injury_type,
       it.injury_date::text AS injury_date,
       it.expected_return_date::text AS expected_return_date,
+      it.estimated_healthy_date::text AS estimated_healthy_date,
       it.return_label,
       it.avg_recovery_weeks,
       it.recovery_pace,
@@ -123,8 +124,9 @@ export async function getInjuredPlayers(
      AND ul.user_id = ${userId}
     WHERE it.status = 'active'
     GROUP BY it.id, it.player_name, it.position, it.team, it.injury_type,
-             it.injury_date, it.expected_return_weeks, it.notes, it.status,
-             pm.player_id, pm.team
+             it.injury_date, it.expected_return_date, it.estimated_healthy_date,
+             it.return_label, it.avg_recovery_weeks, it.recovery_pace,
+             it.expected_return_weeks, it.notes, it.status, pm.player_id, pm.team
   `);
 
   type Row = {
@@ -134,6 +136,7 @@ export async function getInjuredPlayers(
     injury_type: string | null;
     injury_date: string | null;
     expected_return_date: string | null;
+    estimated_healthy_date: string | null;
     return_label: string | null;
     avg_recovery_weeks: number | null;
     recovery_pace: string | null;
@@ -156,6 +159,7 @@ export async function getInjuredPlayers(
       injury_type: r.injury_type,
       injury_date: r.injury_date,
       expected_return_date: r.expected_return_date,
+      estimated_healthy_date: r.estimated_healthy_date,
       return_label: r.return_label,
       avg_recovery_weeks: r.avg_recovery_weeks,
       recovery_pace: r.recovery_pace,
@@ -176,8 +180,13 @@ export async function getInjuredPlayers(
     };
   });
 
-  result.sort((a, b) => severityOrder(a.status ?? a.injury_status) - severityOrder(b.status ?? b.injury_status)
-    || b.league_count - a.league_count);
+  result.sort((a, b) => {
+    const aTime = a.estimated_healthy_date ? Date.parse(a.estimated_healthy_date) : Number.POSITIVE_INFINITY;
+    const bTime = b.estimated_healthy_date ? Date.parse(b.estimated_healthy_date) : Number.POSITIVE_INFINITY;
+    return aTime - bTime
+      || severityOrder(a.status ?? a.injury_status) - severityOrder(b.status ?? b.injury_status)
+      || b.league_count - a.league_count;
+  });
 
   return result;
 }
@@ -196,6 +205,7 @@ export async function getBuyingWindows(
       it.injury_type,
       it.injury_date::text AS injury_date,
       it.expected_return_date::text AS expected_return_date,
+      it.estimated_healthy_date::text AS estimated_healthy_date,
       it.return_label,
       it.avg_recovery_weeks,
       it.recovery_pace,
@@ -231,6 +241,7 @@ export async function getBuyingWindows(
     injury_type: string | null;
     injury_date: string | null;
     expected_return_date: string | null;
+    estimated_healthy_date: string | null;
     return_label: string | null;
     avg_recovery_weeks: number | null;
     recovery_pace: string | null;
@@ -268,6 +279,7 @@ export async function getBuyingWindows(
       injury_type: r.injury_type,
       injury_date: r.injury_date,
       expected_return_date: r.expected_return_date,
+      estimated_healthy_date: r.estimated_healthy_date,
       return_label: r.return_label,
       avg_recovery_weeks: r.avg_recovery_weeks,
       recovery_pace: r.recovery_pace,

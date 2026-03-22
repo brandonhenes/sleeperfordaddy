@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "../lib/api";
+import { weightQueryParams } from "../lib/weights";
 
 export interface PortfolioPlayer {
   player_id: string;
@@ -42,10 +43,11 @@ export interface PortfolioData {
 }
 
 export function usePortfolio(username: string | undefined) {
+  const weights = weightQueryParams();
   return useQuery<PortfolioData>({
-    queryKey: ["portfolio", username],
+    queryKey: ["portfolio", username, weights],
     queryFn: () =>
-      apiFetch(`/api/portfolio?username=${encodeURIComponent(username!)}`),
+      apiFetch(`/api/portfolio?username=${encodeURIComponent(username!)}${weights}`),
     enabled: !!username,
   });
 }

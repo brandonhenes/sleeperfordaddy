@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { getPortfolio } from "../services/portfolio.js";
+import { parseWeights } from "../lib/parse-weights.js";
 
 const router = Router();
 
@@ -11,7 +12,8 @@ router.get("/api/portfolio", async (req, res) => {
       return res.status(400).json({ message: "username is required" });
     }
 
-    const data = await getPortfolio(username);
+    const weights = parseWeights(req);
+    const data = await getPortfolio(username, weights);
     if (!data) {
       return res
         .status(404)

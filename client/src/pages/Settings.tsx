@@ -1,37 +1,23 @@
-import { useState, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import AppShell from "../components/AppShell";
 import ClassStrengthSettings from "../components/ClassStrengthSettings";
+import { useSettings } from "../hooks/use-settings";
+import {
+  DEFAULT_SOURCE_WEIGHTS,
+  fromSettingsPayload,
+  getStoredWeights,
+  isDefaultSourceWeights,
+  toSettingsPayload,
+  type SourceWeights,
+  writeStoredWeights,
+} from "../lib/weights";
 
-interface Weights {
-  fc: number;
-  ktc: number;
-  dp: number;
-}
-
-const PRESETS: { label: string; desc: string; weights: Weights }[] = [
-  { label: "Equal", desc: "All sources weighted equally", weights: { fc: 1, ktc: 1, dp: 1 } },
-  { label: "Market-First", desc: "Emphasize crowd-sourced market values", weights: { fc: 0.35, ktc: 0.35, dp: 0.3 } },
-  { label: "Model-First", desc: "Emphasize DynastyProcess model scores", weights: { fc: 0.15, ktc: 0.15, dp: 0.7 } },
+const PRESETS: { label: string; desc: string; weights: SourceWeights }[] = [
+  { label: "Default", desc: "Balanced default blend", weights: DEFAULT_SOURCE_WEIGHTS },
+  { label: "Equal", desc: "All sources weighted equally", weights: { fc: 33, ktc: 33, dp: 33 } },
+  { label: "Market-First", desc: "Emphasize market sentiment", weights: { fc: 45, ktc: 45, dp: 10 } },
+  { label: "Model-First", desc: "Emphasize DynastyProcess model scores", weights: { fc: 15, ktc: 15, dp: 70 } },
 ];
-
-const STORAGE_KEY = "edge-source-weights";
-
-function loadWeights(): Weights {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (typeof parsed.fc === "number" && typeof parsed.ktc === "number" && typeof parsed.dp === "number") {
-        return parsed;
-      }
-    }
-  } catch { /* ignore */ }
-  return { fc: 1, ktc: 1, dp: 1 };
-}
-
-function saveWeights(w: Weights) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(w));
-}
 
 const cardStyle = {
   background: "var(--card)",
@@ -41,21 +27,57 @@ const cardStyle = {
 } as const;
 
 export default function Settings() {
-  const [weights, setWeights] = useState<Weights>(loadWeights);
+  const username = typeof window !== "undefined" ? localStorage.getItem("edge_username") ?? "" : "";
+  const { weights: savedWeights, isLoading, isSaving, saveWeights } = useSettings(username);
+  const [weights, setWeights] = useState<SourceWeights>(getStoredWeights);
+
+  const serverWeights = useMemo(
+    () => fromSettingsPayload(savedWeights),
+    [savedWeights]
+  );
 
   useEffect(() => {
-    saveWeights(weights);
-  }, [weights]);
+    if (!username) {
+      writeStoredWeights(weights);
+      return;
+    }
+    if (isLoading) return;
+    setWeights(serverWeights);
+    writeStoredWeights(serverWeights);
+  }, [isLoading, serverWeights, username]);
+
+  useEffect(() => {
+    writeStoredWeights(weights);
+    if (!username || isLoading) return;
+
+    const next = toSettingsPayload(weights);
+    const current = toSettingsPayload(serverWeights);
+    if (
+      next.fc_weight === current.fc_weight &&
+      next.ktc_weight === current.ktc_weight &&
+      next.dp_weight === current.dp_weight
+    ) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      saveWeights(next);
+    }, 500);
+
+    return () => window.clearTimeout(timeout);
+  }, [isLoading, saveWeights, serverWeights, username, weights]);
 
   const total = weights.fc + weights.ktc + weights.dp;
 
-  function pct(val: number) {
+  function pct(value: number) {
     if (total === 0) return "0%";
-    return `${Math.round((val / total) * 100)}%`;
+    return `${Math.round((value / total) * 100)}%`;
   }
 
-  function isPreset(p: Weights) {
-    return Math.abs(weights.fc - p.fc) < 0.01 && Math.abs(weights.ktc - p.ktc) < 0.01 && Math.abs(weights.dp - p.dp) < 0.01;
+  function isPreset(preset: SourceWeights) {
+    return Math.abs(weights.fc - preset.fc) < 0.01
+      && Math.abs(weights.ktc - preset.ktc) < 0.01
+      && Math.abs(weights.dp - preset.dp) < 0.01;
   }
 
   return (
@@ -63,24 +85,29 @@ export default function Settings() {
       <div style={{ padding: "28px 0 8px" }}>
         <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>Settings</h1>
         <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 4 }}>
-          Customize how Edge Scores are calculated across sources
+          Save your Edge Score blend and apply it across live score views
         </p>
       </div>
 
-      {/* Presets */}
+      {!username && (
+        <div style={{ ...cardStyle, marginTop: 16, color: "var(--text-dim)", fontSize: 12 }}>
+          No username is currently loaded. These weights will be used locally until you open a user-specific page.
+        </div>
+      )}
+
       <div style={{ ...cardStyle, marginTop: 16 }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-muted)", letterSpacing: 0.5, marginBottom: 12 }}>
           PRESETS
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {PRESETS.map((p) => (
+          {PRESETS.map((preset) => (
             <button
-              key={p.label}
-              onClick={() => setWeights({ ...p.weights })}
+              key={preset.label}
+              onClick={() => setWeights({ ...preset.weights })}
               style={{
-                background: isPreset(p.weights) ? "var(--amber)" : "var(--dark-base)",
-                color: isPreset(p.weights) ? "var(--dark-base)" : "var(--text-dim)",
-                border: `1px solid ${isPreset(p.weights) ? "var(--amber)" : "var(--border)"}`,
+                background: isPreset(preset.weights) ? "var(--amber)" : "var(--dark-base)",
+                color: isPreset(preset.weights) ? "var(--dark-base)" : "var(--text-dim)",
+                border: `1px solid ${isPreset(preset.weights) ? "var(--amber)" : "var(--border)"}`,
                 borderRadius: 8,
                 padding: "10px 18px",
                 cursor: "pointer",
@@ -89,14 +116,13 @@ export default function Settings() {
                 fontFamily: "inherit",
               }}
             >
-              <div>{p.label}</div>
-              <div style={{ fontSize: 10, fontWeight: 400, opacity: 0.7, marginTop: 2 }}>{p.desc}</div>
+              <div>{preset.label}</div>
+              <div style={{ fontSize: 10, fontWeight: 400, opacity: 0.7, marginTop: 2 }}>{preset.desc}</div>
             </button>
           ))}
         </div>
       </div>
 
-      {/* Sliders */}
       <div style={{ ...cardStyle, marginTop: 12 }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-muted)", letterSpacing: 0.5, marginBottom: 16 }}>
           CUSTOM WEIGHTS
@@ -115,8 +141,8 @@ export default function Settings() {
               type="range"
               min={0}
               max={100}
-              value={Math.round(weights[key] * 100)}
-              onChange={(e) => setWeights((prev) => ({ ...prev, [key]: parseInt(e.target.value) / 100 }))}
+              value={Math.round(weights[key])}
+              onChange={(e) => setWeights((prev) => ({ ...prev, [key]: parseInt(e.target.value, 10) }))}
               style={{
                 width: "100%",
                 accentColor: color,
@@ -126,11 +152,10 @@ export default function Settings() {
           </div>
         ))}
         <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 8 }}>
-          Weights are normalized when computing Edge Scores. Changes apply to all pages automatically.
+          Weights are normalized when computing Edge Scores, so the blend still works if the sliders do not total 100.
         </div>
       </div>
 
-      {/* Preview */}
       <div style={{ ...cardStyle, marginTop: 12 }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-muted)", letterSpacing: 0.5, marginBottom: 12 }}>
           CURRENT MIX
@@ -151,8 +176,8 @@ export default function Settings() {
 
       <div style={{ ...cardStyle, marginTop: 12 }}>
         <div style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.6 }}>
-          Custom weights currently apply to Trade Calculator, Player Detail, and Waiver Wire.
-          Power Rankings and Dashboard use the default equal weighting for cache efficiency.
+          {isSaving ? "Saving weights..." : "Weights are saved per user and used by the major live Edge Score views."}
+          {isDefaultSourceWeights(weights) ? " Default blend is FC 35 / KTC 20 / DP 45." : ""}
         </div>
       </div>
 

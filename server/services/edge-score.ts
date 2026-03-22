@@ -68,6 +68,46 @@ export interface SourceWeights {
   dp: number;
 }
 
+export const DEFAULT_SOURCE_WEIGHTS: SourceWeights = {
+  fc: 35,
+  ktc: 20,
+  dp: 45,
+};
+
+export function normalizeSourceWeights(
+  weights?: Partial<SourceWeights> | null
+): SourceWeights {
+  const fc = Number(weights?.fc);
+  const ktc = Number(weights?.ktc);
+  const dp = Number(weights?.dp);
+
+  if (![fc, ktc, dp].every((value) => Number.isFinite(value) && value >= 0)) {
+    return { ...DEFAULT_SOURCE_WEIGHTS };
+  }
+
+  if (fc + ktc + dp <= 0) {
+    return { ...DEFAULT_SOURCE_WEIGHTS };
+  }
+
+  return { fc, ktc, dp };
+}
+
+export function areDefaultSourceWeights(
+  weights?: Partial<SourceWeights> | null
+): boolean {
+  const normalized = normalizeSourceWeights(weights);
+  return normalized.fc === DEFAULT_SOURCE_WEIGHTS.fc
+    && normalized.ktc === DEFAULT_SOURCE_WEIGHTS.ktc
+    && normalized.dp === DEFAULT_SOURCE_WEIGHTS.dp;
+}
+
+export function sourceWeightsKey(
+  weights?: Partial<SourceWeights> | null
+): string {
+  const normalized = normalizeSourceWeights(weights);
+  return `${normalized.fc}-${normalized.ktc}-${normalized.dp}`;
+}
+
 export function computeEdgeScores(
   players: PlayerInput[],
   scaleOverride?: {
@@ -77,6 +117,7 @@ export function computeEdgeScores(
   },
   weights?: SourceWeights
 ): Map<string, EdgeScore> {
+  const effectiveWeights = normalizeSourceWeights(weights);
   // Compute per-source scale parameters from all players
   const fcParams = computeSourceParams(
     players.map((p) => p.fc_value).filter((v): v is number => v != null),
@@ -108,9 +149,9 @@ export function computeEdgeScores(
         : null;
 
     const scored: { value: number; weight: number }[] = [];
-    if (fcScore != null) scored.push({ value: fcScore, weight: weights?.fc ?? 1 });
-    if (ktcScore != null) scored.push({ value: ktcScore, weight: weights?.ktc ?? 1 });
-    if (dpScore != null) scored.push({ value: dpScore, weight: weights?.dp ?? 1 });
+    if (fcScore != null) scored.push({ value: fcScore, weight: effectiveWeights.fc });
+    if (ktcScore != null) scored.push({ value: ktcScore, weight: effectiveWeights.ktc });
+    if (dpScore != null) scored.push({ value: dpScore, weight: effectiveWeights.dp });
     const sourcesUsed = scored.length;
 
     let score = 0;

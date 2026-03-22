@@ -9,7 +9,11 @@ import {
 import { getScoreMovers, type Mover } from "./snapshot-scores.js";
 import type { LeagueScope } from "./dynasty-leagues.js";
 import { optimizeLineup } from "./lineup-optimizer.js";
-import { computeEdgeScores } from "./edge-score.js";
+import {
+  computeEdgeScores,
+  sourceWeightsKey,
+  type SourceWeights,
+} from "./edge-score.js";
 import {
   computeScoringDelta,
   estimateBaselineFPPG,
@@ -265,9 +269,10 @@ async function applyRedraftMultiSourcePpg(
 
 export async function getDashboardData(
   username: string,
-  scope: LeagueScope = "dynasty"
+  scope: LeagueScope = "dynasty",
+  weights?: SourceWeights
 ): Promise<DashboardData | null> {
-  const cacheKey = `${username.toLowerCase()}:${scope}`;
+  const cacheKey = `${username.toLowerCase()}:${scope}:${sourceWeightsKey(weights)}`;
   const now = Date.now();
   const hit = dashboardCache.get(cacheKey);
   if (hit && hit.expires > now) return hit.data;
@@ -276,7 +281,7 @@ export async function getDashboardData(
   if (pending) return pending;
 
   const work = (async () => {
-    const rankings = await getPowerRankings(username, scope);
+    const rankings = await getPowerRankings(username, scope, weights);
     if (rankings.length === 0) return null;
 
     const totalLeagues = rankings.length;

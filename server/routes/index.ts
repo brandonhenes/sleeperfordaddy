@@ -20,6 +20,7 @@ import injuryTrackerRoutes from "./injury-tracker.js";
 import waiverWireRoutes from "./waiver-wire.js";
 import notificationsRoutes from "./notifications.js";
 import tradeHistoryRoutes from "./trade-history.js";
+import settingsRoutes from "./settings.js";
 
 const router = Router();
 
@@ -50,5 +51,6 @@ router.use(injuryTrackerRoutes);
 router.use(waiverWireRoutes);
 router.use(notificationsRoutes);
 router.use(tradeHistoryRoutes);
+router.use(settingsRoutes);
 
 export default router;

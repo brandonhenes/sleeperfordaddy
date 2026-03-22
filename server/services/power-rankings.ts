@@ -5,7 +5,11 @@ import { getLeagueRosters } from "../sleeper/rosters.js";
 import { getAgeCurveStatus, type AgeCurveStatus } from "./age-curves.js";
 import { classifyTeam, percentileRank } from "./archetypes.js";
 import { getCompositeValues } from "./composite-values.js";
-import { computeEdgeScores } from "./edge-score.js";
+import {
+  computeEdgeScores,
+  sourceWeightsKey,
+  type SourceWeights,
+} from "./edge-score.js";
 import {
   getLeagueDraftPicks, getRookieDraftOrder, estimatePickTiers, scoreDraftPicks,
   type ScoredPick, type DraftPick, type TieredPick,
@@ -116,11 +120,17 @@ function scoreAgreement(scores: (number | null)[]): "high" | "medium" | "low" {
 export async function getPowerRankings(
   username: string,
   scopeOrValueType: LeagueScope | ValueType = "dynasty",
-  maybeValueType: ValueType = "dynasty"
+  valueTypeOrWeights?: ValueType | SourceWeights,
+  maybeWeights?: SourceWeights
 ): Promise<LeaguePowerRanking[]> {
   const scope: LeagueScope = scopeOrValueType === "redraft" ? "dynasty" : scopeOrValueType;
-  const valueType: ValueType = scopeOrValueType === "redraft" ? "redraft" : maybeValueType;
-  const cacheKey = `${username.toLowerCase()}:${valueType}`;
+  const valueType: ValueType = scopeOrValueType === "redraft"
+    ? "redraft"
+    : typeof valueTypeOrWeights === "string"
+      ? valueTypeOrWeights
+      : "dynasty";
+  const weights = typeof valueTypeOrWeights === "string" ? maybeWeights : valueTypeOrWeights;
+  const cacheKey = `${username.toLowerCase()}:${valueType}:${sourceWeightsKey(weights)}`;
   const now = Date.now();
   const hit = prCache.get(cacheKey);
   if (hit && hit.expires > now) {
@@ -138,7 +148,7 @@ export async function getPowerRankings(
 
   if (PR_DB_ONLY) {
     try {
-      const dbOnly = await getPowerRankingsDbOnly(username, userId, leagueIds, valueType);
+      const dbOnly = await getPowerRankingsDbOnly(username, userId, leagueIds, valueType, weights);
       prCache.set(cacheKey, { data: dbOnly, expires: Date.now() + PR_TTL_MS });
       return dbOnly;
     } catch (err) {
@@ -283,7 +293,7 @@ export async function getPowerRankings(
 
     // Step 1: Player composite values
     const playerIds = [...new Set(owners.flatMap(([, ps]) => ps.map((p) => p.player_id)))];
-    const compMap = await getCompositeValues(playerIds, mode, valueType);
+    const compMap = await getCompositeValues(playerIds, mode, valueType, weights);
     const leagueScoring = parseLeagueScoring(scoring);
     const ppgMap = valueType === "redraft"
       ? await computeLeaguePPG(playerIds, leagueScoring)
@@ -311,7 +321,7 @@ export async function getPowerRankings(
       sleeper_id: `pick_${p.season}_${p.round}_${p.original_owner_id}`,
       fc_value: null as number | null, ktc_value: p.ktc_value, dp_value: p.dp_value,
     }));
-    const combined = computeEdgeScores([...pInputs, ...pkInputs]);
+    const combined = computeEdgeScores([...pInputs, ...pkInputs], undefined, weights);
 
     for (const [id, cv] of compMap) {
       const e = combined.get(id);
@@ -531,7 +541,8 @@ async function getPowerRankingsDbOnly(
   _username: string,
   userId: string,
   leagueIds: string[],
-  valueType: ValueType = "dynasty"
+  valueType: ValueType = "dynasty",
+  weights?: SourceWeights
 ): Promise<LeaguePowerRanking[]> {
   const leagueIdFrags = leagueIds.map((id) => sql`${id}`);
   const leagueInClause = sql.join(leagueIdFrags, sql`, `);
@@ -643,7 +654,7 @@ async function getPowerRankingsDbOnly(
   await Promise.all(
     [...modePlayerIds.entries()].map(async ([mode, ids]) => {
         const [comp, pickLookups] = await Promise.all([
-        getCompositeValues([...ids], mode, valueType),
+        getCompositeValues([...ids], mode, valueType, weights),
         // loadPickValueLookups stays dynasty-based for picks
         loadPickValueLookups(mode),
       ]);
@@ -688,7 +699,7 @@ async function getPowerRankingsDbOnly(
       sleeper_id: `pick_${p.season}_${p.round}_${p.original_owner_id}`,
       fc_value: null as number | null, ktc_value: p.ktc_value, dp_value: p.dp_value,
     }));
-    const combined = computeEdgeScores([...pInputs, ...pkInputs]);
+    const combined = computeEdgeScores([...pInputs, ...pkInputs], undefined, weights);
 
     for (const [id, cv] of compMap) {
       const e = combined.get(id);

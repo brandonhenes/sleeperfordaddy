@@ -3,6 +3,7 @@ import { sql } from "drizzle-orm";
 import { getCompositeValues } from "./composite-values.js";
 import { getAgeCurveStatus } from "./age-curves.js";
 import { getDynastyLeagueIdsForUserLatestSeason } from "./dynasty-leagues.js";
+import { sourceWeightsKey, type SourceWeights } from "./edge-score.js";
 
 const PORTFOLIO_TTL_MS = 30_000;
 const portfolioCache = new Map<string, { data: PortfolioData | null; expires: number }>();
@@ -10,9 +11,13 @@ const portfolioInFlight = new Map<string, Promise<PortfolioData | null>>();
 
 export function clearPortfolioCache(username?: string) {
   if (username) {
-    const key = username.toLowerCase();
-    portfolioCache.delete(key);
-    portfolioInFlight.delete(key);
+    const prefix = `${username.toLowerCase()}:`;
+    for (const key of portfolioCache.keys()) {
+      if (key.startsWith(prefix)) portfolioCache.delete(key);
+    }
+    for (const key of portfolioInFlight.keys()) {
+      if (key.startsWith(prefix)) portfolioInFlight.delete(key);
+    }
     return;
   }
   portfolioCache.clear();
@@ -68,8 +73,11 @@ export interface PortfolioData {
 
 // ─── Main ───
 
-export async function getPortfolio(username: string): Promise<PortfolioData | null> {
-  const cacheKey = username.toLowerCase();
+export async function getPortfolio(
+  username: string,
+  weights?: SourceWeights
+): Promise<PortfolioData | null> {
+  const cacheKey = `${username.toLowerCase()}:${sourceWeightsKey(weights)}`;
   const now = Date.now();
   const hit = portfolioCache.get(cacheKey);
   if (hit && hit.expires > now) return hit.data;
@@ -116,7 +124,7 @@ export async function getPortfolio(username: string): Promise<PortfolioData | nu
 
   // Get Edge Scores for all unique players (SF mode for universal)
   const playerIds = [...playerInfoMap.keys()];
-  const compMap = await getCompositeValues(playerIds, "sf");
+  const compMap = await getCompositeValues(playerIds, "sf", weights);
 
   // Build output
   const players: PortfolioPlayer[] = [];

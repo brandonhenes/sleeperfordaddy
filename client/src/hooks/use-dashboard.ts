@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "../lib/api";
+import { weightQueryParams } from "../lib/weights";
 
 export type DashboardLeagueScope = "dynasty" | "redraft";
 
@@ -87,11 +88,12 @@ export function useDashboard(
   username: string | undefined,
   leagueScope: DashboardLeagueScope = "dynasty"
 ) {
+  const weights = weightQueryParams();
   return useQuery<DashboardData>({
-    queryKey: ["dashboard", username, leagueScope],
+    queryKey: ["dashboard", username, leagueScope, weights],
     queryFn: () =>
       apiFetch(
-        `/api/dashboard/${encodeURIComponent(username!)}?leagueScope=${encodeURIComponent(leagueScope)}`
+        `/api/dashboard/${encodeURIComponent(username!)}?leagueScope=${encodeURIComponent(leagueScope)}${weights}`
       ),
     enabled: !!username,
     staleTime: 10 * 60 * 1000,

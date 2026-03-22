@@ -2,7 +2,6 @@ import { useState } from "react";
 import { useParams } from "wouter";
 import AppShell from "../components/AppShell";
 import FreshnessBar from "../components/FreshnessBar";
-import EdgeScoreBadge from "../components/EdgeScoreBadge";
 import { PlayerLink } from "../components/ui";
 import { posColor } from "../lib/position-colors";
 import { useInjuredPlayers, useBuyingWindows } from "../hooks/use-injury-tracker";
@@ -25,6 +24,13 @@ function statusLabel(status: string): string {
   if (s === "ir") return "IR";
   if (s === "pup") return "PUP";
   return status.charAt(0).toUpperCase() + status.slice(1);
+}
+
+function formatHealthyDate(dateValue: string | null | undefined): string {
+  if (!dateValue) return "-";
+  const date = new Date(dateValue);
+  if (isNaN(date.getTime())) return "-";
+  return date.toLocaleDateString("en-US", { month: "short", year: "numeric" });
 }
 
 function formatReturnTimeline(player: InjuredPlayerView): string {
@@ -106,7 +112,7 @@ function InjuryTable({ injuries }: { injuries: InjuredPlayerView[] }) {
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
         <thead>
           <tr style={{ borderBottom: "1px solid var(--border)" }}>
-            {["Player", "Pos", "Team", "Injury", "Date", "Return", "Pace", "Leagues", "Notes"].map((h) => (
+            {["Player", "Pos", "Team", "Injury", "Healthy By", "Return", "Pace", "Leagues", "Notes"].map((h) => (
               <th
                 key={h}
                 style={{
@@ -136,17 +142,21 @@ function InjuryTable({ injuries }: { injuries: InjuredPlayerView[] }) {
               <td style={{ padding: "10px 12px", color: "var(--text-dim)" }}>
                 {p.injury_type ?? p.injury_body_part ?? "Unknown"}
               </td>
-              <td style={{ padding: "10px 12px", color: "var(--text-dim)" }}>{p.injury_date ?? p.injury_start_date ?? "Unknown"}</td>
-              <td style={{ padding: "10px 12px", color: "var(--text-dim)" }}>{formatReturnTimeline(p)}</td>
+              <td style={{ padding: "10px 12px", color: "var(--text-dim)" }}>
+                {formatHealthyDate(p.estimated_healthy_date)}
+              </td>
+              <td style={{ padding: "10px 12px", color: "var(--text-dim)" }}>{p.return_label ?? "Unknown"}</td>
               <td style={{ padding: "10px 12px" }}>
-                <div style={{ color: p.recovery_pace === "Ahead" ? "#22c55e" : p.recovery_pace === "Behind" ? "#ef4444" : "var(--text-muted)", fontWeight: 600 }}>
-                  {p.recovery_pace ?? "-"}
+                <div>
+                  <span style={{ color: p.recovery_pace === "Ahead" ? "#22c55e" : p.recovery_pace === "Behind" ? "#ef4444" : "var(--text-dim)", fontWeight: 600 }}>
+                    {p.recovery_pace ?? "-"}
+                  </span>
+                  {p.avg_recovery_weeks != null && (
+                    <div style={{ fontSize: 10, color: "var(--text-muted)" }}>
+                      avg {p.avg_recovery_weeks} wks
+                    </div>
+                  )}
                 </div>
-                {p.avg_recovery_weeks != null && (
-                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
-                    (avg {p.avg_recovery_weeks} wks)
-                  </div>
-                )}
               </td>
               <td style={{ padding: "10px 12px", fontWeight: 600 }}>
                 {p.league_count}

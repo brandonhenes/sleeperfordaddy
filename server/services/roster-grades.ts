@@ -2,6 +2,7 @@ import { db } from "../db/connection.js";
 import { sql } from "drizzle-orm";
 import { getDynastyLeagueIdsForUserLatestSeason } from "./dynasty-leagues.js";
 import { getCompositeValues, type ValueType } from "./composite-values.js";
+import type { SourceWeights } from "./edge-score.js";
 
 // ─── Types ───
 
@@ -67,7 +68,8 @@ function computeFlags(players: { value: number }[], pos: string, grade: string):
 
 export async function getRosterGrades(
   username: string,
-  valueType: ValueType = "dynasty"
+  valueType: ValueType = "dynasty",
+  weights?: SourceWeights
 ): Promise<RosterGradesResult> {
   const userRows = await db.execute(sql`
     SELECT user_id FROM users WHERE LOWER(username) = LOWER(${username}) LIMIT 1
@@ -148,7 +150,7 @@ export async function getRosterGrades(
   }
   await Promise.all(
     [...modeBuckets.entries()].map(async ([mode, ids]) => {
-      const comp = await getCompositeValues([...ids], mode, valueType);
+      const comp = await getCompositeValues([...ids], mode, valueType, weights);
       const scoreMap = new Map<string, number>();
       for (const [playerId, value] of comp) {
         scoreMap.set(playerId, value.edge_score);

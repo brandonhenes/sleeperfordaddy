@@ -454,6 +454,7 @@ export interface InjuredPlayerView {
   injury_date?: string | null;
   expected_return_weeks?: number | null;
   expected_return_date?: string | null;
+  estimated_healthy_date?: string | null;
   return_label?: string | null;
   avg_recovery_weeks?: number | null;
   recovery_pace?: string | null;

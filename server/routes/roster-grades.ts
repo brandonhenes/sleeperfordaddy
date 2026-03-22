@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { getRosterGrades } from "../services/roster-grades.js";
+import { parseWeights } from "../lib/parse-weights.js";
 
 const router = Router();
 
@@ -11,7 +12,8 @@ router.get("/api/roster-grades", async (req, res) => {
       return res.status(400).json({ message: "username is required" });
     }
     const valueType = req.query.redraft === "true" ? "redraft" as const : "dynasty" as const;
-    const data = await getRosterGrades(username, valueType);
+    const weights = parseWeights(req);
+    const data = await getRosterGrades(username, valueType, weights);
     res.json(data);
   } catch (err) {
     console.error("[roster-grades] Error:", err);
