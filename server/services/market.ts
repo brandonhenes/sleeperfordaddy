@@ -126,8 +126,18 @@ export async function getProspects(): Promise<Prospect[]> {
       pp.position,
       pp.school,
       UPPER(pp.tier) AS tier,
-      pp.fantasypros_rank AS fp_rank,
-      pp.fantasypros_rank,
+      ROW_NUMBER() OVER (
+        ORDER BY
+          pp.consensus_adp_rank ASC NULLS LAST,
+          pp.pff_rank ASC NULLS LAST,
+          pp.player_name ASC
+      )::int AS fp_rank,
+      ROW_NUMBER() OVER (
+        ORDER BY
+          pp.consensus_adp_rank ASC NULLS LAST,
+          pp.pff_rank ASC NULLS LAST,
+          pp.player_name ASC
+      )::int AS fantasypros_rank,
       pp.age,
       pp.notes,
       pp.consensus_comp,
@@ -162,8 +172,8 @@ export async function getProspects(): Promise<Prospect[]> {
       pp.last_updated::text AS last_updated
     FROM prospect_profiles pp
     ORDER BY
-      pp.fantasypros_rank ASC NULLS LAST,
       pp.consensus_adp_rank ASC NULLS LAST,
+      pp.pff_rank ASC NULLS LAST,
       pp.player_name ASC
   `);
   return rows as unknown as Prospect[];
