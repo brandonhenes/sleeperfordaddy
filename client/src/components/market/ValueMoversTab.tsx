@@ -4,8 +4,10 @@ import { posColor } from "../../lib/position-colors";
 import { PlayerLink } from "../ui";
 
 const WINDOWS = [7, 14, 21, 28] as const;
+const POSITIONS = ["ALL", "QB", "RB", "WR", "TE"] as const;
 
 type WindowDays = (typeof WINDOWS)[number];
+type PositionFilter = (typeof POSITIONS)[number];
 
 function getDelta(mover: ValueMover, windowDays: WindowDays): number | null {
   switch (windowDays) {
@@ -57,11 +59,9 @@ function deltaColor(value: number | null): string {
 function DeltaCell({
   value,
   percent,
-  selected,
 }: {
   value: number | null;
   percent: number | null;
-  selected: boolean;
 }) {
   const color = deltaColor(value);
 
@@ -71,8 +71,8 @@ function DeltaCell({
         padding: "10px 12px",
         textAlign: "right",
         borderTop: "1px solid var(--border)",
-        background: selected ? "rgba(245, 158, 11, 0.08)" : "transparent",
-        minWidth: 96,
+        background: "rgba(245, 158, 11, 0.08)",
+        minWidth: 100,
       }}
     >
       <div
@@ -105,6 +105,7 @@ function MovementTable({
                 fontSize: 11,
                 color: "var(--text-muted)",
                 letterSpacing: 0.5,
+                minWidth: 140,
               }}
             >
               PLAYER
@@ -116,6 +117,7 @@ function MovementTable({
                 fontSize: 11,
                 color: "var(--text-muted)",
                 letterSpacing: 0.5,
+                minWidth: 50,
               }}
             >
               POS
@@ -127,6 +129,7 @@ function MovementTable({
                 fontSize: 11,
                 color: "var(--text-muted)",
                 letterSpacing: 0.5,
+                minWidth: 50,
               }}
             >
               TEAM
@@ -138,25 +141,24 @@ function MovementTable({
                 fontSize: 11,
                 color: "var(--text-muted)",
                 letterSpacing: 0.5,
+                minWidth: 80,
               }}
             >
               FC VALUE
             </th>
-            {WINDOWS.map((days) => (
-              <th
-                key={days}
-                style={{
-                  textAlign: "right",
-                  padding: "10px 12px",
-                  fontSize: 11,
-                  color: days === windowDays ? "var(--amber)" : "var(--text-muted)",
-                  letterSpacing: 0.5,
-                  background: days === windowDays ? "rgba(245, 158, 11, 0.08)" : "transparent",
-                }}
-              >
-                {days}D
-              </th>
-            ))}
+            <th
+              style={{
+                textAlign: "right",
+                padding: "10px 12px",
+                fontSize: 11,
+                color: "var(--amber)",
+                letterSpacing: 0.5,
+                background: "rgba(245, 158, 11, 0.08)",
+                minWidth: 100,
+              }}
+            >
+              {windowDays}D CHANGE
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -166,7 +168,7 @@ function MovementTable({
                 style={{
                   padding: "10px 12px",
                   borderTop: "1px solid var(--border)",
-                  minWidth: 180,
+                  minWidth: 140,
                 }}
               >
                 <PlayerLink name={mover.player_name} style={{ fontSize: 13 }} />
@@ -200,18 +202,15 @@ function MovementTable({
                   borderTop: "1px solid var(--border)",
                   fontSize: 13,
                   fontWeight: 700,
+                  minWidth: 80,
                 }}
               >
                 {formatValue(mover.fc_value_now)}
               </td>
-              {WINDOWS.map((days) => (
-                <DeltaCell
-                  key={days}
-                  value={getDelta(mover, days)}
-                  percent={getPercentChange(mover, days)}
-                  selected={days === windowDays}
-                />
-              ))}
+              <DeltaCell
+                value={getDelta(mover, windowDays)}
+                percent={getPercentChange(mover, windowDays)}
+              />
             </tr>
           ))}
         </tbody>
@@ -285,6 +284,7 @@ function MovementPanel({
 export default function ValueMoversTab() {
   const { data, isLoading, error } = useMovers();
   const [windowDays, setWindowDays] = useState<WindowDays>(7);
+  const [positionFilter, setPositionFilter] = useState<PositionFilter>("ALL");
 
   if (isLoading) {
     return (
@@ -321,11 +321,14 @@ export default function ValueMoversTab() {
   }
 
   const movers = data ?? [];
-  const risers = movers
+  const filteredMovers = movers.filter((mover) =>
+    positionFilter === "ALL" ? true : mover.position === positionFilter
+  );
+  const risers = filteredMovers
     .filter((mover) => (getDelta(mover, windowDays) ?? 0) > 0)
     .sort((left, right) => (getDelta(right, windowDays) ?? 0) - (getDelta(left, windowDays) ?? 0))
     .slice(0, 25);
-  const fallers = movers
+  const fallers = filteredMovers
     .filter((mover) => (getDelta(mover, windowDays) ?? 0) < 0)
     .sort((left, right) => (getDelta(left, windowDays) ?? 0) - (getDelta(right, windowDays) ?? 0))
     .slice(0, 25);
@@ -377,7 +380,42 @@ export default function ValueMoversTab() {
         </div>
       </div>
 
-      <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {POSITIONS.map((position) => (
+          <button
+            key={position}
+            type="button"
+            onClick={() => setPositionFilter(position)}
+            style={{
+              padding: "8px 12px",
+              borderRadius: 999,
+              border:
+                position === positionFilter
+                  ? "1px solid var(--amber)"
+                  : "1px solid var(--border)",
+              background:
+                position === positionFilter
+                  ? "rgba(245, 158, 11, 0.14)"
+                  : "var(--card)",
+              color: position === positionFilter ? "var(--amber)" : "var(--text-muted)",
+              fontSize: 12,
+              fontWeight: 700,
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            {position}
+          </button>
+        ))}
+      </div>
+
+      <div
+        style={{
+          display: "grid",
+          gap: 16,
+          gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+        }}
+      >
         <MovementPanel
           title="Risers"
           movers={risers}
