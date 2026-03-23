@@ -1,5 +1,6 @@
 import { db } from "../db/connection.js";
 import { sql } from "drizzle-orm";
+import { snapshotDpDaily } from "./source-daily-snapshots.js";
 
 const CSV_URL =
   "https://raw.githubusercontent.com/dynastyprocess/data/master/files/values.csv";
@@ -165,6 +166,8 @@ export async function syncDynastyProcessValues(): Promise<DPSyncStats> {
         synced_at = NOW()
     `);
   }
+
+  await snapshotDpDaily();
 
   const stats: DPSyncStats = { total_rows: rows.length, matched, unmatched, picks };
   console.log("[dp] Sync complete:", stats);

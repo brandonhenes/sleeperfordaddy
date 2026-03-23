@@ -1,5 +1,6 @@
 import { db } from "../db/connection.js";
 import { sql } from "drizzle-orm";
+import { snapshotDpDaily } from "./source-daily-snapshots.js";
 
 const FP_1QB_URL = "https://www.fantasypros.com/nfl/rankings/dynasty-overall.php";
 const FP_SF_URL = "https://www.fantasypros.com/nfl/rankings/dynasty-superflex.php";
@@ -170,6 +171,8 @@ export async function syncFpEliteValues(): Promise<FPSyncStats> {
         synced_at = NOW()
     `);
   }
+
+  await snapshotDpDaily();
 
   const stats: FPSyncStats = {
     total_scraped: players1qb.length + playersSf.length,

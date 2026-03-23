@@ -1,6 +1,7 @@
 import { db } from "../db/connection.js";
 import { sql } from "drizzle-orm";
 import type {
+  TradeAgingRow,
   TradeGrade,
   TradeGradedAsset,
   TradeHistoryResponse,
@@ -156,14 +157,57 @@ function closestFantasyCalcValue(entries: FantasyCalcEntry[] | undefined, target
   return best.dynasty_value;
 }
 
-export async function getTradeHistory(username: string): Promise<TradeHistoryResponse> {
+async function getUserIdForUsername(username: string): Promise<string | null> {
   const userRows = await db.execute(sql`
     SELECT user_id
     FROM users
-    WHERE username = ${username}
+    WHERE LOWER(username) = LOWER(${username})
     LIMIT 1
   `);
-  const userId = (userRows as unknown as UserRow[])[0]?.user_id;
+  return (userRows as unknown as UserRow[])[0]?.user_id ?? null;
+}
+
+export async function getTradeAging(username: string): Promise<TradeAgingRow[]> {
+  const userId = await getUserIdForUsername(username);
+  if (!userId) return [];
+
+  const rows = await db.execute(sql`
+    SELECT
+      ta.trade_id,
+      ta.trade_date::text AS trade_date,
+      ta.days_since_trade::int AS days_since_trade,
+      ta.direction,
+      ta.asset_type,
+      ta.asset_key,
+      ta.asset_name,
+      ta.position,
+      ta.fc_value_at_trade::real AS fc_value_at_trade,
+      ta.fc_value_now::real AS fc_value_now,
+      ta.fc_value_change::real AS fc_value_change,
+      COALESCE(t.league_id, ta.league_id) AS league_id,
+      COALESCE(l.name, 'Unknown League') AS league_name
+    FROM v_trade_aging ta
+    LEFT JOIN trades t ON t.transaction_id = ta.trade_id
+    LEFT JOIN leagues l ON l.league_id = COALESCE(t.league_id, ta.league_id)
+    JOIN user_leagues ul
+      ON ul.league_id = COALESCE(t.league_id, ta.league_id)
+      AND ul.user_id = ${userId}
+    WHERE ta.roster_id IN (
+      SELECT roster_id
+      FROM rosters
+      WHERE league_id = COALESCE(t.league_id, ta.league_id)
+        AND owner_id = ${userId}
+    )
+      AND ta.asset_type = 'player'
+      AND ta.fc_value_at_trade IS NOT NULL
+    ORDER BY ta.trade_date DESC, ta.trade_id DESC, ta.direction ASC, ta.asset_name ASC NULLS LAST
+  `);
+
+  return rows as unknown as TradeAgingRow[];
+}
+
+export async function getTradeHistory(username: string): Promise<TradeHistoryResponse> {
+  const userId = await getUserIdForUsername(username);
   if (!userId) return { trades: [], stats: emptyStats() };
 
   const userRosterRows = await db.execute(sql`

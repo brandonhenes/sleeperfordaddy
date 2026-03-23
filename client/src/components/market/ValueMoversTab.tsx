@@ -1,209 +1,315 @@
-import { useMovers, type Mover } from "../../hooks/use-market";
+import { useState } from "react";
+import { useMovers, type ValueMover } from "../../hooks/use-market";
 import { posColor } from "../../lib/position-colors";
-import EdgeScoreBadge from "../EdgeScoreBadge";
 import { PlayerLink } from "../ui";
 
-function SourceDelta({
-  current,
-  previous,
-  color,
-}: {
-  current: number | null;
-  previous: number | null;
-  color: string;
-}) {
-  if (current == null) {
-    return (
-      <span style={{ fontSize: 10, color: "var(--text-muted)" }}>
-        {"\u2014"}
-      </span>
-    );
-  }
+const WINDOWS = [7, 14, 21, 28] as const;
 
-  const delta = previous != null ? current - previous : null;
+type WindowDays = (typeof WINDOWS)[number];
+
+function getDelta(mover: ValueMover, windowDays: WindowDays): number | null {
+  switch (windowDays) {
+    case 7:
+      return mover.fc_delta_7d;
+    case 14:
+      return mover.fc_delta_14d;
+    case 21:
+      return mover.fc_delta_21d;
+    case 28:
+      return mover.fc_delta_28d;
+    default:
+      return null;
+  }
+}
+
+function getPercentChange(mover: ValueMover, windowDays: WindowDays): number | null {
+  const currentValue = mover.fc_value_now;
+  const delta = getDelta(mover, windowDays);
+  if (currentValue == null || delta == null) return null;
+
+  const previousValue = currentValue - delta;
+  if (previousValue <= 0) return null;
+
+  return (delta / previousValue) * 100;
+}
+
+function formatValue(value: number | null): string {
+  if (value == null) return "-";
+  return Math.round(value).toLocaleString();
+}
+
+function formatSignedValue(value: number | null): string {
+  if (value == null) return "-";
+  const rounded = Math.round(value);
+  return `${rounded > 0 ? "+" : ""}${rounded.toLocaleString()}`;
+}
+
+function formatPercent(value: number | null): string {
+  if (value == null) return "-";
+  return `${value > 0 ? "+" : ""}${value.toFixed(1)}%`;
+}
+
+function deltaColor(value: number | null): string {
+  if (value == null || value === 0) return "var(--text-muted)";
+  return value > 0 ? "var(--green)" : "var(--red)";
+}
+
+function DeltaCell({
+  value,
+  percent,
+  selected,
+}: {
+  value: number | null;
+  percent: number | null;
+  selected: boolean;
+}) {
+  const color = deltaColor(value);
 
   return (
-    <span className="font-mono" style={{ fontSize: 11 }}>
-      <span style={{ color }}>{current.toFixed(1)}</span>
-      {delta != null && Math.abs(delta) >= 0.1 && (
-        <span
-          style={{
-            color: delta > 0 ? "var(--green)" : "var(--red)",
-            marginLeft: 3,
-            fontSize: 10,
-          }}
-        >
-          {delta > 0 ? "+" : ""}
-          {delta.toFixed(1)}
-        </span>
-      )}
-    </span>
+    <td
+      style={{
+        padding: "10px 12px",
+        textAlign: "right",
+        borderTop: "1px solid var(--border)",
+        background: selected ? "rgba(245, 158, 11, 0.08)" : "transparent",
+        minWidth: 96,
+      }}
+    >
+      <div
+        className="font-mono"
+        style={{ fontSize: 12, fontWeight: 700, color }}
+      >
+        {formatSignedValue(value)}
+      </div>
+      <div style={{ fontSize: 10, color }}>{formatPercent(percent)}</div>
+    </td>
   );
 }
 
-function MoverRow({ mover, type }: { mover: Mover; type: "riser" | "faller" }) {
-  const deltaColor = type === "riser" ? "var(--green)" : "var(--red)";
-  const arrow = type === "riser" ? "\u25B2" : "\u25BC";
-
+function MovementTable({
+  movers,
+  windowDays,
+}: {
+  movers: ValueMover[];
+  windowDays: WindowDays;
+}) {
   return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "40px 2fr 60px 60px 60px 70px",
-        alignItems: "center",
-        padding: "8px 14px",
-        borderBottom: "1px solid var(--border)",
-        gap: 8,
-      }}
-    >
-      <EdgeScoreBadge score={mover.edge_score} size="sm" />
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          overflow: "hidden",
-        }}
-      >
-        <span
-          style={{
-            fontSize: 11,
-            fontWeight: 600,
-            color: posColor(mover.position ?? ""),
-            flexShrink: 0,
-          }}
-        >
-          {mover.position}
-        </span>
-        <PlayerLink name={mover.player_name} style={{ fontSize: 13 }} />
-        {mover.team && (
-          <span
-            style={{
-              fontSize: 10,
-              color: "var(--text-muted)",
-              flexShrink: 0,
-            }}
-          >
-            {mover.team}
-          </span>
-        )}
-      </div>
-      <SourceDelta
-        current={mover.fc_score}
-        previous={mover.prev_fc_score}
-        color="var(--amber)"
-      />
-      <SourceDelta
-        current={mover.ktc_score}
-        previous={mover.prev_ktc_score}
-        color="#3b82f6"
-      />
-      <SourceDelta
-        current={mover.dp_score}
-        previous={mover.prev_dp_score}
-        color="#7c3aed"
-      />
-      <span
-        className="font-mono"
-        style={{
-          fontSize: 13,
-          fontWeight: 700,
-          color: deltaColor,
-          textAlign: "right",
-        }}
-      >
-        {arrow} {Math.abs(mover.edge_delta).toFixed(1)}
-      </span>
+    <div style={{ overflowX: "auto" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <thead>
+          <tr style={{ background: "var(--dark-base)" }}>
+            <th
+              style={{
+                textAlign: "left",
+                padding: "10px 12px",
+                fontSize: 11,
+                color: "var(--text-muted)",
+                letterSpacing: 0.5,
+              }}
+            >
+              PLAYER
+            </th>
+            <th
+              style={{
+                textAlign: "left",
+                padding: "10px 12px",
+                fontSize: 11,
+                color: "var(--text-muted)",
+                letterSpacing: 0.5,
+              }}
+            >
+              POS
+            </th>
+            <th
+              style={{
+                textAlign: "left",
+                padding: "10px 12px",
+                fontSize: 11,
+                color: "var(--text-muted)",
+                letterSpacing: 0.5,
+              }}
+            >
+              TEAM
+            </th>
+            <th
+              style={{
+                textAlign: "right",
+                padding: "10px 12px",
+                fontSize: 11,
+                color: "var(--text-muted)",
+                letterSpacing: 0.5,
+              }}
+            >
+              FC VALUE
+            </th>
+            {WINDOWS.map((days) => (
+              <th
+                key={days}
+                style={{
+                  textAlign: "right",
+                  padding: "10px 12px",
+                  fontSize: 11,
+                  color: days === windowDays ? "var(--amber)" : "var(--text-muted)",
+                  letterSpacing: 0.5,
+                  background: days === windowDays ? "rgba(245, 158, 11, 0.08)" : "transparent",
+                }}
+              >
+                {days}D
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {movers.map((mover) => (
+            <tr key={mover.player_id}>
+              <td
+                style={{
+                  padding: "10px 12px",
+                  borderTop: "1px solid var(--border)",
+                  minWidth: 180,
+                }}
+              >
+                <PlayerLink name={mover.player_name} style={{ fontSize: 13 }} />
+              </td>
+              <td
+                style={{
+                  padding: "10px 12px",
+                  borderTop: "1px solid var(--border)",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: posColor(mover.position ?? ""),
+                }}
+              >
+                {mover.position ?? "-"}
+              </td>
+              <td
+                style={{
+                  padding: "10px 12px",
+                  borderTop: "1px solid var(--border)",
+                  fontSize: 12,
+                  color: "var(--text-dim)",
+                }}
+              >
+                {mover.team ?? "-"}
+              </td>
+              <td
+                className="font-mono"
+                style={{
+                  padding: "10px 12px",
+                  textAlign: "right",
+                  borderTop: "1px solid var(--border)",
+                  fontSize: 13,
+                  fontWeight: 700,
+                }}
+              >
+                {formatValue(mover.fc_value_now)}
+              </td>
+              {WINDOWS.map((days) => (
+                <DeltaCell
+                  key={days}
+                  value={getDelta(mover, days)}
+                  percent={getPercentChange(mover, days)}
+                  selected={days === windowDays}
+                />
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
 
-function MoverColumn({
+function MovementPanel({
   title,
   movers,
-  type,
-  color,
+  windowDays,
+  accentColor,
 }: {
   title: string;
-  movers: Mover[];
-  type: "riser" | "faller";
-  color: string;
+  movers: ValueMover[];
+  windowDays: WindowDays;
+  accentColor: string;
 }) {
   return (
-    <div style={{ flex: 1, minWidth: 280 }}>
+    <div
+      style={{
+        flex: 1,
+        minWidth: 320,
+        background: "var(--card)",
+        border: "1px solid var(--border)",
+        borderRadius: 12,
+        overflow: "hidden",
+      }}
+    >
       <div
         style={{
-          padding: "10px 14px",
-          fontWeight: 700,
-          fontSize: 12,
-          letterSpacing: 1,
-          color,
-          textTransform: "uppercase",
-          borderBottom: `2px solid ${color}`,
-        }}
-      >
-        {title}
-      </div>
-      <div
-        style={{
-          background: "var(--card)",
-          border: "1px solid var(--border)",
-          borderRadius: "0 0 10px 10px",
-          overflow: "hidden",
+          padding: "14px 16px",
+          borderBottom: "1px solid var(--border)",
+          background: "linear-gradient(180deg, rgba(15,23,42,0.45), rgba(15,23,42,0.1))",
         }}
       >
         <div
           style={{
-            display: "grid",
-            gridTemplateColumns: "40px 2fr 60px 60px 60px 70px",
-            padding: "6px 14px",
-            borderBottom: "1px solid var(--border)",
-            gap: 8,
-            fontSize: 10,
-            fontWeight: 700,
-            color: "var(--text-muted)",
-            letterSpacing: 0.5,
+            fontSize: 12,
+            fontWeight: 800,
+            letterSpacing: 0.6,
+            color: accentColor,
+            textTransform: "uppercase",
           }}
         >
-          <span>EDGE</span>
-          <span>PLAYER</span>
-          <span>FC</span>
-          <span>KTC</span>
-          <span>DP</span>
-          <span style={{ textAlign: "right" }}>DELTA</span>
+          {title}
         </div>
-        {movers.length === 0 ? (
-          <div
-            style={{
-              padding: 24,
-              textAlign: "center",
-              color: "var(--text-muted)",
-              fontSize: 13,
-            }}
-          >
-            No movers
-          </div>
-        ) : (
-          movers.slice(0, 25).map((m) => (
-            <MoverRow key={m.player_id} mover={m} type={type} />
-          ))
-        )}
+        <div style={{ marginTop: 4, fontSize: 12, color: "var(--text-muted)" }}>
+          Sorted by {windowDays}D FantasyCalc movement
+        </div>
       </div>
+      {movers.length === 0 ? (
+        <div
+          style={{
+            padding: 28,
+            textAlign: "center",
+            color: "var(--text-muted)",
+            fontSize: 13,
+          }}
+        >
+          No movers for this window
+        </div>
+      ) : (
+        <MovementTable movers={movers} windowDays={windowDays} />
+      )}
     </div>
   );
 }
 
 export default function ValueMoversTab() {
-  const { data, isLoading, error } = useMovers(7);
+  const { data, isLoading, error } = useMovers();
+  const [windowDays, setWindowDays] = useState<WindowDays>(7);
 
-  if (isLoading) return <MoversSkeleton />;
+  if (isLoading) {
+    return (
+      <div
+        style={{
+          background: "var(--card)",
+          border: "1px solid var(--border)",
+          borderRadius: 12,
+          padding: 40,
+          textAlign: "center",
+          color: "var(--text-muted)",
+        }}
+      >
+        Loading value movers...
+      </div>
+    );
+  }
+
   if (error) {
     return (
       <div
         style={{
           background: "var(--card)",
           border: "1px solid var(--border)",
-          borderRadius: 10,
+          borderRadius: 12,
           padding: 40,
           textAlign: "center",
           color: "var(--red)",
@@ -214,42 +320,77 @@ export default function ValueMoversTab() {
     );
   }
 
-  const { risers = [], fallers = [] } = data ?? {};
+  const movers = data ?? [];
+  const risers = movers
+    .filter((mover) => (getDelta(mover, windowDays) ?? 0) > 0)
+    .sort((left, right) => (getDelta(right, windowDays) ?? 0) - (getDelta(left, windowDays) ?? 0))
+    .slice(0, 25);
+  const fallers = movers
+    .filter((mover) => (getDelta(mover, windowDays) ?? 0) < 0)
+    .sort((left, right) => (getDelta(left, windowDays) ?? 0) - (getDelta(right, windowDays) ?? 0))
+    .slice(0, 25);
 
   return (
-    <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-      <MoverColumn
-        title="Risers"
-        movers={risers}
-        type="riser"
-        color="var(--green)"
-      />
-      <MoverColumn
-        title="Fallers"
-        movers={fallers}
-        type="faller"
-        color="var(--red)"
-      />
-    </div>
-  );
-}
+    <div style={{ display: "grid", gap: 16 }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 12,
+          flexWrap: "wrap",
+        }}
+      >
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 700 }}>FantasyCalc Value Movers</div>
+          <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>
+            Focused on real dynasty value swings instead of edge-score noise.
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {WINDOWS.map((days) => (
+            <button
+              key={days}
+              type="button"
+              onClick={() => setWindowDays(days)}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 999,
+                border:
+                  days === windowDays
+                    ? "1px solid var(--amber)"
+                    : "1px solid var(--border)",
+                background:
+                  days === windowDays
+                    ? "rgba(245, 158, 11, 0.14)"
+                    : "var(--card)",
+                color: days === windowDays ? "var(--amber)" : "var(--text-muted)",
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: "pointer",
+                fontFamily: "inherit",
+              }}
+            >
+              {days}D
+            </button>
+          ))}
+        </div>
+      </div>
 
-function MoversSkeleton() {
-  return (
-    <div style={{ display: "flex", gap: 16 }}>
-      {[1, 2].map((i) => (
-        <div
-          key={i}
-          className="animate-pulse"
-          style={{
-            flex: 1,
-            background: "var(--card)",
-            border: "1px solid var(--border)",
-            borderRadius: 10,
-            height: 400,
-          }}
+      <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+        <MovementPanel
+          title="Risers"
+          movers={risers}
+          windowDays={windowDays}
+          accentColor="var(--green)"
         />
-      ))}
+        <MovementPanel
+          title="Fallers"
+          movers={fallers}
+          windowDays={windowDays}
+          accentColor="var(--red)"
+        />
+      </div>
     </div>
   );
 }

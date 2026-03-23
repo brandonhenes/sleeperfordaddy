@@ -1,7 +1,21 @@
 import { Router } from "express";
-import { getTradeHistory } from "../services/trade-history.js";
+import { getTradeAging, getTradeHistory } from "../services/trade-history.js";
 
 const router = Router();
+
+router.get("/api/trades/:username/aging", async (req, res) => {
+  try {
+    const username = req.params.username;
+    if (!username) {
+      return res.status(400).json({ message: "username is required" });
+    }
+    const data = await getTradeAging(username);
+    res.json(data);
+  } catch (error) {
+    console.error("[trades/aging] Error:", error);
+    res.status(500).json({ message: "Failed to fetch trade aging" });
+  }
+});
 
 router.get("/api/trade-history", async (req, res) => {
   try {

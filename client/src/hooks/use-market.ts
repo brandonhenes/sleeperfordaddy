@@ -66,25 +66,16 @@ export interface Prospect {
   last_updated: string | null;
 }
 
-export interface Mover {
+export interface ValueMover {
   player_id: string;
   player_name: string;
   position: string | null;
   team: string | null;
-  edge_score: number;
-  previous_edge: number;
-  edge_delta: number;
-  fc_score: number | null;
-  ktc_score: number | null;
-  dp_score: number | null;
-  prev_fc_score: number | null;
-  prev_ktc_score: number | null;
-  prev_dp_score: number | null;
-}
-
-export interface MoversData {
-  risers: Mover[];
-  fallers: Mover[];
+  fc_value_now: number | null;
+  fc_delta_7d: number | null;
+  fc_delta_14d: number | null;
+  fc_delta_21d: number | null;
+  fc_delta_28d: number | null;
 }
 
 export interface Signal {
@@ -114,10 +105,10 @@ export function useProspects() {
   });
 }
 
-export function useMovers(days: number = 7) {
-  return useQuery<MoversData>({
-    queryKey: ["market", "movers", days],
-    queryFn: () => apiFetch(`/api/market/movers?days=${days}`),
+export function useMovers() {
+  return useQuery<ValueMover[]>({
+    queryKey: ["market", "value-movers"],
+    queryFn: () => apiFetch("/api/market/value-movers"),
   });
 }
 

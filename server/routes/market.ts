@@ -4,7 +4,6 @@ import { sql } from "drizzle-orm";
 import {
   getRecommendations,
   getProspects,
-  getMovers,
   getSignals,
 } from "../services/market.js";
 import { getRookieDraftContext } from "../services/rookie-draft-context.js";
@@ -14,6 +13,25 @@ import { getDraftHitRates } from "../services/draft-hit-rates.js";
 import { computeRookieADP } from "../services/sync-league-drafts.js";
 
 const router = Router();
+
+async function fetchValueMovers() {
+  return db.execute(sql`
+    SELECT
+      player_id,
+      player_name,
+      position,
+      team,
+      fc_value_now::int AS fc_value_now,
+      fc_delta_7d::int AS fc_delta_7d,
+      fc_delta_14d::int AS fc_delta_14d,
+      fc_delta_21d::int AS fc_delta_21d,
+      fc_delta_28d::int AS fc_delta_28d
+    FROM v_value_movers
+    WHERE fc_value_now > 200
+    ORDER BY ABS(COALESCE(fc_delta_7d, 0)) DESC
+    LIMIT 100
+  `);
+}
 
 /** GET /api/market/recommendations — Buy/Sell/Hold recs */
 router.get("/api/market/recommendations", async (_req, res) => {
@@ -37,15 +55,25 @@ router.get("/api/market/prospects", async (_req, res) => {
   }
 });
 
-/** GET /api/market/movers?days=7 — FC value risers/fallers */
-router.get("/api/market/movers", async (req, res) => {
+/** GET /api/market/value-movers — FC value risers/fallers from snapshot deltas */
+router.get("/api/market/value-movers", async (_req, res) => {
   try {
-    const days = parseInt(req.query.days as string) || 7;
-    const data = await getMovers(days);
-    res.json(data);
+    const rows = await fetchValueMovers();
+    res.json(rows);
+  } catch (err) {
+    console.error("[market/value-movers] Error:", err);
+    res.status(500).json({ message: "Failed to fetch value movers" });
+  }
+});
+
+/** GET /api/market/movers — backwards-compatible alias */
+router.get("/api/market/movers", async (_req, res) => {
+  try {
+    const rows = await fetchValueMovers();
+    res.json(rows);
   } catch (err) {
     console.error("[market/movers] Error:", err);
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ message: "Failed to fetch value movers" });
   }
 });
 

@@ -768,3 +768,19 @@ export interface TradeHistoryResponse {
   stats: TradeHistoryStats;
 }
 
+export interface TradeAgingRow {
+  trade_id: string;
+  trade_date: string;
+  days_since_trade: number;
+  direction: "gave" | "received";
+  asset_type: "player";
+  asset_key: string;
+  asset_name: string | null;
+  position: string | null;
+  fc_value_at_trade: number | null;
+  fc_value_now: number | null;
+  fc_value_change: number | null;
+  league_id: string;
+  league_name: string;
+}
+

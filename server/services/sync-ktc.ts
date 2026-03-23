@@ -1,6 +1,7 @@
 import { db } from "../db/connection.js";
 import { sql } from "drizzle-orm";
 import { backfillKtcSleeperIds } from "./source-coverage-backfill.js";
+import { snapshotKtcDaily } from "./source-daily-snapshots.js";
 
 const KTC_URL = "https://keeptradecut.com/dynasty-rankings";
 
@@ -158,6 +159,8 @@ export async function syncKtcValues(): Promise<KtcSyncStats> {
         scraped_at = NOW()
     `);
   }
+
+  await snapshotKtcDaily();
 
   const fallbackNameMatched = await backfillKtcSleeperIds();
 

@@ -18,8 +18,12 @@ import EmptyState from "../components/EmptyState";
 import FreshnessBar from "../components/FreshnessBar";
 import { SectionHeader, StatCard } from "../components/ui";
 import { useEnsureUser } from "../hooks/use-ensure-user";
-import { useTradeHistory } from "../hooks/use-trade-history";
-import type { TradeGrade, TradeGradedAsset } from "../../../shared/types";
+import { useTradeAging, useTradeHistory } from "../hooks/use-trade-history";
+import type {
+  TradeAgingRow,
+  TradeGrade,
+  TradeGradedAsset,
+} from "../../../shared/types";
 
 const cardStyle = {
   background: "var(--card)",
@@ -36,6 +40,14 @@ const selectStyle = {
   fontSize: 13,
   fontFamily: "inherit",
 } as const;
+
+interface TradeAgingSummary {
+  days_since_trade: number;
+  gave_change: number;
+  received_change: number;
+  net_change: number;
+  assets: TradeAgingRow[];
+}
 
 function formatTradeDate(value: string): string {
   return new Date(`${value}T00:00:00`).toLocaleDateString("en-US", {
@@ -69,6 +81,29 @@ function formatTrackedValue(value: number | null): string {
   return value.toFixed(1);
 }
 
+function formatSignedTrackedValue(value: number | null): string {
+  if (value == null) return "-";
+  return `${value > 0 ? "+" : ""}${formatTrackedValue(value)}`;
+}
+
+function daysSince(dateStr: string): number {
+  const ms = Date.parse(`${dateStr}T00:00:00Z`);
+  if (Number.isNaN(ms)) return 0;
+  return Math.max(0, Math.floor((Date.now() - ms) / 86_400_000));
+}
+
+function agingColor(value: number): string {
+  if (value > 0) return "var(--green)";
+  if (value < 0) return "var(--red)";
+  return "var(--text-muted)";
+}
+
+function agingLabel(value: number): string {
+  if (value > 0) return "Won";
+  if (value < 0) return "Lost";
+  return "Flat";
+}
+
 function summarizeTrade(trade: TradeGrade): string {
   const gave = trade.gave.map((asset) => asset.label).join(", ");
   const received = trade.received.map((asset) => asset.label).join(", ");
@@ -76,7 +111,32 @@ function summarizeTrade(trade: TradeGrade): string {
   return summary.length > 110 ? `${summary.slice(0, 107)}...` : summary;
 }
 
-function AssetValueRow({ asset }: { asset: TradeGradedAsset }) {
+function findAgingAsset(
+  aging: TradeAgingSummary | undefined,
+  asset: TradeGradedAsset,
+  direction: "gave" | "received"
+): TradeAgingRow | undefined {
+  if (!aging) return undefined;
+  return aging.assets.find(
+    (row) => row.direction === direction && row.asset_key === asset.asset_key
+  );
+}
+
+function AssetValueRow({
+  asset,
+  direction,
+  aging,
+}: {
+  asset: TradeGradedAsset;
+  direction: "gave" | "received";
+  aging?: TradeAgingSummary;
+}) {
+  const agingAsset = findAgingAsset(aging, asset, direction);
+  const thenValue = agingAsset?.fc_value_at_trade ?? asset.edge_score_then;
+  const nowValue = agingAsset?.fc_value_now ?? asset.edge_score_now;
+  const changeValue = agingAsset?.fc_value_change ?? asset.value_change;
+  const detailLabel = agingAsset ? "FC aging" : "Tracked";
+
   return (
     <div
       style={{
@@ -96,10 +156,10 @@ function AssetValueRow({ asset }: { asset: TradeGradedAsset }) {
       </div>
       <div style={{ textAlign: "right", flexShrink: 0 }}>
         <div style={{ fontSize: 12, color: "var(--text-dim)" }}>
-          {formatTrackedValue(asset.edge_score_then)}{" -> "}{formatTrackedValue(asset.edge_score_now)}
+          {detailLabel}: {formatTrackedValue(thenValue)}{" -> "}{formatTrackedValue(nowValue)}
         </div>
-        <div style={{ fontSize: 11, fontWeight: 700, color: netColor(asset.value_change) }}>
-          {asset.value_change > 0 ? "+" : ""}{formatTrackedValue(asset.value_change)}
+        <div style={{ fontSize: 11, fontWeight: 700, color: netColor(changeValue ?? 0) }}>
+          {formatSignedTrackedValue(changeValue)}
         </div>
       </div>
     </div>
@@ -110,10 +170,44 @@ export default function TradeHistory() {
   const { username } = useParams<{ username: string }>();
   const { phase, syncProgress, errorMsg, retry } = useEnsureUser(username);
   const { data, isLoading, error } = useTradeHistory(phase === "ready" ? username : undefined);
+  const { data: agingData } = useTradeAging(phase === "ready" ? username : undefined);
   const [leagueFilter, setLeagueFilter] = useState("ALL");
   const [gradeFilter, setGradeFilter] = useState("ALL");
   const [positionFilter, setPositionFilter] = useState("ALL");
   const [expandedTradeIds, setExpandedTradeIds] = useState<Set<string>>(new Set());
+
+  const agingByTrade = useMemo(() => {
+    const grouped = new Map<string, TradeAgingSummary>();
+    for (const row of agingData ?? []) {
+      const current = grouped.get(row.trade_id) ?? {
+        days_since_trade: row.days_since_trade,
+        gave_change: 0,
+        received_change: 0,
+        net_change: 0,
+        assets: [],
+      };
+      current.days_since_trade = row.days_since_trade;
+      current.assets.push(row);
+      if (row.direction === "received") {
+        current.received_change += row.fc_value_change ?? 0;
+      } else {
+        current.gave_change += row.fc_value_change ?? 0;
+      }
+      current.net_change = current.received_change - current.gave_change;
+      grouped.set(row.trade_id, current);
+    }
+
+    for (const [tradeId, summary] of grouped.entries()) {
+      grouped.set(tradeId, {
+        ...summary,
+        gave_change: Math.round(summary.gave_change * 10) / 10,
+        received_change: Math.round(summary.received_change * 10) / 10,
+        net_change: Math.round(summary.net_change * 10) / 10,
+      });
+    }
+
+    return grouped;
+  }, [agingData]);
 
   const filteredTrades = useMemo(() => {
     const trades = data?.trades ?? [];
@@ -351,6 +445,9 @@ export default function TradeHistory() {
           <div style={{ display: "grid", gap: 12 }}>
             {filteredTrades.map((trade) => {
               const expanded = expandedTradeIds.has(trade.trade_id);
+              const aging = agingByTrade.get(trade.trade_id);
+              const daysSinceTrade = aging?.days_since_trade ?? daysSince(trade.trade_date);
+              const agingBadgeColor = aging ? agingColor(aging.net_change) : "var(--text-muted)";
               return (
                 <button
                   key={trade.trade_id}
@@ -371,13 +468,38 @@ export default function TradeHistory() {
                       <span style={{ background: gradeColor(trade.grade), color: trade.grade === "push" ? "var(--dark-base)" : "#fff", borderRadius: 6, padding: "4px 10px", fontSize: 11, fontWeight: 800 }}>
                         {gradeLabel(trade.grade)}
                       </span>
+                      {aging && (
+                        <span
+                          style={{
+                            background:
+                              aging.net_change === 0
+                                ? "rgba(148, 163, 184, 0.12)"
+                                : aging.net_change > 0
+                                  ? "rgba(34, 197, 94, 0.16)"
+                                  : "rgba(239, 68, 68, 0.14)",
+                            color: agingBadgeColor,
+                            border: `1px solid ${aging.net_change === 0 ? "var(--border)" : agingBadgeColor}`,
+                            borderRadius: 6,
+                            padding: "4px 10px",
+                            fontSize: 11,
+                            fontWeight: 800,
+                          }}
+                        >
+                          Aging {agingLabel(aging.net_change)} ({formatSignedTrackedValue(aging.net_change)})
+                        </span>
+                      )}
                       <div>
                         <div style={{ fontSize: 13, fontWeight: 700 }}>{trade.league_name}</div>
-                        <div style={{ fontSize: 11, color: "var(--text-muted)" }}>{formatTradeDate(trade.trade_date)}</div>
+                        <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                          {formatTradeDate(trade.trade_date)} · {daysSinceTrade}d ago
+                        </div>
                       </div>
                     </div>
-                    <div style={{ fontSize: 13, fontWeight: 800, color: netColor(trade.net_value_change) }}>
-                      {trade.net_value_change > 0 ? "+" : ""}{formatTrackedValue(trade.net_value_change)}
+                    <div style={{ textAlign: "right" }}>
+                      <div style={{ fontSize: 13, fontWeight: 800, color: netColor(trade.net_value_change) }}>
+                        {trade.net_value_change > 0 ? "+" : ""}{formatTrackedValue(trade.net_value_change)}
+                      </div>
+                      <div style={{ fontSize: 10, color: "var(--text-muted)" }}>Tracked net</div>
                     </div>
                   </div>
 
@@ -391,13 +513,23 @@ export default function TradeHistory() {
                         <div style={{ background: "var(--dark-base)", borderRadius: 8, padding: 14 }}>
                           <div style={{ fontSize: 11, fontWeight: 800, color: "#ef4444", marginBottom: 8 }}>GAVE</div>
                           {trade.gave.map((asset) => (
-                            <AssetValueRow key={`gave-${trade.trade_id}-${asset.asset_key}-${asset.label}`} asset={asset} />
+                            <AssetValueRow
+                              key={`gave-${trade.trade_id}-${asset.asset_key}-${asset.label}`}
+                              asset={asset}
+                              direction="gave"
+                              aging={aging}
+                            />
                           ))}
                         </div>
                         <div style={{ background: "var(--dark-base)", borderRadius: 8, padding: 14 }}>
                           <div style={{ fontSize: 11, fontWeight: 800, color: "#22c55e", marginBottom: 8 }}>RECEIVED</div>
                           {trade.received.map((asset) => (
-                            <AssetValueRow key={`received-${trade.trade_id}-${asset.asset_key}-${asset.label}`} asset={asset} />
+                            <AssetValueRow
+                              key={`received-${trade.trade_id}-${asset.asset_key}-${asset.label}`}
+                              asset={asset}
+                              direction="received"
+                              aging={aging}
+                            />
                           ))}
                         </div>
                       </div>
@@ -405,6 +537,17 @@ export default function TradeHistory() {
                       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 12, color: "var(--text-dim)" }}>
                         <span>Then: {formatTrackedValue(trade.gave_total_then)}{" -> "}{formatTrackedValue(trade.received_total_then)}</span>
                         <span>Now: {formatTrackedValue(trade.gave_total_now)}{" -> "}{formatTrackedValue(trade.received_total_now)}</span>
+                        {aging ? (
+                          <>
+                            <span>FC aging received: {formatSignedTrackedValue(aging.received_change)}</span>
+                            <span>FC aging gave: {formatSignedTrackedValue(aging.gave_change)}</span>
+                            <span style={{ color: agingColor(aging.net_change), fontWeight: 700 }}>
+                              FC aging net: {formatSignedTrackedValue(aging.net_change)}
+                            </span>
+                          </>
+                        ) : (
+                          <span>No FC aging data for this trade</span>
+                        )}
                         <span>Partners: {trade.partner_names.join(", ")}</span>
                       </div>
                     </div>
