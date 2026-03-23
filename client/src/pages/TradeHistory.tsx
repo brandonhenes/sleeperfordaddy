@@ -77,8 +77,7 @@ function netColor(value: number): string {
 
 function formatTrackedValue(value: number | null): string {
   if (value == null) return "-";
-  if (Math.abs(value) >= 1000) return Math.round(value).toLocaleString();
-  return value.toFixed(1);
+  return Math.round(value).toLocaleString();
 }
 
 function formatSignedTrackedValue(value: number | null): string {
@@ -132,10 +131,10 @@ function AssetValueRow({
   aging?: TradeAgingSummary;
 }) {
   const agingAsset = findAgingAsset(aging, asset, direction);
-  const thenValue = agingAsset?.fc_value_at_trade ?? asset.edge_score_then;
-  const nowValue = agingAsset?.fc_value_now ?? asset.edge_score_now;
+  const thenValue = agingAsset?.fc_value_at_trade ?? asset.value_at_trade;
+  const nowValue = agingAsset?.fc_value_now ?? asset.value_now;
   const changeValue = agingAsset?.fc_value_change ?? asset.value_change;
-  const detailLabel = agingAsset ? "FC aging" : "Tracked";
+  const detailLabel = "FC value";
 
   return (
     <div
@@ -344,13 +343,13 @@ export default function TradeHistory() {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 16, marginTop: 16 }}>
         <StatCard label="Win Rate" value={`${data.stats.win_rate.toFixed(1)}%`} sub={`${data.stats.wins}W / ${data.stats.losses}L / ${data.stats.pushes}P`} accent={data.stats.win_rate >= 55 ? "var(--green)" : data.stats.win_rate >= 45 ? "var(--amber)" : "var(--red)"} />
         <StatCard label="Total Trades" value={data.stats.total_trades} />
-        <StatCard label="Net Value Gained" value={`${data.stats.total_value_gained > 0 ? "+" : ""}${formatTrackedValue(data.stats.total_value_gained)}`} accent={netColor(data.stats.total_value_gained)} />
+        <StatCard label="Net FC Value" value={`${data.stats.total_value_gained > 0 ? "+" : ""}${formatTrackedValue(data.stats.total_value_gained)}`} accent={netColor(data.stats.total_value_gained)} />
         <StatCard label="Avg Per Trade" value={`${data.stats.avg_value_per_trade > 0 ? "+" : ""}${formatTrackedValue(data.stats.avg_value_per_trade)}`} accent={netColor(data.stats.avg_value_per_trade)} />
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 16, marginTop: 24 }}>
         <div style={{ ...cardStyle, padding: 16 }}>
-          <SectionHeader icon="QB" title="By Position" subtitle="Net value gained or lost by position" />
+          <SectionHeader icon="QB" title="By Position" subtitle="Net FC value gained or lost by position" />
           <div style={{ width: "100%", height: 320 }}>
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={data.stats.by_position} layout="vertical" margin={{ top: 8, right: 20, bottom: 8, left: 10 }}>
@@ -359,7 +358,7 @@ export default function TradeHistory() {
                 <YAxis dataKey="position" type="category" tick={{ fill: "var(--text-muted)", fontSize: 11 }} width={36} />
                 <Tooltip
                   contentStyle={{ background: "var(--dark-base)", border: "1px solid var(--border)", borderRadius: 8 }}
-                  formatter={(value) => [`${Number(value ?? 0).toFixed(1)} edge`, "Net Value"]}
+                  formatter={(value) => [formatTrackedValue(Number(value ?? 0)), "Net FC Value"]}
                   />
                 <Bar dataKey="net_value" radius={[0, 4, 4, 0]}>
                   {data.stats.by_position.map((row) => (
@@ -372,7 +371,7 @@ export default function TradeHistory() {
         </div>
 
         <div style={{ ...cardStyle, padding: 16 }}>
-          <SectionHeader icon="Mo" title="Monthly Trend" subtitle="Win rate and net value over time" />
+          <SectionHeader icon="Mo" title="Monthly Trend" subtitle="Win rate and net FC value over time" />
           <div style={{ width: "100%", height: 320 }}>
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={data.stats.by_month} margin={{ top: 8, right: 20, bottom: 8, left: 0 }}>
@@ -499,7 +498,7 @@ export default function TradeHistory() {
                       <div style={{ fontSize: 13, fontWeight: 800, color: netColor(trade.net_value_change) }}>
                         {trade.net_value_change > 0 ? "+" : ""}{formatTrackedValue(trade.net_value_change)}
                       </div>
-                      <div style={{ fontSize: 10, color: "var(--text-muted)" }}>Tracked net</div>
+                      <div style={{ fontSize: 10, color: "var(--text-muted)" }}>FC net</div>
                     </div>
                   </div>
 

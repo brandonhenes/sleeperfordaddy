@@ -16,80 +16,25 @@ const router = Router();
 
 async function fetchValueMovers() {
   const rows = await db.execute(sql`
-    WITH anchors AS (
-      SELECT
-        MAX(snapshot_date) AS latest_snapshot,
-        MAX(snapshot_date) FILTER (
-          WHERE snapshot_date <= (SELECT MAX(snapshot_date) FROM fantasycalc_daily) - INTERVAL '7 days'
-        ) AS snapshot_7d,
-        MAX(snapshot_date) FILTER (
-          WHERE snapshot_date <= (SELECT MAX(snapshot_date) FROM fantasycalc_daily) - INTERVAL '14 days'
-        ) AS snapshot_14d,
-        MAX(snapshot_date) FILTER (
-          WHERE snapshot_date <= (SELECT MAX(snapshot_date) FROM fantasycalc_daily) - INTERVAL '21 days'
-        ) AS snapshot_21d,
-        MAX(snapshot_date) FILTER (
-          WHERE snapshot_date <= (SELECT MAX(snapshot_date) FROM fantasycalc_daily) - INTERVAL '28 days'
-        ) AS snapshot_28d
-      FROM fantasycalc_daily
-      WHERE is_pick = false
-    ),
-    latest_fc AS (
-      SELECT
-        COALESCE(fc.sleeper_id, fc.player_name) AS player_id,
-        fc.player_name,
-        fc.position,
-        fc.team,
-        fc.dynasty_value::int AS fc_value_now
-      FROM fantasycalc_daily fc
-      CROSS JOIN anchors a
-      WHERE fc.snapshot_date = a.latest_snapshot
-        AND fc.is_pick = false
-        AND fc.dynasty_value > 200
-    )
     SELECT
-      latest.player_id,
-      latest.player_name,
-      latest.position,
-      latest.team,
-      latest.fc_value_now,
-      (latest.fc_value_now - fc7.dynasty_value)::int AS fc_delta_7d,
-      (latest.fc_value_now - fc14.dynasty_value)::int AS fc_delta_14d,
-      (latest.fc_value_now - fc21.dynasty_value)::int AS fc_delta_21d,
-      (latest.fc_value_now - fc28.dynasty_value)::int AS fc_delta_28d
-    FROM latest_fc latest
-    CROSS JOIN anchors a
-    LEFT JOIN fantasycalc_daily fc7
-      ON fc7.snapshot_date = a.snapshot_7d
-      AND fc7.is_pick = false
-      AND COALESCE(fc7.sleeper_id, fc7.player_name) = latest.player_id
-    LEFT JOIN fantasycalc_daily fc14
-      ON fc14.snapshot_date = a.snapshot_14d
-      AND fc14.is_pick = false
-      AND COALESCE(fc14.sleeper_id, fc14.player_name) = latest.player_id
-    LEFT JOIN fantasycalc_daily fc21
-      ON fc21.snapshot_date = a.snapshot_21d
-      AND fc21.is_pick = false
-      AND COALESCE(fc21.sleeper_id, fc21.player_name) = latest.player_id
-    LEFT JOIN fantasycalc_daily fc28
-      ON fc28.snapshot_date = a.snapshot_28d
-      AND fc28.is_pick = false
-      AND COALESCE(fc28.sleeper_id, fc28.player_name) = latest.player_id
-    ORDER BY ABS(COALESCE(latest.fc_value_now - fc7.dynasty_value, 0)) DESC
+      player_name AS player_id,
+      player_name,
+      position,
+      team,
+      fc_value_now,
+      fc_delta_7d,
+      fc_delta_14d,
+      fc_delta_21d,
+      fc_delta_28d,
+      fc_trend_30d,
+      ktc_value_now,
+      dp_value_now
+    FROM v_value_movers
+    WHERE fc_value_now > 200
+    ORDER BY ABS(COALESCE(fc_delta_7d, 0)) DESC
     LIMIT 100
   `);
-
-  return rows as unknown as Array<{
-    player_id: string;
-    player_name: string;
-    position: string | null;
-    team: string | null;
-    fc_value_now: number | null;
-    fc_delta_7d: number | null;
-    fc_delta_14d: number | null;
-    fc_delta_21d: number | null;
-    fc_delta_28d: number | null;
-  }>;
+  return rows;
 }
 
 /** GET /api/market/recommendations — Buy/Sell/Hold recs */

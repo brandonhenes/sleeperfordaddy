@@ -29,34 +29,20 @@ interface TradeAssetRow {
   counterparty_roster_ids: string | null;
 }
 
-interface PlayerMetaRow {
-  player_id: string;
-  full_name: string | null;
+interface TradeAgingSourceRow {
+  trade_id: string;
+  trade_date: string;
+  days_since_trade: number;
+  direction: "gave" | "received";
+  asset_type: "player" | "pick";
+  asset_key: string;
+  asset_name: string | null;
   position: string | null;
-}
-
-interface SnapshotRow {
-  player_id: string;
-  snapshot_date: string;
-  edge_score: number | null;
-  fc_value: number | null;
-}
-
-interface SnapshotEntry {
-  snapshot_ms: number;
-  edge_score: number | null;
-  fc_value: number | null;
-}
-
-interface FantasyCalcRow {
-  sleeper_id: string;
-  snapshot_date: string;
-  dynasty_value: number | null;
-}
-
-interface FantasyCalcEntry {
-  snapshot_ms: number;
-  dynasty_value: number | null;
+  fc_value_at_trade: number | null;
+  fc_value_now: number | null;
+  fc_value_change: number | null;
+  league_id: string;
+  league_name: string;
 }
 
 interface LeagueRow {
@@ -90,9 +76,13 @@ function toTimestamp(value: number | string): number | null {
   return Number.isFinite(timestamp) ? timestamp : null;
 }
 
-function gradeFromNet(net: number): "win" | "loss" | "push" {
-  if (net > 3) return "win";
-  if (net < -3) return "loss";
+function toWhole(value: number): number {
+  return Math.round(value);
+}
+
+function gradeFromTotals(received: number, gave: number): "win" | "loss" | "push" {
+  if (received > gave * 1.1) return "win";
+  if (gave > received * 1.1) return "loss";
   return "push";
 }
 
@@ -123,40 +113,6 @@ function parseCounterpartyIds(raw: string | null): number[] {
   }
 }
 
-function closestEdgeScore(entries: SnapshotEntry[] | undefined, targetMs: number): number | null {
-  if (!entries || entries.length === 0) return null;
-
-  let best = entries[0];
-  let bestDiff = Math.abs(entries[0].snapshot_ms - targetMs);
-
-  for (let index = 1; index < entries.length; index += 1) {
-    const diff = Math.abs(entries[index].snapshot_ms - targetMs);
-    if (diff < bestDiff) {
-      best = entries[index];
-      bestDiff = diff;
-    }
-  }
-
-  return best.edge_score;
-}
-
-function closestFantasyCalcValue(entries: FantasyCalcEntry[] | undefined, targetMs: number): number | null {
-  if (!entries || entries.length === 0) return null;
-
-  let best = entries[0];
-  let bestDiff = Math.abs(entries[0].snapshot_ms - targetMs);
-
-  for (let index = 1; index < entries.length; index += 1) {
-    const diff = Math.abs(entries[index].snapshot_ms - targetMs);
-    if (diff < bestDiff) {
-      best = entries[index];
-      bestDiff = diff;
-    }
-  }
-
-  return best.dynasty_value;
-}
-
 async function getUserIdForUsername(username: string): Promise<string | null> {
   const userRows = await db.execute(sql`
     SELECT user_id
@@ -181,9 +137,9 @@ export async function getTradeAging(username: string): Promise<TradeAgingRow[]> 
       ta.asset_key,
       ta.asset_name,
       ta.position,
-      ta.fc_value_at_trade::real AS fc_value_at_trade,
-      ta.fc_value_now::real AS fc_value_now,
-      ta.fc_value_change::real AS fc_value_change,
+      ta.value_at_trade::real AS fc_value_at_trade,
+      ta.value_now::real AS fc_value_now,
+      ta.value_change::real AS fc_value_change,
       COALESCE(t.league_id, ta.league_id) AS league_id,
       COALESCE(l.name, 'Unknown League') AS league_name
     FROM v_trade_aging ta
@@ -198,8 +154,6 @@ export async function getTradeAging(username: string): Promise<TradeAgingRow[]> 
       WHERE league_id = COALESCE(t.league_id, ta.league_id)
         AND owner_id = ${userId}
     )
-      AND ta.asset_type = 'player'
-      AND ta.fc_value_at_trade IS NOT NULL
     ORDER BY ta.trade_date DESC, ta.trade_id DESC, ta.direction ASC, ta.asset_name ASC NULLS LAST
   `);
 
@@ -233,13 +187,14 @@ export async function getTradeHistory(username: string): Promise<TradeHistoryRes
   );
   if (userTradeAssets.length === 0) return { trades: [], stats: emptyStats() };
 
+  const agingRows = (await getTradeAging(username)) as TradeAgingSourceRow[];
+  if (agingRows.length === 0) return { trades: [], stats: emptyStats() };
+
   const tradeMap = new Map<string, {
     league_id: string;
     created_at_ms: number;
-    assets: TradeAssetRow[];
     partner_roster_ids: Set<number>;
   }>();
-  const playerIds = new Set<string>();
 
   for (const asset of userTradeAssets) {
     const createdAtMs = toTimestamp(asset.created_at_ms);
@@ -247,10 +202,8 @@ export async function getTradeHistory(username: string): Promise<TradeHistoryRes
     const trade = tradeMap.get(asset.trade_id) ?? {
       league_id: asset.league_id,
       created_at_ms: createdAtMs,
-      assets: [],
       partner_roster_ids: new Set<number>(),
     };
-    trade.assets.push(asset);
     if (createdAtMs > trade.created_at_ms) {
       trade.created_at_ms = createdAtMs;
     }
@@ -258,40 +211,9 @@ export async function getTradeHistory(username: string): Promise<TradeHistoryRes
       trade.partner_roster_ids.add(rosterId);
     }
     tradeMap.set(asset.trade_id, trade);
-    if (asset.asset_type === "player") {
-      playerIds.add(asset.asset_key);
-    }
   }
 
-  const playerIdList = [...playerIds];
-  const playerIdSql = playerIdList.length
-    ? sql.join(playerIdList.map((playerId) => sql`${playerId}`), sql`, `)
-    : null;
-
-  const [playerMetaRows, snapshotRows, fantasyCalcRows, leagueRows, leagueRosterRows, leagueUserRows] = await Promise.all([
-    playerIdSql
-      ? db.execute(sql`
-          SELECT player_id, full_name, position
-          FROM players_master
-          WHERE player_id IN (${playerIdSql})
-        `)
-      : Promise.resolve([]),
-    playerIdSql
-      ? db.execute(sql`
-          SELECT player_id, snapshot_date, edge_score, fc_value
-          FROM player_value_snapshots
-          WHERE player_id IN (${playerIdSql})
-          ORDER BY player_id ASC, snapshot_date ASC
-        `)
-      : Promise.resolve([]),
-    playerIdSql
-      ? db.execute(sql`
-          SELECT sleeper_id, snapshot_date, dynasty_value
-          FROM fantasycalc_daily
-          WHERE sleeper_id IN (${playerIdSql})
-          ORDER BY sleeper_id ASC, snapshot_date ASC
-        `)
-      : Promise.resolve([]),
+  const [leagueRows, leagueRosterRows, leagueUserRows] = await Promise.all([
     db.execute(sql`
       SELECT league_id, name
       FROM leagues
@@ -308,32 +230,6 @@ export async function getTradeHistory(username: string): Promise<TradeHistoryRes
       WHERE league_id IN (${leagueIdSql})
     `),
   ]);
-
-  const playerMetaMap = new Map<string, PlayerMetaRow>();
-  for (const row of playerMetaRows as unknown as PlayerMetaRow[]) {
-    playerMetaMap.set(row.player_id, row);
-  }
-
-  const snapshotMap = new Map<string, SnapshotEntry[]>();
-  for (const row of snapshotRows as unknown as SnapshotRow[]) {
-    const entries = snapshotMap.get(row.player_id) ?? [];
-      entries.push({
-        snapshot_ms: Date.parse(`${row.snapshot_date}T00:00:00Z`),
-        edge_score: row.edge_score,
-        fc_value: row.fc_value,
-      });
-      snapshotMap.set(row.player_id, entries);
-    }
-
-  const fantasyCalcMap = new Map<string, FantasyCalcEntry[]>();
-  for (const row of fantasyCalcRows as unknown as FantasyCalcRow[]) {
-    const entries = fantasyCalcMap.get(row.sleeper_id) ?? [];
-    entries.push({
-      snapshot_ms: Date.parse(`${row.snapshot_date}T00:00:00Z`),
-      dynasty_value: row.dynasty_value,
-    });
-    fantasyCalcMap.set(row.sleeper_id, entries);
-  }
 
   const leagueNameMap = new Map<string, string>();
   for (const row of leagueRows as unknown as LeagueRow[]) {
@@ -354,42 +250,31 @@ export async function getTradeHistory(username: string): Promise<TradeHistoryRes
   }
 
   const trades: TradeGrade[] = [];
+  const agingByTrade = new Map<string, TradeAgingSourceRow[]>();
+  for (const row of agingRows) {
+    const current = agingByTrade.get(row.trade_id) ?? [];
+    current.push(row);
+    agingByTrade.set(row.trade_id, current);
+  }
 
   for (const [tradeId, trade] of tradeMap.entries()) {
-    const tradeDate = toDateStr(trade.created_at_ms);
+    const agingAssets = agingByTrade.get(tradeId);
+    if (!agingAssets || agingAssets.length === 0) continue;
+
+    const tradeDate = agingAssets[0]?.trade_date ?? toDateStr(trade.created_at_ms);
     const gave: TradeGradedAsset[] = [];
     const received: TradeGradedAsset[] = [];
 
-    for (const asset of trade.assets) {
+    for (const asset of agingAssets) {
       const gradedAsset: TradeGradedAsset = {
-        asset_type: asset.asset_type === "player" ? "player" : "pick",
+        asset_type: asset.asset_type,
         asset_key: asset.asset_key,
         label: asset.asset_name ?? asset.asset_key,
-        position: null,
-        edge_score_then: null,
-        edge_score_now: null,
-        value_change: 0,
+        position: asset.position ?? null,
+        value_at_trade: asset.fc_value_at_trade,
+        value_now: asset.fc_value_now,
+        value_change: toWhole(asset.fc_value_change ?? 0),
       };
-
-      if (asset.asset_type === "player") {
-        const meta = playerMetaMap.get(asset.asset_key);
-        const edgeHistory = snapshotMap.get(asset.asset_key);
-        const fantasyCalcHistory = fantasyCalcMap.get(asset.asset_key);
-        const useFantasyCalc = !!fantasyCalcHistory?.length && (!edgeHistory || edgeHistory.length <= 1);
-        const thenScore = useFantasyCalc
-          ? closestFantasyCalcValue(fantasyCalcHistory, trade.created_at_ms)
-          : closestEdgeScore(edgeHistory, trade.created_at_ms);
-        const nowScore = useFantasyCalc
-          ? fantasyCalcHistory?.[fantasyCalcHistory.length - 1]?.dynasty_value ?? null
-          : edgeHistory?.[edgeHistory.length - 1]?.edge_score ?? null;
-        gradedAsset.label = meta?.full_name ?? asset.asset_name ?? asset.asset_key;
-        gradedAsset.position = meta?.position ?? null;
-        gradedAsset.edge_score_then = thenScore;
-        gradedAsset.edge_score_now = nowScore;
-        if (thenScore != null && nowScore != null) {
-          gradedAsset.value_change = round1(nowScore - thenScore);
-        }
-      }
 
       if (asset.direction === "gave") {
         gave.push(gradedAsset);
@@ -400,11 +285,11 @@ export async function getTradeHistory(username: string): Promise<TradeHistoryRes
 
     if (gave.length === 0 && received.length === 0) continue;
 
-    const gaveThen = round1(gave.reduce((sum, asset) => sum + (asset.edge_score_then ?? 0), 0));
-    const gaveNow = round1(gave.reduce((sum, asset) => sum + (asset.edge_score_now ?? 0), 0));
-    const receivedThen = round1(received.reduce((sum, asset) => sum + (asset.edge_score_then ?? 0), 0));
-    const receivedNow = round1(received.reduce((sum, asset) => sum + (asset.edge_score_now ?? 0), 0));
-    const netValueChange = round1((receivedNow - receivedThen) - (gaveNow - gaveThen));
+    const gaveThen = toWhole(gave.reduce((sum, asset) => sum + (asset.value_at_trade ?? 0), 0));
+    const gaveNow = toWhole(gave.reduce((sum, asset) => sum + (asset.value_now ?? 0), 0));
+    const receivedThen = toWhole(received.reduce((sum, asset) => sum + (asset.value_at_trade ?? 0), 0));
+    const receivedNow = toWhole(received.reduce((sum, asset) => sum + (asset.value_now ?? 0), 0));
+    const netValueChange = receivedNow - gaveNow;
 
     const partnerNames = [...trade.partner_roster_ids]
       .map((rosterId) => ownerByLeagueRoster.get(`${trade.league_id}:${rosterId}`))
@@ -425,8 +310,8 @@ export async function getTradeHistory(username: string): Promise<TradeHistoryRes
       received_total_then: receivedThen,
       received_total_now: receivedNow,
       net_value_change: netValueChange,
-      grade: gradeFromNet(netValueChange),
-      grade_magnitude: round1(Math.abs(netValueChange)),
+      grade: gradeFromTotals(receivedNow, gaveNow),
+      grade_magnitude: Math.abs(netValueChange),
       partner_names: partnerNames.length > 0 ? partnerNames : ["Trade Partner"],
     });
   }
@@ -446,8 +331,8 @@ function computeStats(trades: TradeGrade[]): TradeHistoryStats {
   const losses = trades.filter((trade) => trade.grade === "loss").length;
   const pushes = trades.filter((trade) => trade.grade === "push").length;
   const decidedTrades = wins + losses;
-  const totalValueGained = round1(trades.reduce((sum, trade) => sum + trade.net_value_change, 0));
-  const avgValuePerTrade = round1(totalValueGained / trades.length);
+  const totalValueGained = toWhole(trades.reduce((sum, trade) => sum + trade.net_value_change, 0));
+  const avgValuePerTrade = toWhole(totalValueGained / trades.length);
 
   const bestTrade = [...trades].sort((left, right) => right.net_value_change - left.net_value_change)[0] ?? null;
   const worstTrade = [...trades].sort((left, right) => left.net_value_change - right.net_value_change)[0] ?? null;
@@ -471,7 +356,7 @@ function computeStats(trades: TradeGrade[]): TradeHistoryStats {
     .map(([position, values]) => ({
       position,
       trades: values.trades,
-      net_value: round1(values.net_value),
+      net_value: toWhole(values.net_value),
     }))
     .sort((left, right) => right.net_value - left.net_value);
 
@@ -499,7 +384,7 @@ function computeStats(trades: TradeGrade[]): TradeHistoryStats {
         league_name: values.league_name,
         trades: values.trades,
         win_rate: decided > 0 ? round1((values.wins / decided) * 100) : 0,
-        net_value: round1(values.net_value),
+        net_value: toWhole(values.net_value),
       };
     })
     .sort((left, right) => right.net_value - left.net_value);
@@ -522,7 +407,7 @@ function computeStats(trades: TradeGrade[]): TradeHistoryStats {
         month,
         trades: values.trades,
         win_rate: decided > 0 ? round1((values.wins / decided) * 100) : 0,
-        net_value: round1(values.net_value),
+        net_value: toWhole(values.net_value),
       };
     })
     .sort((left, right) => left.month.localeCompare(right.month));

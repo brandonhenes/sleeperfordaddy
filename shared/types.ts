@@ -743,8 +743,8 @@ export interface TradeGradedAsset {
   asset_key: string;
   label: string;
   position: string | null;
-  edge_score_then: number | null;
-  edge_score_now: number | null;
+  value_at_trade: number | null;
+  value_now: number | null;
   value_change: number;
 }
 
@@ -773,7 +773,7 @@ export interface TradeAgingRow {
   trade_date: string;
   days_since_trade: number;
   direction: "gave" | "received";
-  asset_type: "player";
+  asset_type: "player" | "pick";
   asset_key: string;
   asset_name: string | null;
   position: string | null;
