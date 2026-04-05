@@ -405,16 +405,40 @@ function getPlayerStats(playerId: string, season: number | null): Record<string,
   return playerStatsMap.get(playerId)?.get(season) ?? null;
 }
 
+function getTradeSeasonWeek(tradeDate: Date): { season: number; week: number } {
+  const month = tradeDate.getMonth(); // 0-indexed (Jan=0, Dec=11)
+  const year = tradeDate.getFullYear();
+
+  // Dynasty season = calendar year, always.
+  // A Jan 2025 trade is for the 2025 season (player won't play until Sep 2025).
+  // An Aug 2024 trade is for the 2024 season (preseason).
+  const season = year;
+
+  // Only calculate a specific week if the trade happened DURING the NFL season
+  // (September through December). Otherwise it's an offseason trade and
+  // ALL weeks in the upcoming season should count as post-trade.
+  if (month >= 8) {
+    // September-December: in-season trade. Calculate approximate NFL week.
+    const seasonStart = new Date(season, 8, 7); // Sept 7
+    const diffMs = tradeDate.getTime() - seasonStart.getTime();
+    const week = Math.max(1, Math.ceil(diffMs / (7 * 24 * 60 * 60 * 1000)));
+    return { season, week };
+  }
+
+  // January-August: offseason/preseason trade.
+  // Week 0 means ALL weeks in this season count as post-trade.
+  return { season, week: 0 };
+}
+
 function estimateStartWeek(tradeDate: Date, seasonYear: number): number {
-  const tradeYear = tradeDate.getUTCFullYear();
-  if (tradeYear < seasonYear) return 1;
-  if (tradeYear > seasonYear) return Number.MAX_SAFE_INTEGER;
+  const { season: tradeSeason, week: tradeWeek } = getTradeSeasonWeek(tradeDate);
 
-  const seasonStart = Date.UTC(seasonYear, 8, 1);
-  if (tradeDate.getTime() < seasonStart) return 1;
+  if (seasonYear < tradeSeason) return Number.MAX_SAFE_INTEGER; // pre-trade season, skip
+  if (seasonYear > tradeSeason) return 1; // future season, all weeks count
 
-  const week = Math.floor((tradeDate.getTime() - seasonStart) / (7 * 24 * 60 * 60 * 1000)) + 1;
-  return clamp(week, 1, 18);
+  // Same season as trade
+  if (tradeWeek === 0) return 1; // offseason trade, all weeks count
+  return tradeWeek + 1; // in-season trade, start after trade week
 }
 
 function buildTeamWeekMap(rows: MatchupRow[]): Map<string, TeamWeekSummary> {
@@ -525,7 +549,7 @@ async function loadTradeSeasonContext(
         league_median::real AS league_median,
         roster_total::real AS roster_total
       FROM weekly_matchup_scores
-      WHERE league_id IN (${leagueIdSql})
+      WHERE league_id IN (${leagueIdSql}) AND week <= 17
     `),
   ]);
 
@@ -718,6 +742,9 @@ function computeSeasonOutcomes(
     };
   }
 
+  const { season: tradeSeason } = getTradeSeasonWeek(tradeDate);
+  const maxSeason = tradeSeason + 2; // 3-season cap
+
   let seasonNumber = 0;
   const seasons: TradeSeasonRowInput[] = [];
   let winsWithTrade = 0;
@@ -730,6 +757,8 @@ function computeSeasonOutcomes(
   let receivedStartedRows = 0;
 
   for (const league of seasonContext.timeline) {
+    // Only process seasons from trade season through 3-season cap
+    if (league.season < tradeSeason || league.season > maxSeason) continue;
     const seasonRosterId = seasonContext.rosterIdByLeagueOwner.get(
       `${league.league_id}:${ownerId}`
     );
@@ -748,7 +777,7 @@ function computeSeasonOutcomes(
     const receivedByAsset = new Map<string, number>();
     const gaveByAsset = new Map<string, number>();
 
-    for (let week = startWeek; week <= 18; week += 1) {
+    for (let week = startWeek; week <= 17; week += 1) {
       const summary = seasonContext.teamWeeks.get(
         `${league.league_id}:${league.season}:${week}:${seasonRosterId}`
       );
@@ -1318,7 +1347,7 @@ export async function loadAllValues(force = false): Promise<void> {
     playerMetaMap.clear();
     pickToPlayerMap.clear();
 
-    const [fcRowsRaw, dpRowsRaw, playerRowsRaw, statsRowsRaw, draftResultsRaw] = await Promise.all([
+    const [fcRowsRaw, dpRowsRaw, playerRowsRaw, statsRowsRaw, draftResultsRaw, chainRowsRaw, tradedPickRowsRaw] = await Promise.all([
       db.execute(sql`
         SELECT
           snapshot_date::text AS snapshot_date,
@@ -1402,6 +1431,13 @@ export async function loadAllValues(force = false): Promise<void> {
         SELECT league_id, season, round, roster_id, player_id, player_name, position
         FROM league_draft_results
       `),
+      db.execute(sql`
+        SELECT league_id, root_id FROM league_chain
+      `),
+      db.execute(sql`
+        SELECT league_id, season, round, original_owner_id, current_owner_id
+        FROM draft_traded_picks
+      `),
     ]);
 
     for (const row of playerRowsRaw as unknown as PlayerMeta[]) {
@@ -1451,6 +1487,18 @@ export async function loadAllValues(force = false): Promise<void> {
       playerStatsMap.set(row.player_id, seasonMap);
     }
 
+    // Build league chain maps
+    const leagueToRoot = new Map<string, string>();
+    const rootToLeagues = new Map<string, string[]>();
+    for (const row of chainRowsRaw as unknown as Array<{ league_id: string; root_id: string }>) {
+      leagueToRoot.set(row.league_id, row.root_id);
+      const existing = rootToLeagues.get(row.root_id) ?? [];
+      existing.push(row.league_id);
+      rootToLeagues.set(row.root_id, existing);
+    }
+
+    // Build draft results index: "leagueId:season:round:rosterId" -> [{player_id, player_name, position}]
+    const draftIndex = new Map<string, Array<{ player_id: string; player_name: string; position: string | null }>>();
     for (const row of draftResultsRaw as unknown as Array<{
       league_id: string;
       season: string;
@@ -1460,12 +1508,69 @@ export async function loadAllValues(force = false): Promise<void> {
       player_name: string;
       position: string | null;
     }>) {
-      const key = `${row.league_id}:${row.season}_${row.round}_${row.roster_id}`;
-      pickToPlayerMap.set(key, {
-        sleeperId: row.player_id,
-        playerName: row.player_name,
-        position: row.position,
-      });
+      const key = `${row.league_id}:${row.season}:${row.round}:${row.roster_id}`;
+      const existing = draftIndex.get(key) ?? [];
+      existing.push({ player_id: row.player_id, player_name: row.player_name, position: row.position });
+      draftIndex.set(key, existing);
+    }
+
+    // Build pick ownership index: "leagueId:season:round:originalOwnerId" -> currentOwnerId
+    const ownershipIndex = new Map<string, number>();
+    for (const row of tradedPickRowsRaw as unknown as Array<{
+      league_id: string;
+      season: number;
+      round: number;
+      original_owner_id: number;
+      current_owner_id: number;
+    }>) {
+      const key = `${row.league_id}:${row.season}:${row.round}:${row.original_owner_id}`;
+      ownershipIndex.set(key, row.current_owner_id);
+    }
+
+    // Build pickToPlayerMap using league chain traversal
+    // For every league, resolve picks through the chain
+    for (const [leagueId, rootId] of leagueToRoot) {
+      const chainLeagues = rootToLeagues.get(rootId) ?? [leagueId];
+
+      // For each draft result, create direct mappings
+      for (const chainLeagueId of chainLeagues) {
+        for (const [draftKey, results] of draftIndex) {
+          if (!draftKey.startsWith(`${chainLeagueId}:`)) continue;
+          const parts = draftKey.split(":");
+          const season = parts[1];
+          const round = parts[2];
+          const rosterId = parts[3];
+
+          // Create mapping for every league in the chain
+          for (const srcLeague of chainLeagues) {
+            const pickKey = `${srcLeague}:${season}_${round}_${rosterId}`;
+            if (pickToPlayerMap.has(pickKey)) continue;
+
+            // Check if pick ownership was transferred
+            const ownerKey = `${chainLeagueId}:${season}:${round}:${rosterId}`;
+            const currentOwner = ownershipIndex.get(ownerKey) ?? Number(rosterId);
+
+            // Look up draft result for the current owner
+            const currentOwnerKey = `${chainLeagueId}:${season}:${round}:${currentOwner}`;
+            const ownerResults = draftIndex.get(currentOwnerKey);
+
+            if (ownerResults && ownerResults.length > 0) {
+              pickToPlayerMap.set(pickKey, {
+                sleeperId: ownerResults[0].player_id,
+                playerName: ownerResults[0].player_name,
+                position: ownerResults[0].position,
+              });
+            } else if (results.length > 0) {
+              // Fallback to direct roster match
+              pickToPlayerMap.set(pickKey, {
+                sleeperId: results[0].player_id,
+                playerName: results[0].player_name,
+                position: results[0].position,
+              });
+            }
+          }
+        }
+      }
     }
 
     finalizeValueIndex(fantasycalcIndex);

@@ -14,7 +14,7 @@ const cardStyle = {
   padding: 18,
   textAlign: "left" as const,
   color: "var(--text)",
-  cursor: "pointer",
+  cursor: "default",
   fontFamily: "inherit",
   width: "100%",
 } as const;
@@ -174,7 +174,7 @@ export default function TradeCard({
   const detailsLoading = expanded && seasons === undefined;
 
   return (
-    <button type="button" onClick={onToggle} style={cardStyle}>
+    <div style={cardStyle}>
       <div
         style={{
           display: "flex",
@@ -377,6 +377,25 @@ export default function TradeCard({
         </div>
       </div>
 
+      <div
+        onClick={onToggle}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 6,
+          padding: "8px 0",
+          cursor: "pointer",
+          color: "var(--text-muted)",
+          fontSize: 12,
+          borderTop: "1px solid var(--border)",
+          marginTop: 12,
+        }}
+      >
+        <span>{expanded ? "Hide Details" : "Show Season Breakdown"}</span>
+        <span style={{ fontSize: 10 }}>{expanded ? "\u25B2" : "\u25BC"}</span>
+      </div>
+
       {expanded && (
         <div
           style={{
@@ -556,6 +575,6 @@ export default function TradeCard({
           )}
         </div>
       )}
-    </button>
+    </div>
   );
 }

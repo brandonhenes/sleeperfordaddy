@@ -52,12 +52,21 @@ async function getAssetsForTrades(
     LEFT JOIN players_master pm
       ON pm.player_id = ta.asset_key
      AND ta.asset_type = 'player'
-    LEFT JOIN league_draft_results ldr
-      ON ldr.league_id = ta.league_id
-     AND ta.asset_type = 'pick'
-     AND ldr.season = split_part(ta.asset_key, '_', 1)
-     AND ldr.round = split_part(ta.asset_key, '_', 2)::int
-     AND ldr.roster_id = split_part(ta.asset_key, '_', 3)::int
+    LEFT JOIN LATERAL (
+      SELECT dr.player_name, dr.position
+      FROM league_draft_results dr
+      JOIN league_chain lc_trade ON lc_trade.league_id = ta.league_id
+      JOIN league_chain lc_draft ON lc_draft.root_id = lc_trade.root_id AND lc_draft.league_id = dr.league_id
+      LEFT JOIN draft_traded_picks dtp ON dtp.league_id = dr.league_id
+        AND dtp.season = split_part(ta.asset_key, '_', 1)::int
+        AND dtp.round = split_part(ta.asset_key, '_', 2)::int
+        AND dtp.original_owner_id = split_part(ta.asset_key, '_', 3)::int
+      WHERE dr.season = split_part(ta.asset_key, '_', 1)
+        AND dr.round = split_part(ta.asset_key, '_', 2)::int
+        AND dr.roster_id = COALESCE(dtp.current_owner_id, split_part(ta.asset_key, '_', 3)::int)
+        AND ta.asset_type = 'pick'
+      LIMIT 1
+    ) ldr ON true
     WHERE ta.trade_id IN (${tradeIdSql})
       AND ta.league_id IN (${leagueIdSql})
       AND ta.asset_type IN ('player', 'pick')

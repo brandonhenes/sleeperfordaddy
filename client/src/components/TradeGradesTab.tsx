@@ -108,8 +108,8 @@ export default function TradeGradesTab({ selectedLeagueId, leagueName, username 
   const filteredOutcomes = useMemo(() => {
     const outcomes = leagueQuery.data?.outcomes ?? [];
     if (ownerFilter === "mine") {
-      if (myRosterId == null) return outcomes;
-      return outcomes.filter((o) => o.roster_id === myRosterId);
+      if (myRosterId == null) return [];
+      return outcomes.filter((o) => Number(o.roster_id) === Number(myRosterId));
     }
     if (ownerFilter === "all") {
       const seen = new Set<string>();
