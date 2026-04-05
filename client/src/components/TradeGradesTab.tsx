@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import TradeCard from "./TradeCard";
 import EmptyState from "./EmptyState";
 import { SectionHeader } from "./ui";
+import { usePowerRankings } from "../hooks/use-power-rankings";
 import {
   useTradeIntelligenceLeague,
   useTradeIntelligenceTradeDetail,
@@ -17,6 +18,18 @@ const cardStyle = {
   border: "1px solid var(--border)",
   borderRadius: 12,
 } as const;
+
+const selectStyle = {
+  padding: "10px 12px",
+  background: "var(--dark-base)",
+  color: "var(--text)",
+  border: "1px solid var(--border)",
+  borderRadius: 8,
+  fontSize: 13,
+  fontFamily: "inherit",
+} as const;
+
+type OwnerFilter = "mine" | "all" | number;
 
 function buildRosterNameMap(rosters: TradeIntelligenceRoster[] | undefined) {
   return new Map<number, string>(
@@ -45,15 +58,17 @@ function ErrorBlock({ message }: { message: string }) {
 interface TradeGradesTabProps {
   selectedLeagueId: string;
   leagueName: string;
+  username: string;
 }
 
-export default function TradeGradesTab({ selectedLeagueId, leagueName }: TradeGradesTabProps) {
+export default function TradeGradesTab({ selectedLeagueId, leagueName, username }: TradeGradesTabProps) {
   const [expandedTrade, setExpandedTrade] = useState<{
     key: string;
     outcomeId: number;
     tradeId: string;
     leagueId: string;
   } | null>(null);
+  const [ownerFilter, setOwnerFilter] = useState<OwnerFilter>("mine");
 
   useEffect(() => {
     setExpandedTrade(null);
@@ -66,10 +81,46 @@ export default function TradeGradesTab({ selectedLeagueId, leagueName }: TradeGr
     !!expandedTrade
   );
 
+  const { data: powerData } = usePowerRankings(
+    selectedLeagueId ? username : ""
+  );
+
+  const myRosterId = useMemo(() => {
+    if (!powerData || !selectedLeagueId) return null;
+    const league = powerData.find((l) => l.league_id === selectedLeagueId);
+    if (!league) return null;
+    const me = league.rosters.find((r) => r.is_user);
+    return me?.roster_id ?? null;
+  }, [powerData, selectedLeagueId]);
+
   const rosterNames = useMemo(
     () => buildRosterNameMap(leagueQuery.data?.rosters),
     [leagueQuery.data?.rosters]
   );
+
+  const ownerOptions = useMemo(() => {
+    const rosters = leagueQuery.data?.rosters ?? [];
+    return rosters
+      .filter((r) => myRosterId == null || r.roster_id !== myRosterId)
+      .sort((a, b) => a.display_name.localeCompare(b.display_name));
+  }, [leagueQuery.data?.rosters, myRosterId]);
+
+  const filteredOutcomes = useMemo(() => {
+    const outcomes = leagueQuery.data?.outcomes ?? [];
+    if (ownerFilter === "mine") {
+      if (myRosterId == null) return outcomes;
+      return outcomes.filter((o) => o.roster_id === myRosterId);
+    }
+    if (ownerFilter === "all") {
+      const seen = new Set<string>();
+      return outcomes.filter((o) => {
+        if (seen.has(o.trade_id)) return false;
+        seen.add(o.trade_id);
+        return true;
+      });
+    }
+    return outcomes.filter((o) => o.roster_id === ownerFilter);
+  }, [leagueQuery.data?.outcomes, ownerFilter, myRosterId]);
 
   function toggleTrade(outcome: TradeOutcome) {
     const key = getTradeKey(outcome);
@@ -97,12 +148,36 @@ export default function TradeGradesTab({ selectedLeagueId, leagueName }: TradeGr
     return <EmptyState title="Select a league to view trade grades." />;
   }
 
+  const myDisplayName = myRosterId != null ? rosterNames.get(myRosterId) : null;
+
   return (
     <div>
+      <div style={{ marginBottom: 16 }}>
+        <select
+          value={typeof ownerFilter === "number" ? String(ownerFilter) : ownerFilter}
+          onChange={(event) => {
+            const val = event.target.value;
+            if (val === "mine" || val === "all") setOwnerFilter(val);
+            else setOwnerFilter(Number(val));
+          }}
+          style={selectStyle}
+        >
+          <option value="mine">
+            My Trades{myDisplayName ? ` (${myDisplayName})` : ""}
+          </option>
+          <option value="all">All Trades</option>
+          {ownerOptions.map((roster) => (
+            <option key={roster.roster_id} value={String(roster.roster_id)}>
+              {roster.display_name}
+            </option>
+          ))}
+        </select>
+      </div>
+
       <SectionHeader
         icon="TI"
         title="Trade Grades"
-        subtitle={`${leagueName} trade outcomes from each manager's perspective`}
+        subtitle={`${leagueName} trade outcomes`}
       />
 
       {tradeDetailQuery.error && expandedTrade ? (
@@ -119,11 +194,11 @@ export default function TradeGradesTab({ selectedLeagueId, leagueName }: TradeGr
         </div>
       ) : leagueQuery.error ? (
         <ErrorBlock message={(leagueQuery.error as Error).message || "Failed to load graded trades."} />
-      ) : (leagueQuery.data?.outcomes.length ?? 0) === 0 ? (
+      ) : filteredOutcomes.length === 0 ? (
         <EmptyState title="No graded trades yet. Trades will be graded automatically during sync." />
       ) : (
         <div style={{ display: "grid", gap: 12 }}>
-          {leagueQuery.data!.outcomes.map((outcome) => {
+          {filteredOutcomes.map((outcome) => {
             const expanded = expandedTrade?.key === getTradeKey(outcome);
             return (
               <TradeCard

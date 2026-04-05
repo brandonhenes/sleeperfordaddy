@@ -301,7 +301,7 @@ export default function TradeCard({
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+          gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
           gap: 12,
           marginTop: 16,
         }}
@@ -314,17 +314,40 @@ export default function TradeCard({
           }}
         >
           <div style={{ fontSize: 10, fontWeight: 800, color: "var(--text-muted)", letterSpacing: 0.6, textTransform: "uppercase" }}>
-            Value Delta
+            Value Summary
           </div>
-          <div className="font-mono" style={{ fontSize: 20, fontWeight: 800, color: valueColor, marginTop: 6 }}>
-            {formatSignedPercent(outcome.value_delta_pct)}
-          </div>
-          <div style={{ fontSize: 12, color: valueColor, fontWeight: 700, marginTop: 2 }}>
-            {outcome.value_verdict === "won"
-              ? "Won on value"
-              : outcome.value_verdict === "lost"
-                ? "Lost on value"
-                : "Push on value"}
+          <div style={{ marginTop: 8, display: "grid", gap: 6 }}>
+            <div style={{ fontSize: 12, color: "var(--text-dim)" }}>
+              Gave:{" "}
+              <span className="font-mono" style={{ color: "var(--text)", fontWeight: 700 }}>
+                {formatPoints(outcome.value_gave_at_trade)}
+              </span>
+              {" -> "}
+              <span className="font-mono" style={{ color: metricColor(outcome.value_gave_current - outcome.value_gave_at_trade), fontWeight: 700 }}>
+                {formatPoints(outcome.value_gave_current)}
+              </span>
+            </div>
+            <div style={{ fontSize: 12, color: "var(--text-dim)" }}>
+              Received:{" "}
+              <span className="font-mono" style={{ color: "var(--text)", fontWeight: 700 }}>
+                {formatPoints(outcome.value_received_at_trade)}
+              </span>
+              {" -> "}
+              <span className="font-mono" style={{ color: metricColor(outcome.value_received_current - outcome.value_received_at_trade), fontWeight: 700 }}>
+                {formatPoints(outcome.value_received_current)}
+              </span>
+            </div>
+            <div style={{ fontSize: 13, fontWeight: 800, color: valueColor, marginTop: 2 }}>
+              Net: {formatSignedPercent(outcome.value_delta_pct)}
+              {" "}
+              <span style={{ fontWeight: 600, fontSize: 11 }}>
+                ({outcome.value_verdict === "won"
+                  ? "Won"
+                  : outcome.value_verdict === "lost"
+                    ? "Lost"
+                    : "Push"})
+              </span>
+            </div>
           </div>
         </div>
 
@@ -339,27 +362,15 @@ export default function TradeCard({
             Win Impact
           </div>
           <WinImpactBar value={outcome.win_impact} />
-        </div>
-
-        <div
-          style={{
-            background: "rgba(15, 23, 42, 0.65)",
-            borderRadius: 10,
-            padding: 12,
-          }}
-        >
-          <div style={{ fontSize: 10, fontWeight: 800, color: "var(--text-muted)", letterSpacing: 0.6, textTransform: "uppercase" }}>
-            Points
-          </div>
-          <div style={{ marginTop: 8, display: "grid", gap: 6 }}>
+          <div style={{ marginTop: 8, display: "grid", gap: 4 }}>
             <div style={{ fontSize: 12, color: "var(--text-dim)" }}>
-              Received:{" "}
+              Points received:{" "}
               <span className="font-mono" style={{ color: "var(--text)", fontWeight: 700 }}>
                 {formatPoints(outcome.points_received_assets)}
               </span>
             </div>
             <div style={{ fontSize: 12, color: "var(--text-dim)" }}>
-              Gave:{" "}
+              Points gave:{" "}
               <span className="font-mono" style={{ color: "var(--text)", fontWeight: 700 }}>
                 {formatPoints(outcome.points_gave_assets)}
               </span>
