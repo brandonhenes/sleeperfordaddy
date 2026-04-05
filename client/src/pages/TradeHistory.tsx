@@ -231,6 +231,12 @@ export default function TradeHistory() {
   const leagueOptions = useMemo(() => data?.stats.by_league ?? [], [data?.stats.by_league]);
   const positionOptions = useMemo(() => data?.stats.by_position.map((item) => item.position) ?? [], [data?.stats.by_position]);
 
+  const intelLeagueName = useMemo(() => {
+    if (!intelLeagueId) return "";
+    const match = leagueOptions.find((l) => l.league_id === intelLeagueId);
+    return match?.league_name ?? "";
+  }, [intelLeagueId, leagueOptions]);
+
   function toggleTrade(tradeId: string) {
     setExpandedTradeIds((current) => {
       const next = new Set(current);
@@ -336,12 +342,6 @@ export default function TradeHistory() {
       </AppShell>
     );
   }
-
-  const intelLeagueName = useMemo(() => {
-    if (!intelLeagueId) return "";
-    const match = leagueOptions.find((l) => l.league_id === intelLeagueId);
-    return match?.league_name ?? "";
-  }, [intelLeagueId, leagueOptions]);
 
   return (
     <AppShell>
