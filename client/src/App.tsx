@@ -35,7 +35,7 @@ export default function App() {
       <Route path="/signals/:username" component={MarketSignals} />
       <Route path="/player/:playerName" component={PlayerDetail} />
       <Route path="/trade-calculator" component={TradeCalculator} />
-      <Route path="/trade-finder/:username" component={TradeFinder} />
+<Route path="/trade-finder/:username" component={TradeFinder} />
       <Route path="/trade-history/:username" component={TradeHistory} />
       <Route path="/rookie-draft" component={RookieDraft} />
       <Route path="/history/:username" component={LeagueHistory} />

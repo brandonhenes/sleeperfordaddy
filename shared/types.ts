@@ -784,3 +784,115 @@ export interface TradeAgingRow {
   league_name: string;
 }
 
+// Trade Intelligence
+
+export interface TradeOutcome {
+  id: number;
+  trade_id: string;
+  league_id: string;
+  league_name?: string | null;
+  roster_id: number;
+  counterparty_roster_id: number;
+  value_gave_at_trade: number;
+  value_received_at_trade: number;
+  value_gave_current: number;
+  value_received_current: number;
+  value_delta_pct: number;
+  value_verdict: "won" | "lost" | "push" | null;
+  wins_with_trade: number;
+  wins_without_trade: number;
+  win_impact: number;
+  median_weeks_with: number;
+  median_weeks_without: number;
+  median_impact: number;
+  points_received_assets: number;
+  points_gave_assets: number;
+  starter_rate_pct: number;
+  trade_date: string;
+  seasons_graded: number;
+  is_final: boolean;
+  graded_through_date?: string | null;
+  value_source: string;
+  scoring_adjusted: boolean;
+}
+
+export interface TradeOutcomeSeason {
+  trade_outcome_id: number;
+  season_number: number;
+  season_year: number;
+  wins_with: number;
+  wins_without: number;
+  win_impact: number;
+  median_with: number;
+  median_without: number;
+  points_received: number;
+  points_gave: number;
+  value_delta_pct: number;
+  key_assets_received: string[];
+  key_assets_gave: string[];
+}
+
+export interface TradeAssetWithPlayer {
+  trade_id: string;
+  league_id: string;
+  roster_id: number;
+  direction: "received" | "gave";
+  asset_type: "player" | "pick";
+  asset_key: string;
+  asset_name: string | null;
+  player_name: string | null;
+  position: string | null;
+  team: string | null;
+}
+
+export interface TradeIntelligenceRoster {
+  league_id: string;
+  roster_id: number;
+  owner_id: string | null;
+  display_name: string;
+}
+
+export interface OwnerProfile {
+  league_id: string;
+  roster_id: number;
+  owner_id: string | null;
+  display_name: string;
+  total_trades: number;
+  trade_win_rate_value: number;
+  trade_win_rate_impact: number;
+  cumulative_win_impact: number;
+  cumulative_value_delta: number;
+  avg_acquired_age: number | null;
+  youth_vet_bias: "youth" | "balanced" | "veteran";
+  top_positions_acquired: string[];
+  trades_per_season: number;
+  most_common_partner_roster_id?: number | null;
+  soft_target_score: number;
+  best_trade_id: string | null;
+  best_trade_summary: string | null;
+  worst_trade_id: string | null;
+  worst_trade_summary: string | null;
+}
+
+export interface TradeIntelligenceLeagueResponse {
+  outcomes: TradeOutcome[];
+  assets: TradeAssetWithPlayer[];
+  rosters: TradeIntelligenceRoster[];
+}
+
+export interface TradeIntelligenceTradeDetailResponse {
+  outcomes: TradeOutcome[];
+  seasons: TradeOutcomeSeason[];
+  assets: TradeAssetWithPlayer[];
+}
+
+export interface TradeIntelligenceLeaderboardResponse {
+  profiles: OwnerProfile[];
+}
+
+export interface TradeIntelligenceUserTradesResponse {
+  outcomes: TradeOutcome[];
+  assets: TradeAssetWithPlayer[];
+  rosters: TradeIntelligenceRoster[];
+}
+

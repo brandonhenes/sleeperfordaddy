@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { SEASONS, SLEEPER_CONCURRENCY, TRANSACTION_ROUNDS } from "../../shared/constants.js";
 import { getUser } from "../sleeper/users.js";
 import { getUserLeagues, getLeagueUsers, getLeague } from "../sleeper/leagues.js";
@@ -43,6 +43,8 @@ import { clearDashboardCache } from "./dashboard.js";
 import { clearPortfolioCache } from "./portfolio.js";
 import { clearActionCache } from "./action.js";
 import { clearArbitrageCache } from "./arbitrage.js";
+import { backfillLeagueMatchups } from "./matchup-backfill.js";
+import { gradeLeagueTrades } from "./trade-intelligence.js";
 import type {
   SleeperLeague,
   SleeperRoster,
@@ -531,6 +533,33 @@ async function processLeague(league: SleeperLeague, userId: string) {
 
   // Fetch and store trades
   await processTrades(league.league_id, season);
+
+  try {
+    const matchupCountRows = await db.execute(sql`
+      SELECT COUNT(*)::int AS cnt
+      FROM weekly_matchup_scores
+      WHERE league_id = ${league.league_id}
+    `);
+    const matchupCount = Number(
+      (matchupCountRows as unknown as Array<{ cnt: number | string }>)[0]?.cnt ?? 0
+    );
+
+    if (matchupCount === 0) {
+      console.log(`[sync] No matchup data for ${league.league_id}, pulling from Sleeper...`);
+      await backfillLeagueMatchups(league.league_id);
+    }
+  } catch (err) {
+    console.error(`[sync] Matchup backfill failed for ${league.league_id}:`, err);
+  }
+
+  try {
+    const result = await gradeLeagueTrades(league.league_id);
+    console.log(
+      `[sync] Graded ${result.graded} trades for league ${league.league_id} (${result.skipped} final, skipped)`
+    );
+  } catch (err) {
+    console.error(`[sync] Trade grading failed for ${league.league_id}:`, err);
+  }
 }
 
 /**

@@ -16,6 +16,8 @@ import {
 import AppShell from "../components/AppShell";
 import EmptyState from "../components/EmptyState";
 import FreshnessBar from "../components/FreshnessBar";
+import LeaderboardTab from "../components/LeaderboardTab";
+import TradeGradesTab from "../components/TradeGradesTab";
 import { SectionHeader, StatCard } from "../components/ui";
 import { useEnsureUser } from "../hooks/use-ensure-user";
 import { useTradeAging, useTradeHistory } from "../hooks/use-trade-history";
@@ -24,6 +26,9 @@ import type {
   TradeGrade,
   TradeGradedAsset,
 } from "../../../shared/types";
+
+const mainTabs = ["Trade Log", "Trade Grades", "Leaderboard"] as const;
+type MainTab = typeof mainTabs[number];
 
 const cardStyle = {
   background: "var(--card)",
@@ -170,10 +175,12 @@ export default function TradeHistory() {
   const { phase, syncProgress, errorMsg, retry } = useEnsureUser(username);
   const { data, isLoading, error } = useTradeHistory(phase === "ready" ? username : undefined);
   const { data: agingData } = useTradeAging(phase === "ready" ? username : undefined);
+  const [activeTab, setActiveTab] = useState<MainTab>("Trade Log");
   const [leagueFilter, setLeagueFilter] = useState("ALL");
   const [gradeFilter, setGradeFilter] = useState("ALL");
   const [positionFilter, setPositionFilter] = useState("ALL");
   const [expandedTradeIds, setExpandedTradeIds] = useState<Set<string>>(new Set());
+  const [intelLeagueId, setIntelLeagueId] = useState("");
 
   const agingByTrade = useMemo(() => {
     const grouped = new Map<string, TradeAgingSummary>();
@@ -330,6 +337,12 @@ export default function TradeHistory() {
     );
   }
 
+  const intelLeagueName = useMemo(() => {
+    if (!intelLeagueId) return "";
+    const match = leagueOptions.find((l) => l.league_id === intelLeagueId);
+    return match?.league_name ?? "";
+  }, [intelLeagueId, leagueOptions]);
+
   return (
     <AppShell>
       <div style={{ padding: "28px 0 8px" }}>
@@ -340,6 +353,60 @@ export default function TradeHistory() {
         <FreshnessBar />
       </div>
 
+      <div style={{ display: "flex", gap: 0, marginBottom: 24, borderBottom: "1px solid var(--border)" }}>
+        {mainTabs.map(tab => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            style={{
+              padding: "10px 20px",
+              background: "none",
+              border: "none",
+              borderBottom: activeTab === tab ? "2px solid var(--green)" : "2px solid transparent",
+              color: activeTab === tab ? "var(--text)" : "var(--text-muted)",
+              fontSize: 14,
+              fontWeight: activeTab === tab ? 700 : 500,
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            {tab}
+          </button>
+        ))}
+      </div>
+
+      {(activeTab === "Trade Grades" || activeTab === "Leaderboard") && (
+        <div style={{ marginBottom: 20 }}>
+          <select
+            value={intelLeagueId}
+            onChange={(event) => setIntelLeagueId(event.target.value)}
+            style={{
+              padding: "10px 12px",
+              background: "var(--dark-base)",
+              color: "var(--text)",
+              border: "1px solid var(--border)",
+              borderRadius: 8,
+              fontSize: 13,
+              fontFamily: "inherit",
+            }}
+          >
+            <option value="">Select League</option>
+            {leagueOptions.map((league) => (
+              <option key={league.league_id} value={league.league_id}>{league.league_name}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {activeTab === "Trade Grades" && (
+        <TradeGradesTab selectedLeagueId={intelLeagueId} leagueName={intelLeagueName} />
+      )}
+
+      {activeTab === "Leaderboard" && (
+        <LeaderboardTab selectedLeagueId={intelLeagueId} />
+      )}
+
+      {activeTab === "Trade Log" && <>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 16, marginTop: 16 }}>
         <StatCard label="Win Rate" value={`${data.stats.win_rate.toFixed(1)}%`} sub={`${data.stats.wins}W / ${data.stats.losses}L / ${data.stats.pushes}P`} accent={data.stats.win_rate >= 55 ? "var(--green)" : data.stats.win_rate >= 45 ? "var(--amber)" : "var(--red)"} />
         <StatCard label="Total Trades" value={data.stats.total_trades} />
@@ -557,6 +624,7 @@ export default function TradeHistory() {
           </div>
         )}
       </div>
+      </>}
     </AppShell>
   );
 }
