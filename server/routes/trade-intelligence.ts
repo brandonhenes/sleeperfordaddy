@@ -64,9 +64,8 @@ async function getAssetsForTrades(
       WHERE dr.season = split_part(ta.asset_key, '_', 1)
         AND dr.round = split_part(ta.asset_key, '_', 2)::int
         AND dr.roster_id = COALESCE(dtp.current_owner_id, split_part(ta.asset_key, '_', 3)::int)
-        AND ta.asset_type = 'pick'
       LIMIT 1
-    ) ldr ON true
+    ) ldr ON ta.asset_type = 'pick'
     WHERE ta.trade_id IN (${tradeIdSql})
       AND ta.league_id IN (${leagueIdSql})
       AND ta.asset_type IN ('player', 'pick')
