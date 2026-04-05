@@ -106,11 +106,17 @@ function AssetRow({ asset }: { asset: TradeAssetWithPlayer }) {
         <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
           {assetLabel(asset)}
         </div>
-        {asset.team && (
+        {asset.asset_type === "pick" && asset.drafted_player_name ? (
+          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
+            {"-> "}
+            {asset.drafted_player_name}
+            {asset.drafted_position ? ` (${asset.drafted_position})` : ""}
+          </div>
+        ) : asset.team ? (
           <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
             {asset.team}
           </div>
-        )}
+        ) : null}
       </div>
 
       {position && (

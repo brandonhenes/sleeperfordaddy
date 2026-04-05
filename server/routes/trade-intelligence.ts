@@ -45,11 +45,19 @@ async function getAssetsForTrades(
       ta.asset_name,
       pm.full_name AS player_name,
       pm.position,
-      pm.team
+      pm.team,
+      ldr.player_name AS drafted_player_name,
+      ldr.position AS drafted_position
     FROM trade_assets ta
     LEFT JOIN players_master pm
       ON pm.player_id = ta.asset_key
      AND ta.asset_type = 'player'
+    LEFT JOIN league_draft_results ldr
+      ON ldr.league_id = ta.league_id
+     AND ta.asset_type = 'pick'
+     AND ldr.season = split_part(ta.asset_key, '_', 1)
+     AND ldr.round = split_part(ta.asset_key, '_', 2)::int
+     AND ldr.pick_in_round = split_part(ta.asset_key, '_', 3)::int
     WHERE ta.trade_id IN (${tradeIdSql})
       AND ta.league_id IN (${leagueIdSql})
       AND ta.asset_type IN ('player', 'pick')

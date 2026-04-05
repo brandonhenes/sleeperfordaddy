@@ -843,6 +843,8 @@ export interface TradeAssetWithPlayer {
   player_name: string | null;
   position: string | null;
   team: string | null;
+  drafted_player_name: string | null;
+  drafted_position: string | null;
 }
 
 export interface TradeIntelligenceRoster {
