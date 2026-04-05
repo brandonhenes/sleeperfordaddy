@@ -320,31 +320,23 @@ export default function TradeCard({
           }}
         >
           <div style={{ fontSize: 10, fontWeight: 800, color: "var(--text-muted)", letterSpacing: 0.6, textTransform: "uppercase" }}>
-            Value Summary
+            Current Value (FC)
           </div>
           <div style={{ marginTop: 8, display: "grid", gap: 6 }}>
             <div style={{ fontSize: 12, color: "var(--text-dim)" }}>
               Gave:{" "}
               <span className="font-mono" style={{ color: "var(--text)", fontWeight: 700 }}>
-                {formatPoints(outcome.value_gave_at_trade)}
-              </span>
-              {" -> "}
-              <span className="font-mono" style={{ color: metricColor(outcome.value_gave_current - outcome.value_gave_at_trade), fontWeight: 700 }}>
                 {formatPoints(outcome.value_gave_current)}
               </span>
             </div>
             <div style={{ fontSize: 12, color: "var(--text-dim)" }}>
               Received:{" "}
               <span className="font-mono" style={{ color: "var(--text)", fontWeight: 700 }}>
-                {formatPoints(outcome.value_received_at_trade)}
-              </span>
-              {" -> "}
-              <span className="font-mono" style={{ color: metricColor(outcome.value_received_current - outcome.value_received_at_trade), fontWeight: 700 }}>
                 {formatPoints(outcome.value_received_current)}
               </span>
             </div>
             <div style={{ fontSize: 13, fontWeight: 800, color: valueColor, marginTop: 2 }}>
-              Net: {formatSignedPercent(outcome.value_delta_pct)}
+              {formatSignedPercent(outcome.value_delta_pct)}
               {" "}
               <span style={{ fontWeight: 600, fontSize: 11 }}>
                 ({outcome.value_verdict === "won"

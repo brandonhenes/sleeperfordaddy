@@ -212,10 +212,13 @@ interface OwnerRosterInfoRow {
   team_name: string | null;
 }
 
+const DP_TO_FC_SCALE = 2.2;
+
 const fantasycalcIndex: ValueIndex = createValueIndex();
 const dynastyprocessIndex: ValueIndex = createValueIndex();
 const playerStatsMap = new Map<string, Map<number, PlayerStatRecord>>();
 const playerMetaMap = new Map<string, PlayerMeta>();
+const pickToPlayerMap = new Map<string, { sleeperId: string; playerName: string; position: string | null }>();
 
 let valuesLoaded = false;
 let loadPromise: Promise<void> | null = null;
@@ -347,6 +350,13 @@ function getLatestValue(
     if (byName != null) return byName;
   }
   return null;
+}
+
+function getFcCurrentValue(
+  sleeperId: string | null,
+  playerName: string | null
+): number | null {
+  return getLatestValue("fantasycalc", sleeperId, playerName);
 }
 
 function parseCounterpartyRosterIds(raw: string | null): number[] {
@@ -570,21 +580,15 @@ function determineValueSource(
     : "fantasycalc";
 }
 
-function computeValueVerdict(deltaPct: number | null): ValueVerdict {
-  if (deltaPct == null) return null;
-  if (deltaPct > 15) return "won";
-  if (deltaPct < -15) return "lost";
-  return "push";
-}
-
 function computeValueDelta(
   assets: TradeAssetRow[],
   tradeDate: Date,
   league: LeagueRow | null
 ): ValueDeltaResult {
   const dateStr = getDateString(tradeDate);
-  const source = determineValueSource(assets, tradeDate);
+  const atTradeSource = determineValueSource(assets, tradeDate);
   const scoringSettings = normalizeScoringSettings(league?.scoring_settings ?? null);
+  const leagueId = assets[0]?.league_id ?? "";
 
   let valueGaveAtTrade = 0;
   let valueReceivedAtTrade = 0;
@@ -601,13 +605,36 @@ function computeValueDelta(
 
     if (asset.asset_type === "pick") {
       const pickName = getPickName(asset.asset_key);
-      rawAtTrade = getValueAtDate(source, null, pickName, dateStr) ?? 0;
-      rawCurrent = getLatestValue(source, null, pickName) ?? 0;
+      rawAtTrade = getValueAtDate(atTradeSource, null, pickName, dateStr) ?? 0;
+      // Normalize DP at-trade values to FC scale
+      if (atTradeSource === "dynastyprocess") rawAtTrade *= DP_TO_FC_SCALE;
+
+      // Current value: resolve drafted pick to player FC value, else generic FC pick
+      const draftKey = `${leagueId}:${asset.asset_key}`;
+      const drafted = pickToPlayerMap.get(draftKey);
+      if (drafted) {
+        let playerMultiplier = 1;
+        if (league && Object.keys(scoringSettings).length > 0) {
+          const season = getRelevantStatsSeason(drafted.sleeperId, tradeDate);
+          const stats = getPlayerStats(drafted.sleeperId, season);
+          if (stats && drafted.position) {
+            playerMultiplier = getScoringMultiplier(stats, scoringSettings, drafted.position);
+            scoringAdjusted = true;
+          }
+        }
+        rawCurrent = (getFcCurrentValue(drafted.sleeperId, drafted.playerName) ?? 0) * playerMultiplier;
+      } else {
+        rawCurrent = getFcCurrentValue(null, pickName) ?? 0;
+      }
     } else {
       const meta = playerMetaMap.get(asset.asset_key);
       const assetName = meta?.full_name ?? asset.asset_name ?? asset.asset_key;
-      rawAtTrade = getValueAtDate(source, asset.asset_key, assetName, dateStr) ?? 0;
-      rawCurrent = getLatestValue(source, asset.asset_key, assetName) ?? 0;
+      rawAtTrade = getValueAtDate(atTradeSource, asset.asset_key, assetName, dateStr) ?? 0;
+      // Normalize DP at-trade values to FC scale
+      if (atTradeSource === "dynastyprocess") rawAtTrade *= DP_TO_FC_SCALE;
+
+      // Current value: ALWAYS FC
+      rawCurrent = getFcCurrentValue(asset.asset_key, assetName) ?? 0;
 
       if (league && Object.keys(scoringSettings).length > 0) {
         const season = getRelevantStatsSeason(asset.asset_key, tradeDate);
@@ -632,16 +659,21 @@ function computeValueDelta(
     }
   }
 
-  const netAtTrade = valueReceivedAtTrade - valueGaveAtTrade;
-  const netCurrent = valueReceivedCurrent - valueGaveCurrent;
-  const denominator = Math.max(valueGaveAtTrade, valueReceivedAtTrade, 1);
-
+  // Verdict: ratio of FC current values (same scale, apples to apples)
   let valueDeltaPct = 0;
   let valueVerdict: ValueVerdict = null;
 
-  if (!(valueGaveAtTrade === 0 && valueReceivedAtTrade === 0)) {
-    valueDeltaPct = clamp(((netCurrent - netAtTrade) / denominator) * 100, -200, 200);
-    valueVerdict = computeValueVerdict(valueDeltaPct);
+  if (valueReceivedCurrent > 0 || valueGaveCurrent > 0) {
+    const denominator = Math.max(valueReceivedCurrent, valueGaveCurrent, 1);
+    valueDeltaPct = clamp(
+      ((valueReceivedCurrent - valueGaveCurrent) / denominator) * 100,
+      -200,
+      200
+    );
+    const ratio = valueReceivedCurrent / Math.max(valueGaveCurrent, 1);
+    if (ratio > 1.15) valueVerdict = "won";
+    else if (ratio < 0.87) valueVerdict = "lost";
+    else valueVerdict = "push";
   }
 
   return {
@@ -651,7 +683,7 @@ function computeValueDelta(
     valueReceivedCurrent: round1(valueReceivedCurrent),
     valueDeltaPct: round1(valueDeltaPct),
     valueVerdict,
-    valueSource: source,
+    valueSource: atTradeSource,
     scoringAdjusted,
   };
 }
@@ -1284,8 +1316,9 @@ export async function loadAllValues(force = false): Promise<void> {
     clearValueIndex(dynastyprocessIndex);
     playerStatsMap.clear();
     playerMetaMap.clear();
+    pickToPlayerMap.clear();
 
-    const [fcRowsRaw, dpRowsRaw, playerRowsRaw, statsRowsRaw] = await Promise.all([
+    const [fcRowsRaw, dpRowsRaw, playerRowsRaw, statsRowsRaw, draftResultsRaw] = await Promise.all([
       db.execute(sql`
         SELECT
           snapshot_date::text AS snapshot_date,
@@ -1365,6 +1398,10 @@ export async function loadAllValues(force = false): Promise<void> {
           bonus_fd_qb
         FROM player_season_stats
       `),
+      db.execute(sql`
+        SELECT league_id, season, round, roster_id, player_id, player_name, position
+        FROM league_draft_results
+      `),
     ]);
 
     for (const row of playerRowsRaw as unknown as PlayerMeta[]) {
@@ -1412,6 +1449,23 @@ export async function loadAllValues(force = false): Promise<void> {
       ) as PlayerStatRecord;
       seasonMap.set(row.season, statRecord);
       playerStatsMap.set(row.player_id, seasonMap);
+    }
+
+    for (const row of draftResultsRaw as unknown as Array<{
+      league_id: string;
+      season: string;
+      round: number;
+      roster_id: number;
+      player_id: string;
+      player_name: string;
+      position: string | null;
+    }>) {
+      const key = `${row.league_id}:${row.season}_${row.round}_${row.roster_id}`;
+      pickToPlayerMap.set(key, {
+        sleeperId: row.player_id,
+        playerName: row.player_name,
+        position: row.position,
+      });
     }
 
     finalizeValueIndex(fantasycalcIndex);
