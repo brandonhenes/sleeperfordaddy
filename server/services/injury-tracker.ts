@@ -91,6 +91,63 @@ async function ensureFcAtInjuryPopulated(): Promise<void> {
 
 // ─── Main ───
 
+type DedupableInjuryRow = {
+  player_id: string;
+  injury_date: string | null;
+  estimated_healthy_date: string | null;
+  recovery_pace: string | null;
+  notes: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+function hasText(value: string | null | undefined): boolean {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function injuryCompleteness(row: DedupableInjuryRow): number {
+  return Number(row.estimated_healthy_date != null)
+    + Number(hasText(row.notes))
+    + Number(hasText(row.recovery_pace));
+}
+
+function toTimestamp(value: string | null | undefined): number {
+  if (!value) return Number.NEGATIVE_INFINITY;
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? Number.NEGATIVE_INFINITY : parsed;
+}
+
+function isPreferredInjuryRow(
+  candidate: DedupableInjuryRow,
+  current: DedupableInjuryRow
+): boolean {
+  const completenessDiff = injuryCompleteness(candidate) - injuryCompleteness(current);
+  if (completenessDiff !== 0) return completenessDiff > 0;
+
+  const updatedDiff = toTimestamp(candidate.updated_at) - toTimestamp(current.updated_at);
+  if (updatedDiff !== 0) return updatedDiff > 0;
+
+  const createdDiff = toTimestamp(candidate.created_at) - toTimestamp(current.created_at);
+  if (createdDiff !== 0) return createdDiff > 0;
+
+  return toTimestamp(candidate.injury_date) > toTimestamp(current.injury_date);
+}
+
+// The source feed can store both enriched timeline rows and later bare injury rows.
+function dedupeInjuryRows<T extends DedupableInjuryRow>(rows: T[]): T[] {
+  const bestByPlayerId = new Map<string, T>();
+
+  for (const row of rows) {
+    if (injuryCompleteness(row) === 0) continue;
+    const current = bestByPlayerId.get(row.player_id);
+    if (!current || isPreferredInjuryRow(row, current)) {
+      bestByPlayerId.set(row.player_id, row);
+    }
+  }
+
+  return [...bestByPlayerId.values()];
+}
+
 export async function getInjuredPlayers(
   userIdOrUsername: string
 ): Promise<InjuredPlayerView[]> {
@@ -111,6 +168,8 @@ export async function getInjuredPlayers(
       it.expected_return_weeks,
       it.notes,
       it.status,
+      it.created_at::text AS created_at,
+      it.updated_at::text AS updated_at,
       pm.player_id,
       pm.team AS current_team,
       COUNT(DISTINCT rp.league_id)::int AS league_count
@@ -120,13 +179,19 @@ export async function getInjuredPlayers(
      AND pm.position = it.position
     JOIN roster_players rp ON rp.player_id = pm.player_id
     JOIN user_leagues ul
-      ON ul.league_id = rp.league_id
+     ON ul.league_id = rp.league_id
      AND ul.user_id = ${userId}
     WHERE it.status = 'active'
+      AND (
+        it.estimated_healthy_date IS NOT NULL
+        OR NULLIF(BTRIM(COALESCE(it.notes, '')), '') IS NOT NULL
+        OR NULLIF(BTRIM(COALESCE(it.recovery_pace, '')), '') IS NOT NULL
+      )
     GROUP BY it.id, it.player_name, it.position, it.team, it.injury_type,
              it.injury_date, it.expected_return_date, it.estimated_healthy_date,
              it.return_label, it.avg_recovery_weeks, it.recovery_pace,
-             it.expected_return_weeks, it.notes, it.status, pm.player_id, pm.team
+             it.expected_return_weeks, it.notes, it.status, it.created_at, it.updated_at,
+             pm.player_id, pm.team
   `);
 
   type Row = {
@@ -143,11 +208,13 @@ export async function getInjuredPlayers(
     expected_return_weeks: number | null;
     notes: string | null;
     status: string;
+    created_at: string | null;
+    updated_at: string | null;
     player_id: string;
     current_team: string | null;
     league_count: number;
   };
-  const rawRows = rows as unknown as Row[];
+  const rawRows = dedupeInjuryRows(rows as unknown as Row[]);
   if (rawRows.length === 0) return [];
 
   const result: InjuredPlayerView[] = rawRows.map((r) => {
@@ -212,6 +279,8 @@ export async function getBuyingWindows(
       it.expected_return_weeks,
       it.notes,
       it.status,
+      it.created_at::text AS created_at,
+      it.updated_at::text AS updated_at,
       pm.player_id,
       fc.dynasty_value::int AS fc_current,
       it.fc_at_injury::int AS fc_at_injury,
@@ -231,6 +300,11 @@ export async function getBuyingWindows(
      AND fc.snapshot_date = (SELECT MAX(snapshot_date) FROM fantasycalc_daily)
     WHERE it.status = 'active'
       AND it.expected_return_weeks IS NOT NULL
+      AND (
+        it.estimated_healthy_date IS NOT NULL
+        OR NULLIF(BTRIM(COALESCE(it.notes, '')), '') IS NOT NULL
+        OR NULLIF(BTRIM(COALESCE(it.recovery_pace, '')), '') IS NOT NULL
+      )
     ORDER BY it.expected_return_weeks ASC
   `);
 
@@ -248,12 +322,14 @@ export async function getBuyingWindows(
     expected_return_weeks: number | null;
     notes: string | null;
     status: string;
+    created_at: string | null;
+    updated_at: string | null;
     player_id: string;
     fc_current: number | null;
     fc_at_injury: number | null;
     is_buying_window: boolean;
   };
-  const rawRows = rows as unknown as Row[];
+  const rawRows = dedupeInjuryRows(rows as unknown as Row[]);
   if (rawRows.length === 0) return [];
 
   const windows: BuyingWindow[] = [];
@@ -310,6 +386,8 @@ export async function getBuyingWindows(
       leagues_to_target: [],
     });
   }
+
+  windows.sort((a, b) => (a.player.expected_return_weeks ?? Number.POSITIVE_INFINITY) - (b.player.expected_return_weeks ?? Number.POSITIVE_INFINITY));
 
   return windows;
 }
