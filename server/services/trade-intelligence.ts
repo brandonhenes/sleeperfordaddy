@@ -105,6 +105,19 @@ interface TradeAssetRow {
   season: number;
 }
 
+interface PickResolutionAssetRow {
+  id: number;
+  league_id: string;
+  asset_key: string;
+}
+
+interface PickResolutionUpdate {
+  id: number;
+  sleeperId: string;
+  name: string;
+  position: string | null;
+}
+
 interface MatchupRow {
   league_id: string;
   season: number;
@@ -1329,6 +1342,7 @@ export async function clearTradeIntelligenceCache(): Promise<void> {
   clearValueIndex(dynastyprocessIndex);
   playerStatsMap.clear();
   playerMetaMap.clear();
+  pickToPlayerMap.clear();
   valuesLoaded = false;
   loadPromise = null;
 }
@@ -1587,10 +1601,91 @@ export async function loadAllValues(force = false): Promise<void> {
   }
 }
 
+async function flushResolutionBatch(batch: PickResolutionUpdate[]): Promise<void> {
+  for (const item of batch) {
+    await db.execute(sql`
+      UPDATE trade_assets
+      SET
+        resolved_player_id = ${item.sleeperId},
+        resolved_player_name = ${item.name},
+        resolved_position = ${item.position}
+      WHERE id = ${item.id}
+    `);
+  }
+}
+
+async function persistPickResolutions(leagueId?: string): Promise<void> {
+  console.log(
+    `[trade-intel] Persisting pick resolutions${leagueId ? ` for league ${leagueId}` : ""}...`
+  );
+
+  const pickAssetsRaw = leagueId
+    ? await db.execute(sql`
+        SELECT id, league_id, asset_key
+        FROM trade_assets
+        WHERE asset_type = 'pick'
+          AND league_id = ${leagueId}
+          AND (
+            resolved_player_id IS NULL
+            OR resolved_player_name IS NULL
+          )
+      `)
+    : await db.execute(sql`
+        SELECT id, league_id, asset_key
+        FROM trade_assets
+        WHERE asset_type = 'pick'
+          AND (
+            resolved_player_id IS NULL
+            OR resolved_player_name IS NULL
+          )
+      `);
+
+  const pickAssets = pickAssetsRaw as unknown as PickResolutionAssetRow[];
+  if (pickAssets.length === 0) {
+    return;
+  }
+
+  let updated = 0;
+  let resolved = 0;
+  const batch: PickResolutionUpdate[] = [];
+
+  for (const asset of pickAssets) {
+    const key = `${asset.league_id}:${asset.asset_key}`;
+    const drafted = pickToPlayerMap.get(key);
+    if (!drafted) {
+      continue;
+    }
+
+    batch.push({
+      id: asset.id,
+      sleeperId: drafted.sleeperId,
+      name: drafted.playerName,
+      position: drafted.position,
+    });
+    resolved += 1;
+
+    if (batch.length >= 500) {
+      await flushResolutionBatch(batch);
+      updated += batch.length;
+      batch.length = 0;
+    }
+  }
+
+  if (batch.length > 0) {
+    await flushResolutionBatch(batch);
+    updated += batch.length;
+  }
+
+  console.log(
+    `[trade-intel] Resolved ${resolved}/${pickAssets.length} pick assets. Updated ${updated} rows.`
+  );
+}
+
 export async function gradeLeagueTrades(
   leagueId: string
 ): Promise<{ graded: number; skipped: number }> {
   await loadAllValues();
+  await persistPickResolutions(leagueId);
 
   const leagueRows = await loadLeagueRows();
   const seasonContext = await loadTradeSeasonContext(leagueId, leagueRows);
@@ -1654,6 +1749,7 @@ export async function gradeAllTrades(
   options: { leagueId?: string } = {}
 ): Promise<{ graded: number; skipped: number; leagues: number }> {
   await loadAllValues();
+  await persistPickResolutions(options.leagueId);
 
   const leagueRows = await loadLeagueRows();
   const assetsRaw = options.leagueId
