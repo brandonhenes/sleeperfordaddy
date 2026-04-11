@@ -8,8 +8,20 @@ interface UserRow {
   user_id: string;
 }
 
+interface TradeIntelligenceChainRow {
+  root_id: string;
+  league_id: string;
+  name: string;
+  season: number;
+}
+
 function joinValues(values: Array<string | number>) {
   return sql.join(values.map((value) => sql`${value}`), sql`, `);
+}
+
+function cleanChainName(name: string) {
+  const cleaned = name.replace(/^\d+\s+/, "").trim();
+  return cleaned || name.trim();
 }
 
 async function getUserId(username: string): Promise<string | null> {
@@ -92,6 +104,71 @@ async function getRosterDisplayRows(leagueIds: string[]) {
 
   return rows;
 }
+
+router.get("/chains/:username", async (req, res) => {
+  try {
+    const username = req.params.username?.trim();
+    if (!username) {
+      return res.status(400).json({ message: "username is required" });
+    }
+
+    const userId = await getUserId(username);
+    if (!userId) {
+      return res.json([]);
+    }
+
+    const rows = await db.execute(sql`
+      SELECT
+        lc.root_id,
+        l.league_id,
+        l.name,
+        l.season::int AS season
+      FROM rosters r
+      JOIN league_chain lc
+        ON lc.league_id = r.league_id
+      JOIN leagues l
+        ON l.league_id = lc.league_id
+      WHERE r.owner_id = ${userId}
+      ORDER BY lc.root_id, l.season DESC
+    `);
+
+    const chains = new Map<
+      string,
+      {
+        root_id: string;
+        name: string;
+        seasons: Array<{ league_id: string; season: number }>;
+      }
+    >();
+
+    for (const row of rows as unknown as TradeIntelligenceChainRow[]) {
+      const current = chains.get(row.root_id) ?? {
+        root_id: row.root_id,
+        name: cleanChainName(row.name),
+        seasons: [],
+      };
+
+      current.seasons.push({
+        league_id: row.league_id,
+        season: row.season,
+      });
+
+      chains.set(row.root_id, current);
+    }
+
+    const response = Array.from(chains.values()).sort((left, right) => {
+      const seasonDiff =
+        (right.seasons[0]?.season ?? 0) - (left.seasons[0]?.season ?? 0);
+      if (seasonDiff !== 0) return seasonDiff;
+      return left.name.localeCompare(right.name);
+    });
+
+    res.json(response);
+  } catch (error) {
+    console.error("[trade-intelligence/chains] Error:", error);
+    res.status(500).json({ message: "Failed to fetch trade intelligence chains" });
+  }
+});
 
 router.get("/user/:username", async (req, res) => {
   try {

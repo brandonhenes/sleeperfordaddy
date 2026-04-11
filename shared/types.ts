@@ -854,6 +854,17 @@ export interface TradeIntelligenceRoster {
   display_name: string;
 }
 
+export interface TradeIntelligenceChainSeason {
+  league_id: string;
+  season: number;
+}
+
+export interface TradeIntelligenceChain {
+  root_id: string;
+  name: string;
+  seasons: TradeIntelligenceChainSeason[];
+}
+
 export interface OwnerProfile {
   league_id: string;
   roster_id: number;

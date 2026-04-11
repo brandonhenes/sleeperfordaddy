@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "wouter";
 import AppShell from "../components/AppShell";
 import EmptyState from "../components/EmptyState";
@@ -6,6 +6,7 @@ import FreshnessBar from "../components/FreshnessBar";
 import LeaderboardTab from "../components/LeaderboardTab";
 import TradeGradesTab from "../components/TradeGradesTab";
 import { useEnsureUser } from "../hooks/use-ensure-user";
+import { useTradeIntelligenceChains } from "../hooks/use-trade-intelligence";
 import { useTradeHistory } from "../hooks/use-trade-history";
 
 const mainTabs = ["Trade Grades", "Leaderboard"] as const;
@@ -21,16 +22,53 @@ export default function TradeHistory() {
   const { username } = useParams<{ username: string }>();
   const { phase, syncProgress, errorMsg, retry } = useEnsureUser(username);
   const { data, isLoading, error } = useTradeHistory(phase === "ready" ? username : undefined);
+  const chainsQuery = useTradeIntelligenceChains(
+    phase === "ready" ? username : undefined
+  );
   const [activeTab, setActiveTab] = useState<MainTab>("Trade Grades");
+  const [selectedChainId, setSelectedChainId] = useState("");
   const [intelLeagueId, setIntelLeagueId] = useState("");
 
-  const leagueOptions = useMemo(() => data?.stats.by_league ?? [], [data?.stats.by_league]);
+  const chains = useMemo(() => chainsQuery.data ?? [], [chainsQuery.data]);
+  const selectedChain = useMemo(
+    () => chains.find((chain) => chain.root_id === selectedChainId) ?? null,
+    [chains, selectedChainId]
+  );
+  const selectedSeason = useMemo(
+    () =>
+      selectedChain?.seasons.find((season) => season.league_id === intelLeagueId) ??
+      selectedChain?.seasons[0] ??
+      null,
+    [selectedChain, intelLeagueId]
+  );
+
+  useEffect(() => {
+    if (chains.length === 0) {
+      if (selectedChainId) setSelectedChainId("");
+      return;
+    }
+
+    if (!chains.some((chain) => chain.root_id === selectedChainId)) {
+      setSelectedChainId(chains[0].root_id);
+    }
+  }, [chains, selectedChainId]);
+
+  useEffect(() => {
+    if (!selectedChain) {
+      if (intelLeagueId) setIntelLeagueId("");
+      return;
+    }
+
+    if (!selectedChain.seasons.some((season) => season.league_id === intelLeagueId)) {
+      setIntelLeagueId(selectedChain.seasons[0]?.league_id ?? "");
+    }
+  }, [selectedChain, intelLeagueId]);
 
   const intelLeagueName = useMemo(() => {
-    if (!intelLeagueId) return "";
-    const match = leagueOptions.find((l) => l.league_id === intelLeagueId);
-    return match?.league_name ?? "";
-  }, [intelLeagueId, leagueOptions]);
+    if (!selectedChain) return "";
+    if (!selectedSeason) return selectedChain.name;
+    return `${selectedChain.name} (${selectedSeason.season})`;
+  }, [selectedChain, selectedSeason]);
 
   if (phase === "checking" || phase === "syncing") {
     return (
@@ -88,7 +126,7 @@ export default function TradeHistory() {
     );
   }
 
-  if (isLoading) {
+  if (isLoading || chainsQuery.isLoading) {
     return (
       <AppShell>
         <div style={{ padding: "28px 0 8px" }}>
@@ -101,14 +139,16 @@ export default function TradeHistory() {
     );
   }
 
-  if (error || !data) {
+  if (error || chainsQuery.error || !data) {
     return (
       <AppShell>
         <div style={{ padding: "28px 0 8px" }}>
           <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>Trade Execution Tracker</h1>
         </div>
         <div style={{ ...cardStyle, padding: "32px 24px", color: "var(--red)", fontSize: 14 }}>
-          {(error as Error)?.message ?? "Unable to load trade history."}
+          {(error as Error)?.message ??
+            (chainsQuery.error as Error)?.message ??
+            "Unable to load trade history."}
         </div>
       </AppShell>
     );
@@ -125,6 +165,21 @@ export default function TradeHistory() {
           <FreshnessBar />
         </div>
         <EmptyState title="No trades found for this user yet." />
+      </AppShell>
+    );
+  }
+
+  if (chains.length === 0) {
+    return (
+      <AppShell>
+        <div style={{ padding: "28px 0 8px" }}>
+          <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>Trade Execution Tracker</h1>
+          <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 4 }}>
+            Win rate and value tracking across all leagues
+          </p>
+          <FreshnessBar />
+        </div>
+        <EmptyState title="No league chains found for this user yet." />
       </AppShell>
     );
   }
@@ -161,25 +216,75 @@ export default function TradeHistory() {
         ))}
       </div>
 
-      <div style={{ marginBottom: 20 }}>
-        <select
-          value={intelLeagueId}
-          onChange={(event) => setIntelLeagueId(event.target.value)}
-          style={{
-            padding: "10px 12px",
-            background: "var(--dark-base)",
-            color: "var(--text)",
-            border: "1px solid var(--border)",
-            borderRadius: 8,
-            fontSize: 13,
-            fontFamily: "inherit",
-          }}
-        >
-          <option value="">Select League</option>
-          {leagueOptions.map((league) => (
-            <option key={league.league_id} value={league.league_id}>{league.league_name}</option>
-          ))}
-        </select>
+      <div
+        style={{
+          display: "grid",
+          gap: 12,
+          marginBottom: 20,
+          gridTemplateColumns: selectedChain
+            ? "minmax(240px, 1fr) 140px"
+            : "minmax(240px, 1fr)",
+        }}
+      >
+        <div>
+          <div style={{ color: "var(--text-muted)", fontSize: 11, fontWeight: 700, letterSpacing: 0.5, marginBottom: 6 }}>
+            LEAGUE
+          </div>
+          <select
+            value={selectedChainId}
+            onChange={(event) => {
+              const nextRootId = event.target.value;
+              const nextChain =
+                chains.find((chain) => chain.root_id === nextRootId) ?? null;
+              setSelectedChainId(nextRootId);
+              setIntelLeagueId(nextChain?.seasons[0]?.league_id ?? "");
+            }}
+            style={{
+              width: "100%",
+              padding: "10px 12px",
+              background: "var(--dark-base)",
+              color: "var(--text)",
+              border: "1px solid var(--border)",
+              borderRadius: 8,
+              fontSize: 13,
+              fontFamily: "inherit",
+            }}
+          >
+            {chains.map((chain) => (
+              <option key={chain.root_id} value={chain.root_id}>
+                {chain.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {selectedChain ? (
+          <div>
+            <div style={{ color: "var(--text-muted)", fontSize: 11, fontWeight: 700, letterSpacing: 0.5, marginBottom: 6 }}>
+              YEAR
+            </div>
+            <select
+              value={intelLeagueId}
+              onChange={(event) => setIntelLeagueId(event.target.value)}
+              style={{
+                width: "100%",
+                padding: "10px 12px",
+                background: "var(--dark-base)",
+                color: "var(--text)",
+                border: "1px solid var(--border)",
+                borderRadius: 8,
+                fontSize: 13,
+                fontFamily: "inherit",
+              }}
+            >
+              {selectedChain.seasons.map((season) => (
+                <option key={season.league_id} value={season.league_id}>
+                  {season.season}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : null}
       </div>
 
       {activeTab === "Trade Grades" && (
