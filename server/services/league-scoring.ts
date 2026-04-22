@@ -42,6 +42,7 @@ const THRESHOLDS: Array<{
 ];
 
 // Scoring keys that map 1:1 to a stat field and multiply by volume.
+// Every offensive-player key I've seen across 304 leagues is here.
 const DIRECT_KEYS = [
   // Passing
   "pass_yd", "pass_td", "pass_int", "pass_2pt", "pass_cmp", "pass_inc",
@@ -55,8 +56,10 @@ const DIRECT_KEYS = [
   "rec_40p", "rec_td_40p", "rec_td_50p",
   // Distance buckets (receptions caught in N-yard range)
   "rec_0_4", "rec_5_9", "rec_10_19", "rec_20_29", "rec_30_39",
-  // Turnovers
-  "fum", "fum_lost",
+  // Turnovers (offensive side — can recover own fumble, incl. in endzone)
+  "fum", "fum_lost", "fum_rec", "fum_rec_td", "fum_ret_yd",
+  // Return yards/TDs (applicable to WR/RB return specialists)
+  "kr_yd", "pr_yd", "kr_td", "pr_td",
 ] as const;
 
 // Position-gated reception bonuses (bonus per reception for specific positions)
