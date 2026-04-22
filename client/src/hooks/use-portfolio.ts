@@ -24,6 +24,16 @@ export interface PortfolioPlayer {
   disagreement_direction: "sell_signal" | "buy_signal" | "neutral" | null;
   action_needed: { type: "risk" | "dead_weight"; reason: string } | null;
   portfolio_value: number;
+  availability:
+    | "active"
+    | "injured_reserve"
+    | "pup"
+    | "practice_squad"
+    | "unsigned_fa"
+    | "retired_washed"
+    | "unknown";
+  team: string | null;
+  status: string | null;
 }
 
 export interface PortfolioStats {

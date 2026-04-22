@@ -4,6 +4,11 @@ import { getCompositeValues } from "./composite-values.js";
 import { getAgeCurveStatus } from "./age-curves.js";
 import { getDynastyLeagueIdsForUserLatestSeason } from "./dynasty-leagues.js";
 import { sourceWeightsKey, type SourceWeights } from "./edge-score.js";
+import {
+  getPlayerAvailability,
+  contributesToPortfolioValue,
+  type PlayerAvailability,
+} from "../../shared/player-availability.js";
 
 const PORTFOLIO_TTL_MS = 30_000;
 const portfolioCache = new Map<string, { data: PortfolioData | null; expires: number }>();
@@ -53,6 +58,11 @@ export interface PortfolioPlayer {
 
   // Portfolio weight
   portfolio_value: number;
+
+  // Availability — derived from Sleeper status + team + source coverage
+  availability: PlayerAvailability;
+  team: string | null;
+  status: string | null;
 }
 
 export interface PortfolioStats {
@@ -101,24 +111,41 @@ export async function getPortfolio(
   const idFrags = leagueIds.map((id) => sql`${id}`);
   const inClause = sql.join(idFrags, sql`, `);
   const rosterRows = await db.execute(sql`
-    SELECT rp.player_id, pm.full_name, pm.position, pm.age, rp.league_id
+    SELECT rp.player_id, pm.full_name, pm.position, pm.age, pm.team, pm.status, rp.league_id
     FROM roster_players rp
     JOIN players_master pm ON rp.player_id = pm.player_id
     WHERE rp.league_id IN (${inClause})
       AND rp.owner_id = ${userId}
       AND pm.position IN ('QB', 'RB', 'WR', 'TE')
   `);
-  type RR = { player_id: string; full_name: string; position: string; age: number | null; league_id: string };
+  type RR = {
+    player_id: string;
+    full_name: string;
+    position: string;
+    age: number | null;
+    team: string | null;
+    status: string | null;
+    league_id: string;
+  };
   const rows = rosterRows as unknown as RR[];
   if (rows.length === 0) return null;
 
   // Count leagues per player
   const leagueCountMap = new Map<string, number>();
-  const playerInfoMap = new Map<string, { full_name: string; position: string; age: number | null }>();
+  const playerInfoMap = new Map<
+    string,
+    { full_name: string; position: string; age: number | null; team: string | null; status: string | null }
+  >();
   for (const r of rows) {
     leagueCountMap.set(r.player_id, (leagueCountMap.get(r.player_id) ?? 0) + 1);
     if (!playerInfoMap.has(r.player_id)) {
-      playerInfoMap.set(r.player_id, { full_name: r.full_name, position: r.position, age: r.age });
+      playerInfoMap.set(r.player_id, {
+        full_name: r.full_name,
+        position: r.position,
+        age: r.age,
+        team: r.team,
+        status: r.status,
+      });
     }
   }
 
@@ -132,6 +159,11 @@ export async function getPortfolio(
     const comp = compMap.get(pid);
     const leaguesOwned = leagueCountMap.get(pid) ?? 0;
     const ac = getAgeCurveStatus(info.position, info.age);
+    const availability = getPlayerAvailability({
+      status: info.status,
+      team: info.team,
+      sources_available: comp?.sources_available ?? 0,
+    });
     const expertScores = [comp?.fc_score, comp?.dp_score].filter(
       (s): s is number => s != null,
     );
@@ -147,7 +179,9 @@ export async function getPortfolio(
       else disagreementDirection = "neutral";
     }
 
-    const portfolioValue = (comp?.edge_score ?? 0) * leaguesOwned;
+    const portfolioValue = contributesToPortfolioValue(availability)
+      ? (comp?.edge_score ?? 0) * leaguesOwned
+      : 0;
     let actionNeeded: { type: "risk" | "dead_weight"; reason: string } | null = null;
 
     const ageZone = ac.zone;
@@ -197,6 +231,9 @@ export async function getPortfolio(
       disagreement_direction: disagreementDirection,
       action_needed: actionNeeded,
       portfolio_value: portfolioValue,
+      availability,
+      team: info.team,
+      status: info.status,
     });
   }
 

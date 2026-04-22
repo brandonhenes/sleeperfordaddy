@@ -2,6 +2,7 @@ import { Link } from "wouter";
 import type { PortfolioPlayer } from "../hooks/use-portfolio";
 import { ExposureBar } from "./ui";
 import PlayerLink from "./ui/PlayerLink";
+import PlayerStatusBadge from "./ui/PlayerStatusBadge";
 import EdgeScoreBadge from "./EdgeScoreBadge";
 import { posColor } from "../lib/position-colors";
 
@@ -100,6 +101,7 @@ export default function ExposureTable({ players }: ExposureTableProps) {
               </span>
             )}
             <PlayerLink name={p.full_name} style={{ fontSize: 13 }} />
+            <PlayerStatusBadge availability={p.availability} />
           </div>
 
           <span style={{ color: posColor(p.position), fontWeight: 600, fontSize: 12 }}>{p.position}</span>
