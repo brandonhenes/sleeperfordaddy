@@ -143,13 +143,32 @@ export async function getSourceHealth(sources: string[]): Promise<Record<string,
   if (sources.length === 0) return {};
 
   const sourceList = sql.join(sources.map((s) => sql`${s}`), sql`, `);
-  const latest = await db.execute(sql`
-    SELECT DISTINCT ON (source)
-      source, started_at::text AS started_at, status, error_message, duration_ms
-    FROM sync_runs
-    WHERE source IN (${sourceList})
-    ORDER BY source, started_at DESC
-  `);
+  let latest: unknown;
+  try {
+    latest = await db.execute(sql`
+      SELECT DISTINCT ON (source)
+        source, started_at::text AS started_at, status, error_message, duration_ms
+      FROM sync_runs
+      WHERE source IN (${sourceList})
+      ORDER BY source, started_at DESC
+    `);
+  } catch (err) {
+    // sync_runs table missing (migration not applied) — fail soft so freshness
+    // endpoint still returns the legacy per-source timestamps.
+    console.warn("[sync-tracker] getSourceHealth skipped:", (err as Error).message);
+    const empty: Record<string, SourceHealth> = {};
+    for (const s of sources) {
+      empty[s] = {
+        source: s,
+        last_run_at: null,
+        last_status: null,
+        last_error: null,
+        last_duration_ms: null,
+        consecutive_failures: 0,
+      };
+    }
+    return empty;
+  }
   const latestRows = latest as unknown as {
     source: string;
     started_at: string;
