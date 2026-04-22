@@ -9,6 +9,8 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
+    "types": ["node"],
+    "ignoreDeprecations": "5.0",
     "outDir": "dist/server",
     "rootDir": ".",
     "baseUrl": ".",
