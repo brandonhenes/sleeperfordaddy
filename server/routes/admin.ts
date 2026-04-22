@@ -17,6 +17,7 @@ import { backfillPlayerAliases } from "../services/player-resolver.js";
 import { matchFcSleeperIds } from "../services/sync-fc-match.js";
 import { runTrackedSync, getSourceHealth } from "../services/sync-tracker.js";
 import { bustAllCaches } from "../services/cache-bus.js";
+import { forceSyncPlayers } from "../services/sync-players.js";
 
 import { db } from "../db/connection.js";
 import { sql } from "drizzle-orm";
@@ -240,6 +241,13 @@ router.post("/api/admin/backfill-player-aliases", async (_req, res) => {
     ok: result.status === "success",
     ...result,
   });
+});
+
+/** POST /api/admin/sync-players — Force resync of player universe from Sleeper (team/status/injury) */
+router.post("/api/admin/sync-players", async (_req, res) => {
+  const result = await runTrackedSync("sleeper-players", () => forceSyncPlayers());
+  if (result.status === "success") await bustAllCaches();
+  res.status(result.status === "failed" ? 500 : 200).json(result);
 });
 
 /** POST /api/admin/snapshot-scores — Snapshot Edge Scores for history tracking */
