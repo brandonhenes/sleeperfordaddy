@@ -1,4 +1,5 @@
 import type { AgeCurveStatus } from "./age-curves.js";
+import type { PlayerAvailability } from "../../shared/player-availability.js";
 
 // ─── Types ───
 
@@ -17,6 +18,9 @@ export interface PlayerForSlot {
   dp_score: number | null;
   sources_available: number;
   source_agreement: "high" | "medium" | "low";
+  team?: string | null;
+  status?: string | null;
+  availability?: PlayerAvailability;
 }
 
 export interface SlottedPlayer extends PlayerForSlot {

@@ -31,6 +31,16 @@ export interface CoreAsset {
   ppg?: number | null;
   sources_available: number;
   source_agreement: "high" | "medium" | "low";
+  team: string | null;
+  status: string | null;
+  availability:
+    | "active"
+    | "injured_reserve"
+    | "pup"
+    | "practice_squad"
+    | "unsigned_fa"
+    | "retired_washed"
+    | "unknown";
 }
 
 export interface SlottedPlayer extends CoreAsset {

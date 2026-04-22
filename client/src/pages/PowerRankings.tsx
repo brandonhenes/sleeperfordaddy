@@ -7,6 +7,7 @@ import { StatCard } from "../components/ui";
 import { PlayerLink } from "../components/ui";
 import SourceBadge from "../components/SourceBadge";
 import EdgeScoreBadge from "../components/EdgeScoreBadge";
+import PlayerStatusBadge from "../components/ui/PlayerStatusBadge";
 import { posColor } from "../lib/position-colors";
 import FreshnessBar from "../components/FreshnessBar";
 import ShareButton from "../components/ShareButton";
@@ -146,6 +147,7 @@ function PlayerRow({ p, slotLabel, showRedraft }: { p: SlottedPlayer | CoreAsset
         {label}
       </span>
       <PlayerLink name={p.full_name} style={{ flex: 1, fontWeight: 500, fontSize: 12 }} />
+      <PlayerStatusBadge availability={p.availability} />
       <EdgeScoreBadge score={p.edge_score} size="sm" />
       <SourceBadge
         fc_score={p.fc_score} ktc_score={p.ktc_score} dp_score={p.dp_score}
@@ -202,6 +204,7 @@ function ExpandedRosterView({ roster, showRedraft }: { roster: RosterRanking; sh
               {p.slot}
             </span>
             <PlayerLink name={p.full_name} style={{ flex: 1, fontWeight: 500, fontSize: 12 }} />
+            <PlayerStatusBadge availability={p.availability} />
             <EdgeScoreBadge score={p.edge_score} size="sm" />
             <SourceBadge
               fc_score={p.fc_score} ktc_score={p.ktc_score} dp_score={p.dp_score}
