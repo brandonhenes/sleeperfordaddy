@@ -9,21 +9,32 @@ import { snapshotEdgeScores } from "../services/snapshot-scores.js";
 import { syncKtcRedraftValues } from "../services/sync-ktc-redraft.js";
 import { syncFpRedraftValues } from "../services/sync-fp-redraft.js";
 import { syncSleeperStats } from "../services/sync-sleeper-stats.js";
-import { clearGlobalScaleCache } from "../services/composite-values.js";
-import { clearPowerRankingsCache } from "../services/power-rankings.js";
 import {
   backfillFantasyCalcSleeperIds,
   backfillKtcSleeperIds,
 } from "../services/source-coverage-backfill.js";
 import { backfillPlayerAliases } from "../services/player-resolver.js";
 import { matchFcSleeperIds } from "../services/sync-fc-match.js";
+import { runTrackedSync, getSourceHealth } from "../services/sync-tracker.js";
+import { bustAllCaches } from "../services/cache-bus.js";
 
 import { db } from "../db/connection.js";
 import { sql } from "drizzle-orm";
 
 const router = Router();
 
-/** GET /api/meta/freshness — per-source last-sync timestamps */
+const STALE_HOURS: Record<string, number> = {
+  fantasycalc: 48,
+  ktc: 36,
+  dynastyprocess: 36,
+};
+
+function isStale(lastSynced: string | null, hours: number): boolean {
+  if (!lastSynced) return true;
+  return Date.now() - new Date(lastSynced).getTime() > hours * 3600 * 1000;
+}
+
+/** GET /api/meta/freshness — per-source last-sync timestamps + run health */
 router.get("/api/meta/freshness", async (_req, res) => {
   try {
     const [[fc], [ktc], [dp]] = await Promise.all([
@@ -35,10 +46,42 @@ router.get("/api/meta/freshness", async (_req, res) => {
       [{ last_synced: string | null; player_count: number }],
       [{ last_synced: string | null; player_count: number }],
     ];
+
+    const health = await getSourceHealth(["ktc", "fp-elite", "dynastyprocess", "fc-redraft", "crosswalk"]);
+
+    const sources = {
+      fantasycalc: {
+        last_synced: fc.last_synced,
+        player_count: fc.player_count,
+        stale: isStale(fc.last_synced, STALE_HOURS.fantasycalc),
+        last_run: null,
+      },
+      ktc: {
+        last_synced: ktc.last_synced,
+        player_count: ktc.player_count,
+        stale: isStale(ktc.last_synced, STALE_HOURS.ktc),
+        last_run: health.ktc ?? null,
+      },
+      dynastyprocess: {
+        last_synced: dp.last_synced,
+        player_count: dp.player_count,
+        stale: isStale(dp.last_synced, STALE_HOURS.dynastyprocess),
+        last_run: health.dynastyprocess ?? null,
+      },
+    };
+
+    const issues: string[] = [];
+    for (const [name, src] of Object.entries(sources)) {
+      if (src.stale) issues.push(`${name}: stale (last ${src.last_synced ?? "never"})`);
+      if (src.last_run?.last_status === "failed") {
+        issues.push(`${name}: last sync failed (${src.last_run.consecutive_failures} consecutive)`);
+      }
+    }
+
     res.json({
-      fantasycalc: { last_synced: fc.last_synced, player_count: fc.player_count },
-      ktc: { last_synced: ktc.last_synced, player_count: ktc.player_count },
-      dynastyprocess: { last_synced: dp.last_synced, player_count: dp.player_count },
+      ...sources,
+      healthy: issues.length === 0,
+      issues,
     });
   } catch (err) {
     console.error("[meta/freshness] Error:", err);
@@ -63,24 +106,16 @@ router.post("/api/admin/recompute-tags", async (req, res) => {
 
 /** POST /api/admin/sync-crosswalk */
 router.post("/api/admin/sync-crosswalk", async (_req, res) => {
-  try {
-    const stats = await syncPlayerIdCrosswalk();
-    res.json(stats);
-  } catch (err) {
-    console.error("[admin/sync-crosswalk] Error:", err);
-    res.status(500).json({ message: (err as Error).message ?? "Internal server error" });
-  }
+  const result = await runTrackedSync("crosswalk", () => syncPlayerIdCrosswalk());
+  if (result.status === "success") await bustAllCaches();
+  res.status(result.status === "failed" ? 500 : 200).json(result);
 });
 
 /** POST /api/admin/match-fc */
 router.post("/api/admin/match-fc", async (_req, res) => {
-  try {
-    const stats = await matchFcSleeperIds();
-    res.json(stats);
-  } catch (err) {
-    console.error("[admin] FC match error:", err);
-    res.status(500).json({ message: "FC match failed", error: String(err) });
-  }
+  const result = await runTrackedSync("fc-match", () => matchFcSleeperIds());
+  if (result.status === "success") await bustAllCaches();
+  res.status(result.status === "failed" ? 500 : 200).json(result);
 });
 
 router.get("/api/admin/roster-health/:leagueId", async (req, res) => {
@@ -113,133 +148,132 @@ router.get("/api/admin/roster-health/:leagueId", async (req, res) => {
 
 /** POST /api/admin/sync-ktc */
 router.post("/api/admin/sync-ktc", async (_req, res) => {
-  try {
-    const stats = await syncKtcValues();
-    res.json(stats);
-  } catch (err) {
-    console.error("[admin/sync-ktc] Error:", err);
-    res.status(500).json({ message: (err as Error).message ?? "Internal server error" });
-  }
+  const result = await runTrackedSync("ktc", () => syncKtcValues());
+  if (result.status === "success") await bustAllCaches();
+  res.status(result.status === "failed" ? 500 : 200).json(result);
 });
 
 /** POST /api/admin/sync-fp-elite — FP-Elite rankings (replaces DP) */
 router.post("/api/admin/sync-fp-elite", async (_req, res) => {
-  try {
-    const stats = await syncFpEliteValues();
-    res.json(stats);
-  } catch (err) {
-    console.error("[admin/sync-fp-elite] Error:", err);
-    res.status(500).json({ message: (err as Error).message ?? "Internal server error" });
-  }
+  const result = await runTrackedSync("fp-elite", () => syncFpEliteValues());
+  if (result.status === "success") await bustAllCaches();
+  res.status(result.status === "failed" ? 500 : 200).json(result);
 });
 
 /** POST /api/admin/sync-ktc-redraft */
 router.post("/api/admin/sync-ktc-redraft", async (_req, res) => {
-  try {
-    const stats = await syncKtcRedraftValues();
-    clearGlobalScaleCache();
-    clearPowerRankingsCache();
-    res.json(stats);
-  } catch (err) {
-    console.error("[admin/sync-ktc-redraft] Error:", err);
-    res.status(500).json({ message: (err as Error).message ?? "Internal server error" });
-  }
+  const result = await runTrackedSync("ktc-redraft", () => syncKtcRedraftValues());
+  if (result.status === "success") await bustAllCaches();
+  res.status(result.status === "failed" ? 500 : 200).json(result);
 });
 
 /** POST /api/admin/sync-fp-redraft */
 router.post("/api/admin/sync-fp-redraft", async (_req, res) => {
-  try {
-    const stats = await syncFpRedraftValues();
-    clearGlobalScaleCache();
-    clearPowerRankingsCache();
-    res.json(stats);
-  } catch (err) {
-    console.error("[admin/sync-fp-redraft] Error:", err);
-    res.status(500).json({ message: (err as Error).message ?? "Internal server error" });
-  }
+  const result = await runTrackedSync("fp-redraft", () => syncFpRedraftValues());
+  if (result.status === "success") await bustAllCaches();
+  res.status(result.status === "failed" ? 500 : 200).json(result);
 });
 
 /** POST /api/admin/sync-sleeper-stats */
 router.post("/api/admin/sync-sleeper-stats", async (req, res) => {
-  try {
-    const season = Number(req.query.season ?? 2025);
-    const stats = await syncSleeperStats(season);
-    clearGlobalScaleCache();
-    clearPowerRankingsCache();
-    res.json(stats);
-  } catch (err) {
-    console.error("[admin/sync-sleeper-stats] Error:", err);
-    res.status(500).json({ message: (err as Error).message ?? "Internal server error" });
-  }
+  const season = Number(req.query.season ?? 2025);
+  const result = await runTrackedSync("sleeper-stats", () => syncSleeperStats(season));
+  if (result.status === "success") await bustAllCaches();
+  res.status(result.status === "failed" ? 500 : 200).json(result);
 });
 
 /** POST /api/admin/sync-dynastyprocess — Legacy DP sync (fallback) */
 router.post("/api/admin/sync-dynastyprocess", async (_req, res) => {
-  try {
-    const stats = await syncDynastyProcessValues();
-    res.json(stats);
-  } catch (err) {
-    console.error("[admin/sync-dynastyprocess] Error:", err);
-    res.status(500).json({ message: (err as Error).message ?? "Internal server error" });
-  }
+  const result = await runTrackedSync("dynastyprocess", () => syncDynastyProcessValues());
+  if (result.status === "success") await bustAllCaches();
+  res.status(result.status === "failed" ? 500 : 200).json(result);
 });
 
 /** POST /api/admin/sync-fc-redraft */
 router.post("/api/admin/sync-fc-redraft", async (_req, res) => {
-  try {
-    const stats = await syncFcRedraftValues();
-    res.json(stats);
-  } catch (err) {
-    console.error("[admin/sync-fc-redraft] Error:", err);
-    res.status(500).json({ message: (err as Error).message ?? "Internal server error" });
-  }
+  const result = await runTrackedSync("fc-redraft", () => syncFcRedraftValues());
+  if (result.status === "success") await bustAllCaches();
+  res.status(result.status === "failed" ? 500 : 200).json(result);
 });
 
-/** POST /api/admin/sync-values — Run all three syncs in sequence */
+/** POST /api/admin/sync-values — Run all syncs in sequence, partial failures OK */
 router.post("/api/admin/sync-values", async (_req, res) => {
-  try {
-    const crosswalk = await syncPlayerIdCrosswalk();
-    const ktc = await syncKtcValues();
-    const fp = await syncFpEliteValues();
-    const fcBackfill = await backfillFantasyCalcSleeperIds();
-    const ktcBackfill = await backfillKtcSleeperIds();
-    res.json({ crosswalk, ktc, fp, fcBackfill, ktcBackfill });
-  } catch (err) {
-    console.error("[admin/sync-values] Error:", err);
-    res.status(500).json({ message: (err as Error).message ?? "Internal server error" });
-  }
+  const crosswalk = await runTrackedSync("crosswalk", () => syncPlayerIdCrosswalk());
+  const ktc = await runTrackedSync("ktc", () => syncKtcValues());
+  const fp = await runTrackedSync("fp-elite", () => syncFpEliteValues());
+  const fcBackfill = await runTrackedSync("backfill-fc", () => backfillFantasyCalcSleeperIds());
+  const ktcBackfill = await runTrackedSync("backfill-ktc", () => backfillKtcSleeperIds());
+
+  const results = { crosswalk, ktc, fp, fcBackfill, ktcBackfill };
+  const failures = Object.entries(results)
+    .filter(([, r]) => r.status === "failed")
+    .map(([k]) => k);
+  const succeeded = Object.values(results).filter((r) => r.status === "success").length;
+
+  if (succeeded > 0) await bustAllCaches();
+
+  res.json({
+    ...results,
+    summary: {
+      total: 5,
+      succeeded,
+      failed: failures.length,
+      failed_sources: failures,
+    },
+  });
 });
 
-/** POST /api/admin/backfill-fc-ids â€” one-time source coverage backfill */
+/** POST /api/admin/backfill-fc-ids â€" one-time source coverage backfill */
 router.post("/api/admin/backfill-fc-ids", async (_req, res) => {
-  try {
-    const fc = await backfillFantasyCalcSleeperIds();
-    const ktc = await backfillKtcSleeperIds();
-    res.json({ ok: true, fc, ktc });
-  } catch (err) {
-    console.error("[admin/backfill-fc-ids] Error:", err);
-    res.status(500).json({ message: (err as Error).message ?? "Backfill failed" });
-  }
+  const fc = await runTrackedSync("backfill-fc", () => backfillFantasyCalcSleeperIds());
+  const ktc = await runTrackedSync("backfill-ktc", () => backfillKtcSleeperIds());
+  const allOk = fc.status === "success" && ktc.status === "success";
+  if (fc.status === "success" || ktc.status === "success") await bustAllCaches();
+  res.status(allOk ? 200 : 500).json({ ok: allOk, fc, ktc });
 });
 
 /** POST /api/admin/backfill-player-aliases */
 router.post("/api/admin/backfill-player-aliases", async (_req, res) => {
-  try {
-    const stats = await backfillPlayerAliases();
-    res.json({ ok: true, ...stats });
-  } catch (err) {
-    console.error("[admin/backfill-player-aliases] Error:", err);
-    res.status(500).json({ message: (err as Error).message ?? "Alias backfill failed" });
-  }
+  const result = await runTrackedSync("backfill-aliases", () => backfillPlayerAliases());
+  if (result.status === "success") await bustAllCaches();
+  res.status(result.status === "failed" ? 500 : 200).json({
+    ok: result.status === "success",
+    ...result,
+  });
 });
 
 /** POST /api/admin/snapshot-scores — Snapshot Edge Scores for history tracking */
 router.post("/api/admin/snapshot-scores", async (_req, res) => {
+  const result = await runTrackedSync("snapshot-scores", () => snapshotEdgeScores());
+  res.status(result.status === "failed" ? 500 : 200).json(result);
+});
+
+/** GET /api/admin/sync-runs — recent run history */
+router.get("/api/admin/sync-runs", async (req, res) => {
   try {
-    const stats = await snapshotEdgeScores();
-    res.json(stats);
+    const limit = Math.min(parseInt(String(req.query.limit ?? "50"), 10) || 50, 500);
+    const source = req.query.source ? String(req.query.source) : null;
+    const rows = await db.execute(
+      source
+        ? sql`
+          SELECT id, source, started_at::text, finished_at::text, status,
+                 rows_processed, error_message, attempt, duration_ms, stats
+          FROM sync_runs
+          WHERE source = ${source}
+          ORDER BY started_at DESC
+          LIMIT ${limit}
+        `
+        : sql`
+          SELECT id, source, started_at::text, finished_at::text, status,
+                 rows_processed, error_message, attempt, duration_ms, stats
+          FROM sync_runs
+          ORDER BY started_at DESC
+          LIMIT ${limit}
+        `
+    );
+    res.json({ runs: rows });
   } catch (err) {
-    console.error("[admin/snapshot-scores] Error:", err);
+    console.error("[admin/sync-runs] Error:", err);
     res.status(500).json({ message: (err as Error).message ?? "Internal server error" });
   }
 });

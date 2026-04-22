@@ -625,3 +625,25 @@ export const prospectProfiles = pgTable("prospect_profiles", {
   disagreementFlag: text("disagreement_flag"),
 });
 
+// ─── Pipeline Reliability ───
+
+export const sync_runs = pgTable(
+  "sync_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    source: text("source").notNull(),
+    started_at: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    finished_at: timestamp("finished_at", { withTimezone: true }),
+    status: text("status").notNull().default("running"),
+    rows_processed: integer("rows_processed"),
+    error_message: text("error_message"),
+    stats: jsonb("stats"),
+    attempt: integer("attempt").notNull().default(1),
+    duration_ms: integer("duration_ms"),
+  },
+  (table) => [
+    index("idx_sync_runs_source_started").on(table.source, table.started_at),
+    index("idx_sync_runs_status").on(table.status),
+  ]
+);
+

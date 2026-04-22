@@ -7,7 +7,6 @@ import { getLeagueRosters } from "../sleeper/rosters.js";
 import { getLeagueMatchups } from "../sleeper/matchups.js";
 import { getLeagueTransactions } from "../sleeper/transactions.js";
 import { getNflState, getAllPlayers } from "../sleeper/players.js";
-import { clearSleeperCache } from "../sleeper/client.js";
 import { getDraftPicks, getLeagueDrafts, getTradedPicks } from "../sleeper/drafts.js";
 import { db } from "../db/connection.js";
 import {
@@ -35,14 +34,8 @@ import { syncNflDraftHistory } from "./sync-nfl-draft.js";
 import { syncLeagueDraftResults } from "./sync-league-drafts.js";
 import { captureDraftBoardSnapshot } from "./sync-draft-board-snapshot.js";
 import { syncProspectEnrichment, generateScoutingReports } from "./sync-prospect-enrichment.js";
-import { clearDynastyLeagueCache, isDynastyLeagueFromSleeperSettings } from "./dynasty-leagues.js";
-import { clearPowerRankingsCache } from "./power-rankings.js";
-import { clearGlobalScaleCache } from "./composite-values.js";
-import { clearOverviewCache } from "./overview.js";
-import { clearDashboardCache } from "./dashboard.js";
-import { clearPortfolioCache } from "./portfolio.js";
-import { clearActionCache } from "./action.js";
-import { clearArbitrageCache } from "./arbitrage.js";
+import { isDynastyLeagueFromSleeperSettings } from "./dynasty-leagues.js";
+import { bustAllCaches } from "./cache-bus.js";
 import { backfillLeagueMatchups } from "./matchup-backfill.js";
 import { gradeLeagueTrades } from "./trade-intelligence.js";
 import type {
@@ -249,15 +242,7 @@ async function runSync(
   );
 
   if (scope === "latest" || leagueId) {
-    clearSleeperCache();
-    clearDynastyLeagueCache(sleeperUser.user_id);
-    clearGlobalScaleCache();
-    clearPowerRankingsCache(username);
-    clearOverviewCache(username);
-    clearDashboardCache(username);
-    clearPortfolioCache(username);
-    clearActionCache(username);
-    clearArbitrageCache(username);
+    await bustAllCaches({ username, userId: sleeperUser.user_id });
 
     await updateSyncJob(jobId, {
       status: "completed",
@@ -394,15 +379,7 @@ async function runSync(
     console.error("[sync] Error generating scouting reports:", err);
   }
 
-  clearSleeperCache();
-  clearDynastyLeagueCache(sleeperUser.user_id);
-  clearGlobalScaleCache();
-  clearPowerRankingsCache(username);
-  clearOverviewCache(username);
-  clearDashboardCache(username);
-  clearPortfolioCache(username);
-  clearActionCache(username);
-  clearArbitrageCache(username);
+  await bustAllCaches({ username, userId: sleeperUser.user_id });
 
   // Step 12: Done
   await updateSyncJob(jobId, {

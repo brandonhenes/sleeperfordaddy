@@ -1,6 +1,6 @@
 ﻿import { db } from "../db/connection.js";
 import { sql } from "drizzle-orm";
-import { computeEdgeScores, type SourceWeights } from "./edge-score.js";
+import { computeEdgeScores, sourceWeightsKey, type SourceWeights } from "./edge-score.js";
 
 // ─── Types ───
 
@@ -45,6 +45,27 @@ export function clearGlobalScaleCache() {
   globalScaleInFlight.clear();
 }
 
+// ─── Composite Universe Cache ───
+// Caches composite values for the full QB/RB/WR/TE universe, keyed by
+// (mode, valueType, weightsKey). Every getCompositeValues call is a slice.
+
+const COMPOSITE_TTL_MS = 10 * 60 * 1000;
+type UniverseKey = string; // `${mode}:${valueType}:${weightsKey}`
+const universeCache = new Map<
+  UniverseKey,
+  { value: Map<string, CompositeValue>; expires: number }
+>();
+const universeInFlight = new Map<UniverseKey, Promise<Map<string, CompositeValue>>>();
+
+function buildUniverseKey(mode: "sf" | "1qb", valueType: ValueType, weights?: SourceWeights): UniverseKey {
+  return `${mode}:${valueType}:${sourceWeightsKey(weights)}`;
+}
+
+export function clearCompositeCache() {
+  universeCache.clear();
+  universeInFlight.clear();
+}
+
 // ─── Helpers ───
 
 function computeAgreement(scores: number[]): "high" | "medium" | "low" {
@@ -52,11 +73,6 @@ function computeAgreement(scores: number[]): "high" | "medium" | "low" {
   const spread = Math.max(...scores) - Math.min(...scores);
   if (spread < 5) return "high";
   if (spread <= 12) return "medium";
-  return "low";
-}
-
-function normalizeAgreement(value: string | null | undefined): "high" | "medium" | "low" {
-  if (value === "high" || value === "medium" || value === "low") return value;
   return "low";
 }
 
@@ -164,100 +180,6 @@ export async function getGlobalScaleParams(
     return await work;
   } finally {
     globalScaleInFlight.delete(cacheKey);
-  }
-}
-
-async function getSnapshotAsOfDate(): Promise<string | null> {
-  try {
-    const ready = await db.execute(sql`
-      SELECT as_of_date::text AS as_of_date
-      FROM score_snapshot_meta
-      WHERE status = 'ready'
-      ORDER BY updated_at DESC
-      LIMIT 1
-    `);
-    const asOf = (ready as unknown as { as_of_date: string }[])[0]?.as_of_date;
-    return asOf ?? null;
-  } catch {
-    return null;
-  }
-}
-
-async function readFromDailySnapshot(
-  playerIds: string[],
-  mode: "sf" | "1qb"
-): Promise<Map<string, CompositeValue> | null> {
-  const asOfDate = await getSnapshotAsOfDate();
-  if (!asOfDate || playerIds.length === 0) return null;
-  const globalScale = await getGlobalScaleParams(mode);
-  const dpUsable = isDpScaleUsable(globalScale.dp);
-
-  try {
-    const idFragments = playerIds.map((id) => sql`${id}`);
-    const inClause = sql.join(idFragments, sql`, `);
-
-    const rows = await db.execute(sql`
-      SELECT
-        player_id AS sleeper_id,
-        fc_value,
-        ktc_value,
-        dp_value,
-        ROUND(edge_score::numeric, 1)::real AS edge_score,
-        ROUND(fc_score::numeric, 1)::real AS fc_score,
-        ROUND(ktc_score::numeric, 1)::real AS ktc_score,
-        ROUND(dp_score::numeric, 1)::real AS dp_score,
-        sources_used::int AS sources_used,
-        source_agreement
-      FROM player_scores_daily
-      WHERE as_of_date = ${asOfDate}::date
-        AND mode = ${mode}
-        AND player_id IN (${inClause})
-    `);
-
-    type SnapshotRow = {
-      sleeper_id: string;
-      fc_value: number | null;
-      ktc_value: number | null;
-      dp_value: number | null;
-      edge_score: number | null;
-      fc_score: number | null;
-      ktc_score: number | null;
-      dp_score: number | null;
-      sources_used: number | null;
-      source_agreement: string | null;
-    };
-    const snapshotRows = rows as unknown as SnapshotRow[];
-    if (snapshotRows.length === 0) return new Map();
-
-    const out = new Map<string, CompositeValue>();
-    for (const r of snapshotRows) {
-      const fcScore = r.fc_score;
-      const ktcScore = r.ktc_score;
-      const dpScore = dpUsable ? r.dp_score : null;
-      const srcScores = [fcScore, ktcScore, dpScore].filter(
-        (s): s is number => s != null
-      );
-      const edgeScore = srcScores.length > 0
-        ? Math.round((srcScores.reduce((sum, score) => sum + score, 0) / srcScores.length) * 10) / 10
-        : 0;
-
-      out.set(r.sleeper_id, {
-        sleeper_id: r.sleeper_id,
-        fc_value: r.fc_value,
-        ktc_value: r.ktc_value,
-        dp_value: dpUsable ? r.dp_value : null,
-        edge_score: edgeScore,
-        fc_score: fcScore,
-        ktc_score: ktcScore,
-        dp_score: dpScore,
-        sources_available: srcScores.length,
-        source_agreement: normalizeAgreement(computeAgreement(srcScores)),
-      });
-    }
-
-    return out;
-  } catch {
-    return null;
   }
 }
 
@@ -378,6 +300,38 @@ async function computeCompositeRuntime(
   return result;
 }
 
+async function loadCompositeUniverse(
+  mode: "sf" | "1qb",
+  valueType: ValueType,
+  weights?: SourceWeights
+): Promise<Map<string, CompositeValue>> {
+  const key = buildUniverseKey(mode, valueType, weights);
+  const now = Date.now();
+  const hit = universeCache.get(key);
+  if (hit && hit.expires > now) return hit.value;
+
+  const pending = universeInFlight.get(key);
+  if (pending) return pending;
+
+  const work = (async () => {
+    const rows = await db.execute(sql`
+      SELECT player_id FROM players_master
+      WHERE position IN ('QB', 'RB', 'WR', 'TE')
+    `);
+    const allIds = (rows as unknown as { player_id: string }[]).map((r) => r.player_id);
+    const universe = await computeCompositeRuntime(allIds, mode, valueType, weights);
+    universeCache.set(key, { value: universe, expires: Date.now() + COMPOSITE_TTL_MS });
+    return universe;
+  })();
+
+  universeInFlight.set(key, work);
+  try {
+    return await work;
+  } finally {
+    universeInFlight.delete(key);
+  }
+}
+
 // ─── Main ───
 
 export async function getCompositeValues(
@@ -390,21 +344,21 @@ export async function getCompositeValues(
   const valueType = typeof valueTypeOrWeights === "string" ? valueTypeOrWeights : "dynasty";
   const weights = typeof valueTypeOrWeights === "string" ? maybeWeights : valueTypeOrWeights;
 
-  // Always compute fresh until a new snapshot is generated with full source coverage.
-  // The player_scores_daily snapshot was written before the FC/DP pipeline fixes
-  // and contains stale sources_used values. Re-enable snapshot reads after
-  // running a fresh snapshot post-fix.
-  // TODO: Re-enable snapshot reads:
-  return computeCompositeRuntime(playerIds, mode, valueType, weights);
+  const universe = await loadCompositeUniverse(mode, valueType, weights);
 
-  /*
-  const snapshotMap = await readFromDailySnapshot(playerIds, mode);
-  if (snapshotMap && snapshotMap.size === playerIds.length) return snapshotMap;
-  const final = snapshotMap ?? new Map<string, CompositeValue>();
-  const missing = playerIds.filter((id) => !final.has(id));
-  if (missing.length === 0) return final;
-  const runtime = await computeCompositeRuntime(missing, mode);
-  for (const [id, val] of runtime) final.set(id, val);
-  return final;
-  */
+  const out = new Map<string, CompositeValue>();
+  const missing: string[] = [];
+  for (const id of playerIds) {
+    const hit = universe.get(id);
+    if (hit) out.set(id, hit);
+    else missing.push(id);
+  }
+
+  // Fallback for IDs outside the QB/RB/WR/TE universe (picks, DEF, K, etc.)
+  if (missing.length > 0) {
+    const runtime = await computeCompositeRuntime(missing, mode, valueType, weights);
+    for (const [id, val] of runtime) out.set(id, val);
+  }
+
+  return out;
 }
