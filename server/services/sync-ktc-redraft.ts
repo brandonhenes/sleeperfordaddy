@@ -2,6 +2,8 @@ import { db } from "../db/connection.js";
 import { sql } from "drizzle-orm";
 
 const KTC_REDRAFT_URL = "https://keeptradecut.com/fantasy-rankings";
+const USER_AGENT =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
 interface KtcPlayer {
   playerName: string;
@@ -28,9 +30,15 @@ function toInt(value: number | string | null | undefined): number {
 export async function syncKtcRedraftValues(): Promise<KtcRedraftSyncStats> {
   console.log("[ktc-redraft] Fetching KTC redraft rankings page...");
   const resp = await fetch(KTC_REDRAFT_URL, {
-    headers: { "User-Agent": "SleeperScout/1.0" },
+    headers: {
+      "User-Agent": USER_AGENT,
+      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "Accept-Language": "en-US,en;q=0.9",
+    },
   });
-  if (!resp.ok) throw new Error(`Failed to fetch KTC redraft page: ${resp.status}`);
+  if (!resp.ok) {
+    throw new Error(`Failed to fetch KTC redraft page: ${resp.status} ${resp.statusText}`);
+  }
   const html = await resp.text();
 
   const match = html.match(/var\s+playersArray\s*=\s*(\[[\s\S]*?\]);/);
