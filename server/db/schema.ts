@@ -647,3 +647,25 @@ export const sync_runs = pgTable(
   ]
 );
 
+// Raw weekly stats per player. Stores the full Sleeper stat row as jsonb so
+// every scoring key a league might use (first downs, 2pt, threshold bonuses,
+// position-specific receptions, distance buckets, etc.) is captured without
+// schema changes. Per-game granularity is required for threshold bonuses
+// like "bonus_rec_yd_100" that need to know which individual games crossed
+// the threshold.
+export const player_weekly_stats = pgTable(
+  "player_weekly_stats",
+  {
+    sleeper_id: text("sleeper_id").notNull(),
+    season: integer("season").notNull(),
+    week: integer("week").notNull(),
+    stats: jsonb("stats").notNull(),
+    updated_at: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.sleeper_id, table.season, table.week] }),
+    index("idx_player_weekly_stats_season_week").on(table.season, table.week),
+    index("idx_player_weekly_stats_sleeper_season").on(table.sleeper_id, table.season),
+  ]
+);
+

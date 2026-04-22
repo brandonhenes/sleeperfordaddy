@@ -49,7 +49,7 @@ async function fetchWeek(season: number, week: number): Promise<Record<string, S
 
 export async function syncSleeperStats(
   season = 2025
-): Promise<{ season: number; players_synced: number; weeks_included: number[] }> {
+): Promise<{ season: number; players_synced: number; weekly_rows_written: number; weeks_included: number[] }> {
   // Pull each week in parallel. Failures per-week are logged and skipped.
   const weeklyPayloads = await Promise.all(
     WEEKS_INCLUDED.map((week) => fetchWeek(season, week))
@@ -63,6 +63,36 @@ export async function syncSleeperStats(
   const validPlayers = new Set(
     (players as unknown as { player_id: string }[]).map((r) => r.player_id)
   );
+
+  // Step 1: persist raw weekly stats as jsonb so every Sleeper stat key is
+  // captured (first downs, 2pt, threshold bonuses, distance buckets, etc.)
+  // without needing schema changes.
+  let weeklyRowsWritten = 0;
+  const WEEKLY_BATCH = 500;
+  for (let weekIdx = 0; weekIdx < weeklyPayloads.length; weekIdx++) {
+    const week = WEEKS_INCLUDED[weekIdx];
+    const payload = weeklyPayloads[weekIdx];
+    const weeklyRows: { sleeper_id: string; week: number; stats: SleeperStatRow }[] = [];
+    for (const [sleeperId, row] of Object.entries(payload)) {
+      if (!validPlayers.has(sleeperId)) continue;
+      if (!didPlay(row)) continue;
+      weeklyRows.push({ sleeper_id: sleeperId, week, stats: row });
+    }
+    for (let i = 0; i < weeklyRows.length; i += WEEKLY_BATCH) {
+      const chunk = weeklyRows.slice(i, i + WEEKLY_BATCH);
+      const frags = chunk.map(
+        (r) => sql`(${r.sleeper_id}, ${season}, ${r.week}, ${JSON.stringify(r.stats)}::jsonb)`
+      );
+      await db.execute(sql`
+        INSERT INTO player_weekly_stats (sleeper_id, season, week, stats)
+        VALUES ${sql.join(frags, sql`, `)}
+        ON CONFLICT (sleeper_id, season, week) DO UPDATE SET
+          stats = EXCLUDED.stats,
+          updated_at = NOW()
+      `);
+      weeklyRowsWritten += chunk.length;
+    }
+  }
 
   // Per-player aggregate, only counting weeks where they actually played.
   interface Agg {
@@ -171,5 +201,10 @@ export async function syncSleeperStats(
     `);
   }
 
-  return { season, players_synced: values.length, weeks_included: WEEKS_INCLUDED };
+  return {
+    season,
+    players_synced: values.length,
+    weekly_rows_written: weeklyRowsWritten,
+    weeks_included: WEEKS_INCLUDED,
+  };
 }
