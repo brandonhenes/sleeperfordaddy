@@ -29,29 +29,19 @@ export function getPlayerAvailability(input: AvailabilityInput): PlayerAvailabil
   const team = input.team && input.team.trim() !== "" ? input.team : null;
   const hasMarketValue = input.sources_available > 0;
 
+  // Special statuses take precedence — these are roster-situation signals Sleeper does track reliably
   if (status === "Injured Reserve") return "injured_reserve";
   if (status === "Physically Unable to Perform" || status === "Non Football Injury") return "pup";
   if (status === "Practice Squad") return "practice_squad";
 
-  if (status === "Active") {
-    // On an active roster. Missing team is unusual but we still treat as active.
-    return "active";
-  }
+  // Team presence is the reliable signal for Active vs FA/Retired.
+  // Sleeper's `status` field is noisy — it reports Thielen, Carr, Cooper as "Active" despite being FA/retired.
+  if (team) return "active";
 
-  if (status === "Inactive") {
-    // Sleeper lumps UFAs, retirees, and cuts as "Inactive". Use ranking-source
-    // coverage to distinguish: if FC/DP/FP still price the player, the market
-    // considers them valuable (unsigned UFA). If everyone has dropped them,
-    // they're retired/washed.
-    return hasMarketValue ? "unsigned_fa" : "retired_washed";
-  }
-
-  // Null / unrecognized status — fall back to coverage heuristic
-  if (!status) {
-    return hasMarketValue ? "active" : "unknown";
-  }
-
-  return "unknown";
+  // No team. Use ranking-source coverage to distinguish UFA-who-still-has-value
+  // (Deebo, Jennings in April) from retired/washed (Thielen, Cooper).
+  if (hasMarketValue) return "unsigned_fa";
+  return status ? "retired_washed" : "unknown";
 }
 
 /**
