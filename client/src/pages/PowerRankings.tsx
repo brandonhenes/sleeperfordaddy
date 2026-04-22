@@ -8,6 +8,7 @@ import { PlayerLink } from "../components/ui";
 import SourceBadge from "../components/SourceBadge";
 import EdgeScoreBadge from "../components/EdgeScoreBadge";
 import PlayerStatusBadge from "../components/ui/PlayerStatusBadge";
+import LeaguePointsBadge from "../components/ui/LeaguePointsBadge";
 import { posColor } from "../lib/position-colors";
 import FreshnessBar from "../components/FreshnessBar";
 import ShareButton from "../components/ShareButton";
@@ -149,6 +150,12 @@ function PlayerRow({ p, slotLabel, showRedraft }: { p: SlottedPlayer | CoreAsset
       <PlayerLink name={p.full_name} style={{ flex: 1, fontWeight: 500, fontSize: 12 }} />
       <PlayerStatusBadge availability={p.availability} />
       <EdgeScoreBadge score={p.edge_score} size="sm" />
+      <LeaguePointsBadge
+        total={p.league_points_total}
+        ppg={p.league_points_ppg}
+        weeks={p.league_points_weeks}
+        season={p.league_points_season}
+      />
       <SourceBadge
         fc_score={p.fc_score} ktc_score={p.ktc_score} dp_score={p.dp_score}
         sources_available={p.sources_available} source_agreement={p.source_agreement}
@@ -206,6 +213,12 @@ function ExpandedRosterView({ roster, showRedraft }: { roster: RosterRanking; sh
             <PlayerLink name={p.full_name} style={{ flex: 1, fontWeight: 500, fontSize: 12 }} />
             <PlayerStatusBadge availability={p.availability} />
             <EdgeScoreBadge score={p.edge_score} size="sm" />
+            <LeaguePointsBadge
+              total={p.league_points_total}
+              ppg={p.league_points_ppg}
+              weeks={p.league_points_weeks}
+              season={p.league_points_season}
+            />
             <SourceBadge
               fc_score={p.fc_score} ktc_score={p.ktc_score} dp_score={p.dp_score}
               sources_available={p.sources_available} source_agreement={p.source_agreement}

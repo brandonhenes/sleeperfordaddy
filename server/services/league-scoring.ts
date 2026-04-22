@@ -223,3 +223,32 @@ export async function scorePlayerForLeague(
   const weekly = await loadPlayerWeeklyStats(sleeperId, season);
   return computeLeagueScoring(weekly, settings, position);
 }
+
+/**
+ * Batch helper: score many players for one league in one pass.
+ * Used by Power Rankings / Trade Calc to show raw season points on every row.
+ * Returns Map<sleeper_id, { total_points, per_game_points, weeks_scored }>.
+ */
+export async function scorePlayersForLeague(
+  players: { sleeper_id: string; position: string }[],
+  scoringSettings: ScoringSettings,
+  season: number,
+  options: { includeWeek18?: boolean } = {}
+): Promise<Map<string, { total_points: number; per_game_points: number; weeks_scored: number }>> {
+  if (players.length === 0) return new Map();
+
+  const ids = players.map((p) => p.sleeper_id);
+  const weeklyMap = await loadWeeklyStatsBatch(ids, season, options);
+
+  const out = new Map<string, { total_points: number; per_game_points: number; weeks_scored: number }>();
+  for (const p of players) {
+    const weekly = weeklyMap.get(p.sleeper_id) ?? [];
+    const scored = computeLeagueScoring(weekly, scoringSettings, p.position);
+    out.set(p.sleeper_id, {
+      total_points: scored.total_points,
+      per_game_points: scored.per_game_points,
+      weeks_scored: scored.weeks_scored,
+    });
+  }
+  return out;
+}

@@ -21,6 +21,10 @@ export interface PlayerForSlot {
   team?: string | null;
   status?: string | null;
   availability?: PlayerAvailability;
+  league_points_total?: number | null;
+  league_points_ppg?: number | null;
+  league_points_weeks?: number | null;
+  league_points_season?: number | null;
 }
 
 export interface SlottedPlayer extends PlayerForSlot {

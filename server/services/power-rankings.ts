@@ -21,6 +21,9 @@ import { parseLeagueScoring, scoringLabel } from "./scoring-adjustment.js";
 import { computeLeaguePPG } from "./league-ppg.js";
 import type { ValueType } from "./composite-values.js";
 import { getPlayerAvailability, type PlayerAvailability } from "../../shared/player-availability.js";
+import { scorePlayersForLeague } from "./league-scoring.js";
+
+const LEAGUE_SCORING_SEASON = 2025;
 
 const prCache = new Map<string, { data: LeaguePowerRanking[]; expires: number }>();
 const PR_TTL_MS = 5 * 60 * 1000;
@@ -58,6 +61,12 @@ export interface CoreAsset {
   team: string | null;
   status: string | null;
   availability: PlayerAvailability;
+  // Raw fantasy points in THIS league's scoring, computed from 2025 weekly stats
+  // (weeks 1-17, games-played only). Null when no weekly data is available.
+  league_points_total: number | null;
+  league_points_ppg: number | null;
+  league_points_weeks: number | null;
+  league_points_season: number | null;
 }
 
 export interface RosterRanking {
@@ -315,6 +324,18 @@ export async function getPowerRankings(
       ? await computeLeaguePPG(playerIds, leagueScoring)
       : new Map<string, { ppg: number }>();
 
+    // Raw fantasy points in THIS league's scoring_settings, from 2025 weekly stats
+    const rawScoring = (scoring ?? {}) as Record<string, number>;
+    const idPosMap = new Map<string, string>();
+    for (const [, ps] of owners) for (const p of ps) idPosMap.set(p.player_id, p.position);
+    const leaguePointsMap = Object.keys(rawScoring).length > 0
+      ? await scorePlayersForLeague(
+          [...idPosMap.entries()].map(([sleeper_id, position]) => ({ sleeper_id, position })),
+          rawScoring,
+          LEAGUE_SCORING_SEASON
+        )
+      : new Map();
+
     // Step 2: Initial power for tier estimation
     const initSV = owners.map(([oid, ps]) => {
       const s = ps.map((p) => compMap.get(p.player_id)?.edge_score ?? 0).sort((a, b) => b - a);
@@ -374,19 +395,26 @@ export async function getPowerRankings(
       const core = wc.slice(0, coreN);
       const wcr = computeWindowRaw(core.map((p) => ({ value: p.es, age_score: p.ac.score })));
       const wtr = computeWindowRaw(wc.map((p) => ({ value: p.es, age_score: p.ac.score })));
-      const coreAssets: CoreAsset[] = wc.map((p) => ({
-        player_id: p.player_id, full_name: p.full_name, position: p.position,
-        edge_score: p.es, age: p.age, age_curve: p.ac,
-        fc_value: p.cv?.fc_value ?? null, ktc_value: p.cv?.ktc_value ?? null, dp_value: p.cv?.dp_value ?? null,
-        fc_score: p.cv?.fc_score ?? null, ktc_score: p.cv?.ktc_score ?? null, dp_score: p.cv?.dp_score ?? null,
-        ppg: ppgMap.get(p.player_id)?.ppg ?? null,
-        sources_available: p.cv?.sources_available ?? 0, source_agreement: p.cv?.source_agreement ?? "high",
-        team: p.team, status: p.status,
-        availability: getPlayerAvailability({
-          status: p.status, team: p.team, sources_available: p.cv?.sources_available ?? 0,
-          external_flags_fa: p.external_flags_fa,
-        }),
-      }));
+      const coreAssets: CoreAsset[] = wc.map((p) => {
+        const lp = leaguePointsMap.get(p.player_id);
+        return {
+          player_id: p.player_id, full_name: p.full_name, position: p.position,
+          edge_score: p.es, age: p.age, age_curve: p.ac,
+          fc_value: p.cv?.fc_value ?? null, ktc_value: p.cv?.ktc_value ?? null, dp_value: p.cv?.dp_value ?? null,
+          fc_score: p.cv?.fc_score ?? null, ktc_score: p.cv?.ktc_score ?? null, dp_score: p.cv?.dp_score ?? null,
+          ppg: ppgMap.get(p.player_id)?.ppg ?? null,
+          sources_available: p.cv?.sources_available ?? 0, source_agreement: p.cv?.source_agreement ?? "high",
+          team: p.team, status: p.status,
+          availability: getPlayerAvailability({
+            status: p.status, team: p.team, sources_available: p.cv?.sources_available ?? 0,
+            external_flags_fa: p.external_flags_fa,
+          }),
+          league_points_total: lp?.total_points ?? null,
+          league_points_ppg: lp?.per_game_points ?? null,
+          league_points_weeks: lp?.weeks_scored ?? null,
+          league_points_season: lp ? LEAGUE_SCORING_SEASON : null,
+        };
+      });
       const srcAvg = wc.length > 0 ? Math.round((wc.reduce((s, p) => s + (p.cv?.sources_available ?? 0), 0) / wc.length) * 10) / 10 : 0;
       const rid = ridMap.get(`${lid}:${oid}`) ?? 0;
       const rPicks = (picksByRid.get(rid) ?? []).sort((a, b) => b.edge_score - a.edge_score);
@@ -700,6 +728,18 @@ async function getPowerRankingsDbOnly(
       ? await computeLeaguePPG(playerIds, leagueScoring)
       : new Map<string, { ppg: number }>();
 
+    // Raw fantasy points in THIS league's scoring_settings, from 2025 weekly stats
+    const rawScoring = (league.scoring_settings ?? {}) as Record<string, number>;
+    const idPosMap = new Map<string, string>();
+    for (const [, ps] of owners) for (const p of ps) idPosMap.set(p.player_id, p.position);
+    const leaguePointsMap = Object.keys(rawScoring).length > 0
+      ? await scorePlayersForLeague(
+          [...idPosMap.entries()].map(([sleeper_id, position]) => ({ sleeper_id, position })),
+          rawScoring,
+          LEAGUE_SCORING_SEASON
+        )
+      : new Map();
+
     const initSV = owners.map(([oid, ps]) => {
       const s = ps.map((p) => compMap.get(p.player_id)?.edge_score ?? 0).sort((a, b) => b - a);
       return { oid, sv: s.slice(0, slots).reduce((a, v) => a + v, 0) };
@@ -769,19 +809,26 @@ async function getPowerRankingsDbOnly(
       const core = wc.slice(0, coreN);
       const wcr = computeWindowRaw(core.map((p) => ({ value: p.es, age_score: p.ac.score })));
       const wtr = computeWindowRaw(wc.map((p) => ({ value: p.es, age_score: p.ac.score })));
-      const coreAssets: CoreAsset[] = wc.map((p) => ({
-        player_id: p.player_id, full_name: p.full_name, position: p.position,
-        edge_score: p.es, age: p.age, age_curve: p.ac,
-        fc_value: p.cv?.fc_value ?? null, ktc_value: p.cv?.ktc_value ?? null, dp_value: p.cv?.dp_value ?? null,
-        fc_score: p.cv?.fc_score ?? null, ktc_score: p.cv?.ktc_score ?? null, dp_score: p.cv?.dp_score ?? null,
-        ppg: ppgMap.get(p.player_id)?.ppg ?? null,
-        sources_available: p.cv?.sources_available ?? 0, source_agreement: p.cv?.source_agreement ?? "high",
-        team: p.team, status: p.status,
-        availability: getPlayerAvailability({
-          status: p.status, team: p.team, sources_available: p.cv?.sources_available ?? 0,
-          external_flags_fa: p.external_flags_fa,
-        }),
-      }));
+      const coreAssets: CoreAsset[] = wc.map((p) => {
+        const lp = leaguePointsMap.get(p.player_id);
+        return {
+          player_id: p.player_id, full_name: p.full_name, position: p.position,
+          edge_score: p.es, age: p.age, age_curve: p.ac,
+          fc_value: p.cv?.fc_value ?? null, ktc_value: p.cv?.ktc_value ?? null, dp_value: p.cv?.dp_value ?? null,
+          fc_score: p.cv?.fc_score ?? null, ktc_score: p.cv?.ktc_score ?? null, dp_score: p.cv?.dp_score ?? null,
+          ppg: ppgMap.get(p.player_id)?.ppg ?? null,
+          sources_available: p.cv?.sources_available ?? 0, source_agreement: p.cv?.source_agreement ?? "high",
+          team: p.team, status: p.status,
+          availability: getPlayerAvailability({
+            status: p.status, team: p.team, sources_available: p.cv?.sources_available ?? 0,
+            external_flags_fa: p.external_flags_fa,
+          }),
+          league_points_total: lp?.total_points ?? null,
+          league_points_ppg: lp?.per_game_points ?? null,
+          league_points_weeks: lp?.weeks_scored ?? null,
+          league_points_season: lp ? LEAGUE_SCORING_SEASON : null,
+        };
+      });
       const srcAvg = wc.length > 0 ? Math.round((wc.reduce((s, p) => s + (p.cv?.sources_available ?? 0), 0) / wc.length) * 10) / 10 : 0;
       const rid = ridMap.get(`${lid}:${oid}`) ?? 0;
       const rPicks = (picksByRid.get(rid) ?? []).sort((a, b) => b.edge_score - a.edge_score);

@@ -41,6 +41,10 @@ export interface CoreAsset {
     | "unsigned_fa"
     | "retired_washed"
     | "unknown";
+  league_points_total: number | null;
+  league_points_ppg: number | null;
+  league_points_weeks: number | null;
+  league_points_season: number | null;
 }
 
 export interface SlottedPlayer extends CoreAsset {
