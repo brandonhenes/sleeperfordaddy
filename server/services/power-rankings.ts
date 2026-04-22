@@ -177,11 +177,23 @@ export async function getPowerRankings(
   const inClause = sql.join(idFrags, sql`, `);
 
   const rosterRows = await db.execute(sql`
-    SELECT rp.league_id, rp.owner_id, rp.player_id, pm.full_name, pm.position, pm.age, pm.team, pm.status
+    SELECT rp.league_id, rp.owner_id, rp.player_id, pm.full_name, pm.position, pm.age, pm.team, pm.status,
+      EXISTS (
+        SELECT 1 FROM fantasycalc_daily fc
+        WHERE fc.sleeper_id = rp.player_id
+          AND fc.snapshot_date = (SELECT MAX(snapshot_date) FROM fantasycalc_daily)
+          AND fc.is_pick = false
+          AND UPPER(fc.team) IN ('FA', 'FREE AGENT')
+      ) OR EXISTS (
+        SELECT 1 FROM dynastyprocess_values dp
+        WHERE dp.sleeper_id = rp.player_id
+          AND dp.is_pick = false
+          AND UPPER(dp.team) IN ('FA', 'FREE AGENT')
+      ) AS external_flags_fa
     FROM roster_players rp JOIN players_master pm ON rp.player_id = pm.player_id
     WHERE rp.league_id IN (${inClause}) AND pm.position IN ('QB','RB','WR','TE')
   `);
-  type RR = { league_id: string; owner_id: string; player_id: string; full_name: string; position: string; age: number | null; team: string | null; status: string | null };
+  type RR = { league_id: string; owner_id: string; player_id: string; full_name: string; position: string; age: number | null; team: string | null; status: string | null; external_flags_fa: boolean };
   const rows = rosterRows as unknown as RR[];
 
   const [ridRows, nmRows] = await Promise.all([
@@ -372,6 +384,7 @@ export async function getPowerRankings(
         team: p.team, status: p.status,
         availability: getPlayerAvailability({
           status: p.status, team: p.team, sources_available: p.cv?.sources_available ?? 0,
+          external_flags_fa: p.external_flags_fa,
         }),
       }));
       const srcAvg = wc.length > 0 ? Math.round((wc.reduce((s, p) => s + (p.cv?.sources_available ?? 0), 0) / wc.length) * 10) / 10 : 0;
@@ -589,7 +602,7 @@ async function getPowerRankingsDbOnly(
     db.execute(sql`SELECT league_id, season, roster_id, draft_position FROM league_draft_orders WHERE league_id IN (${inClause})`),
   ]);
 
-  type RR = { league_id: string; owner_id: string; player_id: string; full_name: string; position: string; age: number | null; team: string | null; status: string | null };
+  type RR = { league_id: string; owner_id: string; player_id: string; full_name: string; position: string; age: number | null; team: string | null; status: string | null; external_flags_fa: boolean };
   const rows = rosterPlayerRows as unknown as RR[];
 
   const ridMap = new Map<string, number>();
@@ -766,6 +779,7 @@ async function getPowerRankingsDbOnly(
         team: p.team, status: p.status,
         availability: getPlayerAvailability({
           status: p.status, team: p.team, sources_available: p.cv?.sources_available ?? 0,
+          external_flags_fa: p.external_flags_fa,
         }),
       }));
       const srcAvg = wc.length > 0 ? Math.round((wc.reduce((s, p) => s + (p.cv?.sources_available ?? 0), 0) / wc.length) * 10) / 10 : 0;

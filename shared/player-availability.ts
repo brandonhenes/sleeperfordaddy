@@ -22,6 +22,12 @@ export interface AvailabilityInput {
   status: string | null | undefined;
   team: string | null | undefined;
   sources_available: number;
+  /**
+   * True if any ranking source (FC/DP/FP-Elite) flags this player as a free agent.
+   * Used to override Sleeper's team field when Sleeper lags real-world transactions
+   * (e.g., a player becomes a FA but Sleeper still shows their prior team).
+   */
+  external_flags_fa?: boolean;
 }
 
 export function getPlayerAvailability(input: AvailabilityInput): PlayerAvailability {
@@ -34,12 +40,13 @@ export function getPlayerAvailability(input: AvailabilityInput): PlayerAvailabil
   if (status === "Physically Unable to Perform" || status === "Non Football Injury") return "pup";
   if (status === "Practice Squad") return "practice_squad";
 
-  // Team presence is the reliable signal for Active vs FA/Retired.
-  // Sleeper's `status` field is noisy — it reports Thielen, Carr, Cooper as "Active" despite being FA/retired.
-  if (team) return "active";
+  // Team presence is the reliable signal for Active vs FA/Retired — unless
+  // external ranking sources contradict Sleeper (they update FA status faster).
+  if (team && !input.external_flags_fa) return "active";
 
-  // No team. Use ranking-source coverage to distinguish UFA-who-still-has-value
-  // (Deebo, Jennings in April) from retired/washed (Thielen, Cooper).
+  // No team (or external sources flag FA). Use ranking-source coverage to
+  // distinguish UFA-who-still-has-value (Deebo, Jennings in April) from
+  // retired/washed (Thielen, Cooper).
   if (hasMarketValue) return "unsigned_fa";
   return status ? "retired_washed" : "unknown";
 }

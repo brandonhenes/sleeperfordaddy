@@ -111,7 +111,19 @@ export async function getPortfolio(
   const idFrags = leagueIds.map((id) => sql`${id}`);
   const inClause = sql.join(idFrags, sql`, `);
   const rosterRows = await db.execute(sql`
-    SELECT rp.player_id, pm.full_name, pm.position, pm.age, pm.team, pm.status, rp.league_id
+    SELECT rp.player_id, pm.full_name, pm.position, pm.age, pm.team, pm.status, rp.league_id,
+      EXISTS (
+        SELECT 1 FROM fantasycalc_daily fc
+        WHERE fc.sleeper_id = rp.player_id
+          AND fc.snapshot_date = (SELECT MAX(snapshot_date) FROM fantasycalc_daily)
+          AND fc.is_pick = false
+          AND UPPER(fc.team) IN ('FA', 'FREE AGENT')
+      ) OR EXISTS (
+        SELECT 1 FROM dynastyprocess_values dp
+        WHERE dp.sleeper_id = rp.player_id
+          AND dp.is_pick = false
+          AND UPPER(dp.team) IN ('FA', 'FREE AGENT')
+      ) AS external_flags_fa
     FROM roster_players rp
     JOIN players_master pm ON rp.player_id = pm.player_id
     WHERE rp.league_id IN (${inClause})
@@ -126,6 +138,7 @@ export async function getPortfolio(
     team: string | null;
     status: string | null;
     league_id: string;
+    external_flags_fa: boolean;
   };
   const rows = rosterRows as unknown as RR[];
   if (rows.length === 0) return null;
@@ -134,7 +147,14 @@ export async function getPortfolio(
   const leagueCountMap = new Map<string, number>();
   const playerInfoMap = new Map<
     string,
-    { full_name: string; position: string; age: number | null; team: string | null; status: string | null }
+    {
+      full_name: string;
+      position: string;
+      age: number | null;
+      team: string | null;
+      status: string | null;
+      external_flags_fa: boolean;
+    }
   >();
   for (const r of rows) {
     leagueCountMap.set(r.player_id, (leagueCountMap.get(r.player_id) ?? 0) + 1);
@@ -145,6 +165,7 @@ export async function getPortfolio(
         age: r.age,
         team: r.team,
         status: r.status,
+        external_flags_fa: r.external_flags_fa,
       });
     }
   }
@@ -163,6 +184,7 @@ export async function getPortfolio(
       status: info.status,
       team: info.team,
       sources_available: comp?.sources_available ?? 0,
+      external_flags_fa: info.external_flags_fa,
     });
     const expertScores = [comp?.fc_score, comp?.dp_score].filter(
       (s): s is number => s != null,
