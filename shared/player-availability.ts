@@ -23,9 +23,11 @@ export interface AvailabilityInput {
   team: string | null | undefined;
   sources_available: number;
   /**
-   * True if any ranking source (FC/DP/FP-Elite) flags this player as a free agent.
-   * Used to override Sleeper's team field when Sleeper lags real-world transactions
-   * (e.g., a player becomes a FA but Sleeper still shows their prior team).
+   * Reserved for future use. FantasyCalc's `team` field is unreliable in the
+   * offseason — it marks both genuine FAs (Deebo, Jennings) and players who
+   * actually signed (Flacco, Cousins) as "FA", producing false positives.
+   * KTC/DP also lag and lead inconsistently. Until we have a source we can
+   * trust, availability is driven by Sleeper alone.
    */
   external_flags_fa?: boolean;
 }
@@ -40,13 +42,13 @@ export function getPlayerAvailability(input: AvailabilityInput): PlayerAvailabil
   if (status === "Physically Unable to Perform" || status === "Non Football Injury") return "pup";
   if (status === "Practice Squad") return "practice_squad";
 
-  // Team presence is the reliable signal for Active vs FA/Retired — unless
-  // external ranking sources contradict Sleeper (they update FA status faster).
-  if (team && !input.external_flags_fa) return "active";
+  // Team presence is the single reliable signal for Active vs FA.
+  // Sleeper's `status` field is noisy and the value-source team fields are too
+  // inconsistent in the offseason to override Sleeper with.
+  if (team) return "active";
 
-  // No team (or external sources flag FA). Use ranking-source coverage to
-  // distinguish UFA-who-still-has-value (Deebo, Jennings in April) from
-  // retired/washed (Thielen, Cooper).
+  // No team. Use ranking-source coverage to distinguish UFA-who-still-has-value
+  // (Deebo, Jennings in April) from retired/washed (Thielen, Cooper).
   if (hasMarketValue) return "unsigned_fa";
   return status ? "retired_washed" : "unknown";
 }
