@@ -1,52 +1,111 @@
+import { lazy, Suspense } from "react";
 import { Route, Switch } from "wouter";
-import Landing from "./pages/Landing";
-import Dashboard from "./pages/Dashboard";
-import Portfolio from "./pages/Portfolio";
-import Market from "./pages/Market";
-import Action from "./pages/Action";
-import PlayerDetail from "./pages/PlayerDetail";
-import Arbitrage from "./pages/Arbitrage";
-import RosterGrades from "./pages/RosterGrades";
-import PowerRankings from "./pages/PowerRankings";
-import MarketSignals from "./pages/MarketSignals";
-import TradeCalculator from "./pages/TradeCalculator";
-import TradeFinder from "./pages/TradeFinder";
-import TradeHistory from "./pages/TradeHistory";
-import RookieDraft from "./pages/RookieDraft";
-import LeagueHistory from "./pages/LeagueHistory";
-import InjuryTracker from "./pages/InjuryTracker";
-import WaiverWire from "./pages/WaiverWire";
-import FreeAgents from "./pages/FreeAgents";
-import Settings from "./pages/Settings";
-import HowItWorks from "./pages/HowItWorks";
-import NotFound from "./pages/NotFound";
+
+const Landing = lazy(() => import("./pages/Landing"));
+const Dashboard = lazy(() => import("./pages/Dashboard"));
+const Portfolio = lazy(() => import("./pages/Portfolio"));
+const Market = lazy(() => import("./pages/Market"));
+const Action = lazy(() => import("./pages/Action"));
+const PlayerDetail = lazy(() => import("./pages/PlayerDetail"));
+const Arbitrage = lazy(() => import("./pages/Arbitrage"));
+const RosterGrades = lazy(() => import("./pages/RosterGrades"));
+const PowerRankings = lazy(() => import("./pages/PowerRankings"));
+const MarketSignals = lazy(() => import("./pages/MarketSignals"));
+const TradeCalculator = lazy(() => import("./pages/TradeCalculator"));
+const TradeFinder = lazy(() => import("./pages/TradeFinder"));
+const TradeHistory = lazy(() => import("./pages/TradeHistory"));
+const RookieDraft = lazy(() => import("./pages/RookieDraft"));
+const LeagueHistory = lazy(() => import("./pages/LeagueHistory"));
+const InjuryTracker = lazy(() => import("./pages/InjuryTracker"));
+const WaiverWire = lazy(() => import("./pages/WaiverWire"));
+const FreeAgents = lazy(() => import("./pages/FreeAgents"));
+const Settings = lazy(() => import("./pages/Settings"));
+const HowItWorks = lazy(() => import("./pages/HowItWorks"));
+const NotFound = lazy(() => import("./pages/NotFound"));
+
+function RouteFallback() {
+  return (
+    <div className="min-h-screen bg-[var(--dark)] text-[var(--text)] grid place-items-center px-6">
+      <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] px-6 py-5 text-center shadow-xl">
+        <p className="label mb-2">Loading</p>
+        <p className="text-sm text-[var(--text-dim)]">Getting your board ready...</p>
+      </div>
+    </div>
+  );
+}
 
 export default function App() {
   return (
-    <Switch>
-      <Route path="/" component={Landing} />
-      <Route path="/dashboard/:username" component={Dashboard} />
-      <Route path="/portfolio/:username" component={Portfolio} />
-      <Route path="/market" component={Market} />
-      <Route path="/action/:username" component={Action} />
-      <Route path="/arbitrage/:username" component={Arbitrage} />
-      <Route path="/grades/:username" component={RosterGrades} />
-      <Route path="/power/:username" component={PowerRankings} />
-      <Route path="/signals/:username" component={MarketSignals} />
-      <Route path="/player/:playerName" component={PlayerDetail} />
-      <Route path="/trade-calculator" component={TradeCalculator} />
-<Route path="/trade-finder/:username" component={TradeFinder} />
-      <Route path="/trade-history/:username" component={TradeHistory} />
-      <Route path="/rookie-draft" component={RookieDraft} />
-      <Route path="/history/:username" component={LeagueHistory} />
-      <Route path="/injuries/:username" component={InjuryTracker} />
-      <Route path="/waivers/:username" component={WaiverWire} />
-      <Route path="/free-agents/:username" component={FreeAgents} />
-      <Route path="/settings" component={Settings} />
-      <Route path="/how-it-works" component={HowItWorks} />
-      {/* Keep legacy route working */}
-      <Route path="/user/:username" component={Dashboard} />
-      <Route component={NotFound} />
-    </Switch>
+    <Suspense fallback={<RouteFallback />}>
+      <Switch>
+        <Route path="/">
+          <Landing />
+        </Route>
+        <Route path="/dashboard/:username">
+          <Dashboard />
+        </Route>
+        <Route path="/portfolio/:username">
+          <Portfolio />
+        </Route>
+        <Route path="/market">
+          <Market />
+        </Route>
+        <Route path="/action/:username">
+          <Action />
+        </Route>
+        <Route path="/arbitrage/:username">
+          <Arbitrage />
+        </Route>
+        <Route path="/grades/:username">
+          <RosterGrades />
+        </Route>
+        <Route path="/power/:username">
+          <PowerRankings />
+        </Route>
+        <Route path="/signals/:username">
+          <MarketSignals />
+        </Route>
+        <Route path="/player/:playerName">
+          <PlayerDetail />
+        </Route>
+        <Route path="/trade-calculator">
+          <TradeCalculator />
+        </Route>
+        <Route path="/trade-finder/:username">
+          <TradeFinder />
+        </Route>
+        <Route path="/trade-history/:username">
+          <TradeHistory />
+        </Route>
+        <Route path="/rookie-draft">
+          <RookieDraft />
+        </Route>
+        <Route path="/history/:username">
+          <LeagueHistory />
+        </Route>
+        <Route path="/injuries/:username">
+          <InjuryTracker />
+        </Route>
+        <Route path="/waivers/:username">
+          <WaiverWire />
+        </Route>
+        <Route path="/free-agents/:username">
+          <FreeAgents />
+        </Route>
+        <Route path="/settings">
+          <Settings />
+        </Route>
+        <Route path="/how-it-works">
+          <HowItWorks />
+        </Route>
+        {/* Keep legacy route working */}
+        <Route path="/user/:username">
+          <Dashboard />
+        </Route>
+        <Route>
+          <NotFound />
+        </Route>
+      </Switch>
+    </Suspense>
   );
 }
