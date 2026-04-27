@@ -23,6 +23,7 @@ import type {
 
 type Side = "send" | "receive";
 type PickTier = "early" | "mid" | "late";
+type PickSelection = PickTier | `slot:${number}`;
 
 interface SearchAsset {
   type: "player";
@@ -66,6 +67,7 @@ interface OpponentContextResponse {
 const POSITIONS = ["QB", "RB", "WR", "TE"] as const;
 const YEAR = new Date().getFullYear();
 const PICK_YEARS = [String(YEAR), String(YEAR + 1), String(YEAR + 2)];
+const GENERIC_PICK_SLOTS = Array.from({ length: 12 }, (_, index) => index + 1);
 
 function assetKey(a: TradeAssetInput): string {
   if (a.type === "player") {
@@ -104,6 +106,20 @@ function pickDisplay(pick: ScoredPick): string {
   return pick.label;
 }
 
+function pickSelectionValue(tier: PickTier, slot: number | null): PickSelection {
+  return slot != null ? `slot:${slot}` : tier;
+}
+
+function tierFromGenericSlot(slot: number): PickTier {
+  if (slot <= 4) return "early";
+  if (slot <= 8) return "mid";
+  return "late";
+}
+
+function pickSlotLabel(round: number, slot: number): string {
+  return `${round}.${String(slot).padStart(2, "0")}`;
+}
+
 function fairnessColor(f: TradeEvaluation["fairness"]): string {
   if (f === "fair") return "var(--green)";
   if (f === "slight_edge") return "var(--amber)";
@@ -114,6 +130,23 @@ function fairnessLabel(f: TradeEvaluation["fairness"]): string {
   if (f === "fair") return "FAIR";
   if (f === "slight_edge") return "SLIGHT EDGE";
   return "LOPSIDED";
+}
+
+function winnerLabel(winner: TradeEvaluation["winner"]): string {
+  if (winner === "even") return "Even";
+  if (winner === "sideA") return "Side A (you send)";
+  return "Side B (you get)";
+}
+
+function winnerColor(winner: TradeEvaluation["winner"]): string {
+  if (winner === "sideA") return "var(--red)";
+  if (winner === "sideB") return "var(--green)";
+  return "var(--text-dim)";
+}
+
+function formatTradePower(value: number): string {
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${value.toFixed(1)} TP`;
 }
 
 function acceptanceColor(label: AcceptanceResult["label"]): string {
@@ -217,6 +250,27 @@ function buildTradeMessage(
   return lines.join("\n");
 }
 
+function EvalMetric({
+  label,
+  value,
+  color = "var(--text)",
+}: {
+  label: string;
+  value: string;
+  color?: string;
+}) {
+  return (
+    <div style={{ background: "var(--dark-base)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 10px", minWidth: 0 }}>
+      <div style={{ fontSize: 9, fontWeight: 800, color: "var(--text-muted)", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 3 }}>
+        {label}
+      </div>
+      <div style={{ fontSize: 12, fontWeight: 800, color, whiteSpace: "normal", overflowWrap: "break-word" }}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
 function EvalBar({
   result,
   acceptance,
@@ -246,6 +300,17 @@ function EvalBar({
       ? `You underpay by ${Math.abs(result.delta).toFixed(1)} TP`
       : "Even trade power";
   const deltaColor = result.delta > 0 ? "var(--red)" : result.delta < 0 ? "var(--green)" : "var(--text-dim)";
+  const winner = result.winner ?? "even";
+  const percentGap = result.percent_gap ?? 0;
+  const valueAdjustment = result.value_adjustment ?? 0;
+  const valueAdjustmentSide = result.value_adjustment_side ?? "none";
+  const neededToEvenLabel = result.needed_to_even?.label ?? "No meaningful sweetener needed.";
+  const valueAdjustmentColor =
+    valueAdjustmentSide === "sideA"
+      ? "var(--red)"
+      : valueAdjustmentSide === "sideB"
+        ? "var(--green)"
+        : "var(--text-dim)";
 
   return (
     <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: 12 }}>
@@ -272,6 +337,20 @@ function EvalBar({
         <div style={{ width: `${sendPct}%`, background: "#ef4444" }} />
         <div style={{ flex: 1, background: "#22c55e" }} />
       </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(118px, 1fr))", gap: 8, marginTop: 10 }}>
+        <EvalMetric label="Winner" value={winnerLabel(winner)} color={winnerColor(winner)} />
+        <EvalMetric label="Gap" value={`${percentGap.toFixed(1)}%`} color={fairnessColor(result.fairness)} />
+        <EvalMetric label="Value adj" value={formatTradePower(valueAdjustment)} color={valueAdjustmentColor} />
+      </div>
+      <div style={{ marginTop: 8, background: "rgba(96,165,250,0.10)", border: "1px solid rgba(96,165,250,0.22)", borderRadius: 8, padding: "9px 10px", color: "#bfdbfe", fontSize: 12, lineHeight: 1.45 }}>
+        {neededToEvenLabel}
+      </div>
+      {result.consolidation_warning && (
+        <div style={{ marginTop: 8, background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.28)", borderRadius: 8, padding: "9px 10px" }}>
+          <div style={{ color: "#fbbf24", fontSize: 10, fontWeight: 800, letterSpacing: 0.4, textTransform: "uppercase", marginBottom: 4 }}>Consolidation</div>
+          <div style={{ color: "#fcd34d", fontSize: 12, lineHeight: 1.45 }}>{result.consolidation_warning}</div>
+        </div>
+      )}
       <TradeHealthPanel warnings={result.healthCheck} />
     </div>
   );
@@ -511,6 +590,8 @@ function VacuumSearchColumn({
   onPickRoundChange,
   pickTier,
   onPickTierChange,
+  pickSlot,
+  onPickSlotChange,
   onAddPick,
   addPickLabel,
 }: {
@@ -527,9 +608,23 @@ function VacuumSearchColumn({
   onPickRoundChange: (value: number) => void;
   pickTier: PickTier;
   onPickTierChange: (value: PickTier) => void;
+  pickSlot: number | null;
+  onPickSlotChange: (value: number | null) => void;
   onAddPick: () => void;
   addPickLabel: string;
 }) {
+  const pickSelection = pickSelectionValue(pickTier, pickSlot);
+  function handlePickSelection(value: PickSelection) {
+    if (value.startsWith("slot:")) {
+      const slot = Number(value.slice("slot:".length));
+      onPickSlotChange(slot);
+      onPickTierChange(tierFromGenericSlot(slot));
+      return;
+    }
+    onPickSlotChange(null);
+    onPickTierChange(value);
+  }
+
   return (
     <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: 12 }}>
       <div style={{ color, fontSize: 12, fontWeight: 800, marginBottom: 10 }}>{title}</div>
@@ -559,10 +654,15 @@ function VacuumSearchColumn({
         <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 700 }}>Add Pick:</span>
         <select value={pickSeason} onChange={(event) => onPickSeasonChange(event.target.value)} style={{ background: "var(--dark-base)", border: "1px solid var(--border)", borderRadius: 7, color: "var(--text)", padding: "6px 8px", fontSize: 12, fontFamily: "inherit" }}>{PICK_YEARS.map((year) => <option key={year} value={year}>{year}</option>)}</select>
         <select value={pickRound} onChange={(event) => onPickRoundChange(Number(event.target.value))} style={{ background: "var(--dark-base)", border: "1px solid var(--border)", borderRadius: 7, color: "var(--text)", padding: "6px 8px", fontSize: 12, fontFamily: "inherit" }}>{[1, 2, 3, 4].map((round) => <option key={round} value={round}>Round {round}</option>)}</select>
-        <select value={pickTier} onChange={(event) => onPickTierChange(event.target.value as PickTier)} style={{ background: "var(--dark-base)", border: "1px solid var(--border)", borderRadius: 7, color: "var(--text)", padding: "6px 8px", fontSize: 12, fontFamily: "inherit" }}>
+        <select value={pickSelection} onChange={(event) => handlePickSelection(event.target.value as PickSelection)} style={{ background: "var(--dark-base)", border: "1px solid var(--border)", borderRadius: 7, color: "var(--text)", padding: "6px 8px", fontSize: 12, fontFamily: "inherit" }}>
           <option value="early">Early</option>
           <option value="mid">Mid</option>
           <option value="late">Late</option>
+          {GENERIC_PICK_SLOTS.map((slot) => (
+            <option key={slot} value={`slot:${slot}`}>
+              {pickSlotLabel(pickRound, slot)}
+            </option>
+          ))}
         </select>
         <button type="button" onClick={onAddPick} style={{ background: color, border: "none", borderRadius: 7, color: "#fff", padding: "6px 10px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>+ {addPickLabel}</button>
       </div>
@@ -645,9 +745,11 @@ export default function TradeCalculator() {
   const [sendPickSeason, setSendPickSeason] = useState(PICK_YEARS[0]);
   const [sendPickRound, setSendPickRound] = useState(1);
   const [sendPickTier, setSendPickTier] = useState<PickTier>("mid");
+  const [sendPickSlot, setSendPickSlot] = useState<number | null>(null);
   const [receivePickSeason, setReceivePickSeason] = useState(PICK_YEARS[0]);
   const [receivePickRound, setReceivePickRound] = useState(1);
   const [receivePickTier, setReceivePickTier] = useState<PickTier>("mid");
+  const [receivePickSlot, setReceivePickSlot] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
   const [isCompactLeagueLayout, setIsCompactLeagueLayout] = useState(() => (
     typeof window !== "undefined" ? window.innerWidth < 1180 : false
@@ -807,10 +909,24 @@ export default function TradeCalculator() {
     const pickSeason = side === "send" ? sendPickSeason : receivePickSeason;
     const pickRound = side === "send" ? sendPickRound : receivePickRound;
     const pickTier = side === "send" ? sendPickTier : receivePickTier;
+    const pickSlot = side === "send" ? sendPickSlot : receivePickSlot;
     const roundLabel = pickRound === 1 ? "1st" : pickRound === 2 ? "2nd" : pickRound === 3 ? "3rd" : `R${pickRound}`;
     const tierLabel = `${pickTier.charAt(0).toUpperCase()}${pickTier.slice(1)}`;
-    const label = `${pickSeason} ${tierLabel} ${roundLabel}`;
-    toggleAsset(side, { type: "pick", pick_season: pickSeason, pick_round: pickRound, pick_tier: pickTier, pick_label: label }, label);
+    const label = pickSlot != null
+      ? `${pickSeason} ${pickSlotLabel(pickRound, pickSlot)}`
+      : `${pickSeason} ${tierLabel} ${roundLabel}`;
+    toggleAsset(
+      side,
+      {
+        type: "pick",
+        pick_season: pickSeason,
+        pick_round: pickRound,
+        pick_tier: pickTier,
+        pick_slot: pickSlot,
+        pick_label: label,
+      },
+      label
+    );
   }
 
   const leagueColumns = isCompactLeagueLayout ? "1fr" : "minmax(0, 1fr) 320px minmax(0, 1fr)";
@@ -888,6 +1004,8 @@ export default function TradeCalculator() {
               onPickRoundChange={setSendPickRound}
               pickTier={sendPickTier}
               onPickTierChange={setSendPickTier}
+              pickSlot={sendPickSlot}
+              onPickSlotChange={setSendPickSlot}
               onAddPick={() => addVacuumPick("send")}
               addPickLabel="Send Pick"
             />
@@ -912,6 +1030,8 @@ export default function TradeCalculator() {
               onPickRoundChange={setReceivePickRound}
               pickTier={receivePickTier}
               onPickTierChange={setReceivePickTier}
+              pickSlot={receivePickSlot}
+              onPickSlotChange={setReceivePickSlot}
               onAddPick={() => addVacuumPick("receive")}
               addPickLabel="Get Pick"
             />

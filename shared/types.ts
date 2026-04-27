@@ -261,18 +261,41 @@ export interface TradeEvaluation {
   sideA: {
     assets: EvaluatedAsset[];
     total_edge: number;
+    total_base_market_value: number;
+    total_league_market_value: number;
+    total_adjusted_trade_value: number;
     total_trade_power: number;
     package_penalty_pct: number;
   };
   sideB: {
     assets: EvaluatedAsset[];
     total_edge: number;
+    total_base_market_value: number;
+    total_league_market_value: number;
+    total_adjusted_trade_value: number;
     total_trade_power: number;
     package_penalty_pct: number;
   };
   delta: number; // positive = sideA wins by trade power
   delta_edge: number; // positive = sideA wins by raw edge
   fairness: "fair" | "slight_edge" | "lopsided";
+  winner: "sideA" | "sideB" | "even";
+  value_adjustment_side: "sideA" | "sideB" | "none";
+  value_adjustment: number;
+  percent_gap: number;
+  best_asset_side: "sideA" | "sideB" | "even";
+  best_asset_edge: number;
+  best_asset_market_value: number;
+  consolidation_warning: string | null;
+  needed_to_even: {
+    side: "sideA" | "sideB" | "none";
+    tradePowerGap: number;
+    suggestedEdgeScore: number | null;
+    marketValue: number | null;
+    edgeEquivalent: number | null;
+    label: string;
+  };
+  scoring_context_label: string | null;
   healthCheck: TradeHealthWarning[];
 }
 
@@ -330,12 +353,24 @@ export interface EvaluatedAsset {
   position: string | null;
   label: string;
   edge_score: number;
+  base_market_value?: number;
+  league_market_value?: number;
+  context_trade_value?: number;
+  market_value_source?: "raw_sources" | "edge_fallback";
+  source_market_values?: {
+    fc: number | null;
+    ktc: number | null;
+    dp: number | null;
+    edge_fallback: number;
+  };
   trade_power: number;
   fc_score: number | null;
   ktc_score: number | null;
   dp_score: number | null;
   league_adjusted_score: number | null;
   scoring_delta_ppg: number | null;
+  scoring_multiplier?: number | null;
+  lineup_scarcity_multiplier?: number | null;
   ppg?: number | null;
   source_agreement: "high" | "medium" | "low";
   pick_breakdown?: TradePickBreakdown | null;
@@ -397,12 +432,24 @@ export interface TradePackageAsset {
   label: string;
   position: string | null;
   edge_score: number;
+  base_market_value?: number;
+  league_market_value?: number;
+  context_trade_value?: number;
+  market_value_source?: "raw_sources" | "edge_fallback";
+  source_market_values?: {
+    fc: number | null;
+    ktc: number | null;
+    dp: number | null;
+    edge_fallback: number;
+  };
   trade_power: number;
   fc_score: number | null;
   ktc_score: number | null;
   dp_score: number | null;
   league_adjusted_score: number | null;
   scoring_delta_ppg: number | null;
+  scoring_multiplier?: number | null;
+  lineup_scarcity_multiplier?: number | null;
   ppg?: number | null;
   source_agreement: "high" | "medium" | "low";
   pick_breakdown?: TradePickBreakdown | null;

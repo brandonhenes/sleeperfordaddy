@@ -7,9 +7,18 @@ import type {
   TradeHealthWarning,
 } from "../../shared/types.js";
 import type { SourceWeights } from "./edge-score.js";
-import { getCompositeValues, getGlobalScaleParams } from "./composite-values.js";
+import {
+  getCompositeValues,
+  getGlobalScaleParams,
+  type GlobalScaleParams,
+} from "./composite-values.js";
 import { computeEdgeScores } from "./edge-score.js";
-import { evaluateTradeValue } from "./trade-value.js";
+import { calculateMarketValueFromSources } from "./market-value.js";
+import {
+  applyLeagueMarketAdjustment,
+  loadLeagueMarketContext,
+} from "./league-market-adjustment.js";
+import { evaluateTradeMarketValue } from "./trade-value.js";
 import { getAgeCurveStatus } from "./age-curves.js";
 import { computeLeaguePPG } from "./league-ppg.js";
 import type { ValueType } from "./composite-values.js";
@@ -18,11 +27,7 @@ import {
   type ClassStrengthMap,
 } from "./pick-values.js";
 import {
-  parseLeagueScoring,
   loadPlayerUsageStats,
-  computeScoringDelta,
-  computeAdjustedEdgeScore,
-  estimateBaselineFPPG,
 } from "./scoring-adjustment.js";
 
 const ROUND_NAMES: Record<number, string> = {
@@ -510,18 +515,42 @@ async function evaluateAssets(
   }));
 }
 
-function toEvaluatedAsset(raw: RawEval, edge: { score: number; fc_score: number | null; ktc_score: number | null; dp_score: number | null }): EvaluatedAsset {
+function toEvaluatedAsset(
+  raw: RawEval,
+  edge: { score: number; fc_score: number | null; ktc_score: number | null; dp_score: number | null },
+  globalScale: GlobalScaleParams,
+  weights?: SourceWeights
+): EvaluatedAsset {
+  const edgeScore = raw.direct_edge_score ?? edge.score;
+  const marketValue = calculateMarketValueFromSources(
+    {
+      edgeScore,
+      fcValue: raw.fc_value,
+      ktcValue: raw.ktc_value,
+      dpValue: raw.dp_value,
+    },
+    globalScale,
+    weights
+  );
+
   return {
     player_id: raw.player_id,
     position: raw.position,
     label: raw.label,
-    edge_score: raw.direct_edge_score ?? edge.score,
-    trade_power: 0,
+    edge_score: edgeScore,
+    base_market_value: marketValue.marketValue,
+    league_market_value: marketValue.marketValue,
+    context_trade_value: marketValue.marketValue,
+    market_value_source: marketValue.marketValueSource,
+    source_market_values: marketValue.sourceMarketValues,
+    trade_power: marketValue.marketValue,
     fc_score: edge.fc_score,
     ktc_score: edge.ktc_score,
     dp_score: edge.dp_score,
     league_adjusted_score: null,
     scoring_delta_ppg: null,
+    scoring_multiplier: null,
+    lineup_scarcity_multiplier: null,
     ppg: null,
     source_agreement: agreementFromScores([edge.fc_score, edge.ktc_score, edge.dp_score]),
     pick_breakdown: raw.pick_breakdown ?? null,
@@ -554,54 +583,72 @@ export async function evaluateTrade(
   const edgeMap = computeEdgeScores(inputs, globalScale, weights);
 
   const evalA: EvaluatedAsset[] = rawA.map((a, i) =>
-    toEvaluatedAsset(a, edgeMap.get(String(i)) ?? { score: 0, fc_score: null, ktc_score: null, dp_score: null })
+    toEvaluatedAsset(
+      a,
+      edgeMap.get(String(i)) ?? { score: 0, fc_score: null, ktc_score: null, dp_score: null },
+      globalScale,
+      weights
+    )
   );
   const evalB: EvaluatedAsset[] = rawB.map((a, i) =>
     toEvaluatedAsset(
       a,
-      edgeMap.get(String(rawA.length + i)) ?? { score: 0, fc_score: null, ktc_score: null, dp_score: null }
+      edgeMap.get(String(rawA.length + i)) ?? { score: 0, fc_score: null, ktc_score: null, dp_score: null },
+      globalScale,
+      weights
     )
   );
 
-  if (leagueId) {
-    const leagueRow = await db.execute(sql`
-      SELECT scoring_settings FROM leagues WHERE league_id = ${leagueId} LIMIT 1
-    `);
-    const settings = parseLeagueScoring(
-      (leagueRow as unknown as { scoring_settings: Record<string, unknown> | null }[])[0]?.scoring_settings ?? null
-    );
+  const leagueContext = leagueId ? await loadLeagueMarketContext(leagueId, mode) : null;
+  const allPlayerIds = [...new Set([...evalA, ...evalB].map((a) => a.player_id).filter((id): id is string => !!id))];
+  const usageMap = leagueContext ? await loadPlayerUsageStats(allPlayerIds) : new Map();
+  const ppgMap = leagueContext && valueType === "redraft"
+    ? await computeLeaguePPG(allPlayerIds, leagueContext.scoring)
+    : new Map<string, { ppg: number }>();
 
-    const allPlayerIds = [...new Set([...evalA, ...evalB].map((a) => a.player_id).filter((id): id is string => !!id))];
-    const usageMap = await loadPlayerUsageStats(allPlayerIds);
-    const ppgMap = valueType === "redraft"
-      ? await computeLeaguePPG(allPlayerIds, settings)
-      : new Map<string, { ppg: number }>();
-
-    for (const asset of [...evalA, ...evalB]) {
-      if (!asset.player_id || !asset.position) continue;
-      const usage = usageMap.get(asset.player_id);
-      asset.ppg = ppgMap.get(asset.player_id)?.ppg ?? null;
-      if (!usage) continue;
-      const { delta_ppg } = computeScoringDelta(usage, asset.position, settings);
-      const baselineFPPG = estimateBaselineFPPG(usage, asset.position);
-      asset.league_adjusted_score = computeAdjustedEdgeScore(asset.edge_score, delta_ppg, baselineFPPG);
-      asset.scoring_delta_ppg = delta_ppg;
-    }
+  for (const asset of [...evalA, ...evalB]) {
+    const usage = asset.player_id ? usageMap.get(asset.player_id) ?? null : null;
+    const adjustment = applyLeagueMarketAdjustment({
+      baseMarketValue: asset.base_market_value ?? 0,
+      edgeScore: asset.edge_score,
+      position: asset.position,
+      usage,
+      context: leagueContext,
+    });
+    asset.league_market_value = adjustment.leagueMarketValue;
+    asset.scoring_multiplier = adjustment.scoringMultiplier;
+    asset.lineup_scarcity_multiplier = adjustment.lineupScarcityMultiplier;
+    asset.scoring_delta_ppg = adjustment.scoringDeltaPpg;
+    asset.league_adjusted_score = adjustment.leagueAdjustedScore;
+    asset.ppg = asset.player_id ? ppgMap.get(asset.player_id)?.ppg ?? null : null;
   }
 
-  const edgesA = evalA.map((a) => a.edge_score);
-  const edgesB = evalB.map((a) => a.edge_score);
-  const tvResult = evaluateTradeValue(edgesA, edgesB);
+  const leagueValuesA = evalA.map((a) => a.league_market_value ?? a.base_market_value ?? 0);
+  const leagueValuesB = evalB.map((a) => a.league_market_value ?? a.base_market_value ?? 0);
+  const tvResult = evaluateTradeMarketValue(leagueValuesA, leagueValuesB);
 
   for (let i = 0; i < evalA.length; i++) {
-    evalA[i].trade_power = tvResult.sideA.trade_powers[i] ?? 0;
+    const contextValue = tvResult.sideA.contextValues[i] ?? leagueValuesA[i] ?? 0;
+    evalA[i].context_trade_value = contextValue;
+    evalA[i].trade_power = contextValue;
   }
   for (let i = 0; i < evalB.length; i++) {
-    evalB[i].trade_power = tvResult.sideB.trade_powers[i] ?? 0;
+    const contextValue = tvResult.sideB.contextValues[i] ?? leagueValuesB[i] ?? 0;
+    evalB[i].context_trade_value = contextValue;
+    evalB[i].trade_power = contextValue;
   }
 
   const totalEdgeA = Math.round(evalA.reduce((s, a) => s + a.edge_score, 0) * 10) / 10;
   const totalEdgeB = Math.round(evalB.reduce((s, a) => s + a.edge_score, 0) * 10) / 10;
+  const totalBaseA = Math.round(evalA.reduce((s, a) => s + (a.base_market_value ?? 0), 0));
+  const totalBaseB = Math.round(evalB.reduce((s, a) => s + (a.base_market_value ?? 0), 0));
+  const allMarketAssets = [
+    ...evalA.map((asset) => ({ side: "sideA" as const, asset })),
+    ...evalB.map((asset) => ({ side: "sideB" as const, asset })),
+  ];
+  const bestMarketAsset = allMarketAssets
+    .filter(({ asset }) => (asset.league_market_value ?? 0) > 0)
+    .sort((a, b) => (b.asset.league_market_value ?? 0) - (a.asset.league_market_value ?? 0))[0];
   const healthScoreMap = new Map<string, number>();
   for (const asset of [...evalA, ...evalB]) {
     if (asset.player_id) healthScoreMap.set(asset.player_id, asset.edge_score);
@@ -616,18 +663,41 @@ export async function evaluateTrade(
     sideA: {
       assets: evalA,
       total_edge: totalEdgeA,
-      total_trade_power: tvResult.sideA.total_tp,
-      package_penalty_pct: tvResult.sideA.penalty_pct,
+      total_base_market_value: totalBaseA,
+      total_league_market_value: tvResult.sideA.baseTotal,
+      total_adjusted_trade_value: tvResult.sideA.finalTotal,
+      total_trade_power: tvResult.sideA.finalTotal,
+      package_penalty_pct: tvResult.sideA.packagePenaltyPct,
     },
     sideB: {
       assets: evalB,
       total_edge: totalEdgeB,
-      total_trade_power: tvResult.sideB.total_tp,
-      package_penalty_pct: tvResult.sideB.penalty_pct,
+      total_base_market_value: totalBaseB,
+      total_league_market_value: tvResult.sideB.baseTotal,
+      total_adjusted_trade_value: tvResult.sideB.finalTotal,
+      total_trade_power: tvResult.sideB.finalTotal,
+      package_penalty_pct: tvResult.sideB.packagePenaltyPct,
     },
-    delta: tvResult.delta_tp,
+    delta: tvResult.delta,
     delta_edge: Math.round((totalEdgeA - totalEdgeB) * 10) / 10,
     fairness: tvResult.fairness,
+    winner: tvResult.winner,
+    value_adjustment_side: tvResult.valueAdjustmentSide,
+    value_adjustment: tvResult.valueAdjustment,
+    percent_gap: tvResult.percentGap,
+    best_asset_side: tvResult.bestAssetSide,
+    best_asset_edge: bestMarketAsset?.asset.edge_score ?? 0,
+    best_asset_market_value: tvResult.bestAssetMarketValue,
+    consolidation_warning: tvResult.consolidationWarning,
+    needed_to_even: {
+      side: tvResult.neededToEven.side,
+      tradePowerGap: tvResult.neededToEven.tradePowerGap,
+      suggestedEdgeScore: tvResult.neededToEven.suggestedEdgeScore,
+      marketValue: tvResult.neededToEven.marketValue,
+      edgeEquivalent: tvResult.neededToEven.edgeEquivalent,
+      label: tvResult.neededToEven.label,
+    },
+    scoring_context_label: leagueContext?.label ?? null,
     healthCheck,
   };
 }

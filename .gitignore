@@ -3,5 +3,6 @@ dist/
 .env
 *.local
 .env*
+*.log
 .claude/
 test-db.mjs

@@ -1,0 +1,203 @@
+import { db } from "../db/connection.js";
+import { sql } from "drizzle-orm";
+import {
+  computeScoringDelta,
+  estimateBaselineFPPG,
+  parseLeagueScoring,
+  scoringLabel,
+  type LeagueScoringSettings,
+} from "./scoring-adjustment.js";
+import { MAX_MARKET_VALUE } from "./market-value.js";
+
+export interface PlayerUsageProfile {
+  receptions_pg: number;
+  carries_pg: number;
+  passing_tds_pg: number;
+  rushing_tds_pg: number;
+  receiving_tds_pg: number;
+  passing_yds_pg: number;
+  rushing_yds_pg: number;
+  receiving_yds_pg: number;
+}
+
+export interface LeagueMarketContext {
+  scoring: LeagueScoringSettings;
+  rosterPositions: string[];
+  mode: "sf" | "1qb";
+  totalRosters: number;
+  label: string;
+}
+
+export interface LeagueMarketAdjustment {
+  leagueMarketValue: number;
+  scoringMultiplier: number | null;
+  lineupScarcityMultiplier: number | null;
+  scoringDeltaPpg: number | null;
+  leagueAdjustedScore: number | null;
+}
+
+const BASELINE_REPLACEMENT_PPG: Record<string, number> = {
+  QB: 17,
+  RB: 10,
+  WR: 11,
+  TE: 8,
+};
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function roundTo(value: number, decimals = 3): number {
+  const factor = 10 ** decimals;
+  return Math.round(value * factor) / factor;
+}
+
+export async function loadLeagueMarketContext(
+  leagueId: string | undefined,
+  mode: "sf" | "1qb"
+): Promise<LeagueMarketContext | null> {
+  if (!leagueId) return null;
+
+  const rows = await db.execute(sql`
+    SELECT scoring_settings, roster_positions, total_rosters
+    FROM leagues
+    WHERE league_id = ${leagueId}
+    LIMIT 1
+  `);
+  const row = (rows as unknown as Array<{
+    scoring_settings: Record<string, unknown> | null;
+    roster_positions: string[] | null;
+    total_rosters: number | null;
+  }>)[0];
+  if (!row) return null;
+
+  const scoring = parseLeagueScoring(row.scoring_settings ?? null);
+  return {
+    scoring,
+    rosterPositions: row.roster_positions ?? [],
+    mode,
+    totalRosters: row.total_rosters ?? 12,
+    label: scoringLabel(scoring),
+  };
+}
+
+export function scoringMultiplier(params: {
+  baselinePpg: number;
+  leaguePpg: number;
+  baselineReplacementPpg: number;
+  leagueReplacementPpg: number;
+}): number {
+  const baselineVor = Math.max(
+    0.5,
+    params.baselinePpg - params.baselineReplacementPpg
+  );
+  const leagueVor = Math.max(
+    0.5,
+    params.leaguePpg - params.leagueReplacementPpg
+  );
+  const ratio = leagueVor / baselineVor;
+  return roundTo(clamp(Math.pow(ratio, 0.45), 0.78, 1.35));
+}
+
+function estimateLeagueReplacementPpg(
+  position: string,
+  scoring: LeagueScoringSettings
+): number {
+  const baseline = BASELINE_REPLACEMENT_PPG[position] ?? 10;
+  if (position === "QB") {
+    return baseline + (scoring.pass_td - 4) * 1.2;
+  }
+  if (position === "TE") {
+    return baseline + scoring.te_premium * 3;
+  }
+  if (position === "RB") {
+    return baseline + scoring.carry_bonus * 10 + (scoring.ppr - 1) * 3;
+  }
+  if (position === "WR") {
+    return baseline + (scoring.ppr - 1) * 4;
+  }
+  return baseline;
+}
+
+function lineupScarcityMultiplier(
+  position: string | null,
+  context: LeagueMarketContext | null
+): number | null {
+  if (!position || !context) return null;
+
+  const slots = context.rosterPositions;
+  const hasSuperflex = slots.some((slot) => slot === "SUPER_FLEX" || slot === "OP");
+  const qbSlots = slots.filter((slot) => slot === "QB").length;
+  const teSlots = slots.filter((slot) => slot === "TE").length;
+  const flexSlots = slots.filter((slot) => slot === "FLEX").length;
+  const leagueSizeBump = clamp((context.totalRosters - 12) * 0.015, -0.03, 0.06);
+
+  let multiplier = 1;
+  if (position === "QB") {
+    multiplier = context.mode === "sf" || hasSuperflex || qbSlots >= 2 ? 1.10 : 0.88;
+  } else if (position === "TE") {
+    multiplier = teSlots >= 2 ? 1.12 : 1.0;
+  } else if (position === "RB") {
+    multiplier = flexSlots >= 2 ? 1.02 : 1.0;
+  } else if (position === "WR") {
+    multiplier = flexSlots >= 2 ? 1.02 : 1.0;
+  }
+
+  return roundTo(clamp(multiplier + leagueSizeBump, 0.82, 1.22));
+}
+
+export function applyLeagueMarketAdjustment(input: {
+  baseMarketValue: number;
+  edgeScore: number;
+  position: string | null;
+  usage?: PlayerUsageProfile | null;
+  context?: LeagueMarketContext | null;
+}): LeagueMarketAdjustment {
+  const context = input.context ?? null;
+  const scarcity = lineupScarcityMultiplier(input.position, context);
+  let scoringMult: number | null = null;
+  let scoringDeltaPpg: number | null = null;
+  let leagueAdjustedScore: number | null = null;
+
+  if (context && input.usage && input.position) {
+    const baselinePpg = estimateBaselineFPPG(input.usage, input.position);
+    const { delta_ppg } = computeScoringDelta(
+      input.usage,
+      input.position,
+      context.scoring
+    );
+    scoringDeltaPpg = delta_ppg;
+    const leaguePpg = baselinePpg + delta_ppg;
+    scoringMult = scoringMultiplier({
+      baselinePpg,
+      leaguePpg,
+      baselineReplacementPpg: BASELINE_REPLACEMENT_PPG[input.position] ?? 10,
+      leagueReplacementPpg: estimateLeagueReplacementPpg(
+        input.position,
+        context.scoring
+      ),
+    });
+    leagueAdjustedScore = roundTo(
+      clamp(input.edgeScore * scoringMult, 0, 99),
+      1
+    );
+  }
+
+  const scoringFactor = scoringMult ?? 1;
+  const scarcityFactor = scarcity ?? 1;
+  const leagueMarketValue = Math.round(
+    clamp(
+      input.baseMarketValue * scoringFactor * scarcityFactor,
+      0,
+      MAX_MARKET_VALUE
+    )
+  );
+
+  return {
+    leagueMarketValue,
+    scoringMultiplier: scoringMult,
+    lineupScarcityMultiplier: scarcity,
+    scoringDeltaPpg,
+    leagueAdjustedScore,
+  };
+}
