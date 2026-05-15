@@ -17,25 +17,20 @@ import {
 } from "./market-value.js";
 import {
   calculateTradeContext,
+  packageDiscountIndicatorPct,
+  retainedPackageMarketValue,
   type TradeContextResult,
 } from "./trade-context-value.js";
 
 const TRADE_POWER_FLOOR = 45;
-const LEGACY_PACKAGE_MULTIPLIERS = [1.0, 0.7, 0.45, 0.28, 0.18];
 
 type TradeSide = "sideA" | "sideB" | "even";
 
-function roundTo(value: number, decimals = 1): number {
-  const factor = 10 ** decimals;
-  return Math.round(value * factor) / factor;
-}
-
-function legacyPackageMultiplier(index: number): number {
-  return LEGACY_PACKAGE_MULTIPLIERS[
-    Math.min(index, LEGACY_PACKAGE_MULTIPLIERS.length - 1)
-  ];
-}
-
+/**
+ * Deprecated compatibility helper for older callers that only pass Edge Score.
+ * New trade valuation should pass base/league market values through
+ * trade-context-value.ts instead of treating Edge Score as trade value.
+ */
 export function tradePower(
   playerEdge: number,
   _bestInTrade: number = playerEdge,
@@ -45,27 +40,20 @@ export function tradePower(
   return marketValueFromEdge(playerEdge);
 }
 
+/**
+ * Deprecated compatibility helper. Kept for old imports, but package math is
+ * delegated to trade-context-value.ts so this file does not own multipliers.
+ */
 export function applyPackagePenalty(tradePowers: number[]): number {
-  if (tradePowers.length === 0) return 0;
-  if (tradePowers.length === 1) return roundTo(tradePowers[0], 1);
-
-  const sorted = [...tradePowers].sort((a, b) => b - a);
-  return roundTo(
-    sorted.reduce(
-      (total, value, index) => total + value * legacyPackageMultiplier(index),
-      0
-    ),
-    1
-  );
+  return retainedPackageMarketValue(tradePowers);
 }
 
+/**
+ * Deprecated compatibility helper. Kept for old imports, but package math is
+ * delegated to trade-context-value.ts so this file does not own multipliers.
+ */
 export function packagePenaltyPct(assetCount: number): number {
-  if (assetCount <= 1) return 0;
-  let retained = 0;
-  for (let i = 0; i < assetCount; i++) {
-    retained += legacyPackageMultiplier(i);
-  }
-  return Math.round((1 - retained / assetCount) * 100);
+  return packageDiscountIndicatorPct(assetCount);
 }
 
 export interface TradeValueResult {
@@ -154,10 +142,5 @@ export function quickFairness(
   totalA: number,
   totalB: number
 ): "fair" | "slight_edge" | "lopsided" {
-  const maxTP = Math.max(totalA, totalB);
-  const delta = Math.abs(totalA - totalB);
-  const pctDiff = maxTP > 0 ? (delta / maxTP) * 100 : 0;
-  if (pctDiff <= 8) return "fair";
-  if (pctDiff <= 18) return "slight_edge";
-  return "lopsided";
+  return calculateTradeContext([totalA], [totalB]).fairness;
 }

@@ -19,6 +19,7 @@ import type {
   TradeAssetInput,
   TradeEvaluation,
   TradeHealthWarning,
+  TradeValuationWarning,
 } from "../../../shared/types";
 
 type Side = "send" | "receive";
@@ -116,6 +117,10 @@ function tierFromGenericSlot(slot: number): PickTier {
   return "late";
 }
 
+function isPickTier(value: PickSelection): value is PickTier {
+  return value === "early" || value === "mid" || value === "late";
+}
+
 function pickSlotLabel(round: number, slot: number): string {
   return `${round}.${String(slot).padStart(2, "0")}`;
 }
@@ -144,9 +149,14 @@ function winnerColor(winner: TradeEvaluation["winner"]): string {
   return "var(--text-dim)";
 }
 
-function formatTradePower(value: number): string {
+function formatTradeValue(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return "-";
+  return Math.round(value).toLocaleString();
+}
+
+function formatSignedTradeValue(value: number): string {
   const sign = value > 0 ? "+" : "";
-  return `${sign}${value.toFixed(1)} TP`;
+  return `${sign}${formatTradeValue(value)}`;
 }
 
 function acceptanceColor(label: AcceptanceResult["label"]): string {
@@ -212,8 +222,104 @@ function TradeHealthPanel({ warnings }: { warnings: TradeHealthWarning[] }) {
   );
 }
 
-function packagePenalty(count: number): number {
-  return count <= 1 ? 0 : (count - 1) * 1.5;
+function valuationWarningColors(severity: TradeValuationWarning["severity"]) {
+  if (severity === "block") {
+    return {
+      background: "rgba(239,68,68,0.12)",
+      border: "1px solid rgba(239,68,68,0.28)",
+      color: "#fca5a5",
+      label: "#f87171",
+    };
+  }
+  if (severity === "warning") {
+    return {
+      background: "rgba(245,158,11,0.12)",
+      border: "1px solid rgba(245,158,11,0.28)",
+      color: "#fcd34d",
+      label: "#fbbf24",
+    };
+  }
+  return {
+    background: "rgba(96,165,250,0.10)",
+    border: "1px solid rgba(96,165,250,0.22)",
+    color: "#bfdbfe",
+    label: "#93c5fd",
+  };
+}
+
+function ValuationWarningPanel({ warnings }: { warnings: TradeValuationWarning[] }) {
+  if (warnings.length === 0) return null;
+
+  return (
+    <details style={{ marginTop: 8 }}>
+      <summary style={{ cursor: "pointer", color: "#fbbf24", fontSize: 11, fontWeight: 800 }}>
+        Valuation warnings ({warnings.length})
+      </summary>
+      <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
+        {warnings.map((warning, index) => {
+          const colors = valuationWarningColors(warning.severity);
+          return (
+            <div
+              key={`${warning.type}-${warning.asset_key ?? "trade"}-${index}`}
+              style={{
+                background: colors.background,
+                border: colors.border,
+                borderRadius: 8,
+                padding: "9px 10px",
+              }}
+            >
+              <div style={{ color: colors.label, fontSize: 10, fontWeight: 800, textTransform: "uppercase", marginBottom: 4 }}>
+                {warning.type.replaceAll("_", " ")}
+              </div>
+              <div style={{ color: colors.color, fontSize: 12, lineHeight: 1.45 }}>{warning.message}</div>
+            </div>
+          );
+        })}
+      </div>
+    </details>
+  );
+}
+
+function AssetValuationDetails({ asset }: { asset: EvaluatedAsset }) {
+  const sources = asset.source_market_values;
+  const reasons = asset.adjustment_reasons ?? [];
+  const warnings = asset.fallback_warnings ?? [];
+
+  return (
+    <details style={{ marginTop: 2 }}>
+      <summary style={{ cursor: "pointer", color: "var(--text-muted)", fontSize: 10, fontWeight: 700 }}>
+        Valuation details
+      </summary>
+      <div style={{ display: "grid", gap: 8, marginTop: 6, background: "rgba(15,23,42,0.45)", border: "1px solid var(--border)", borderRadius: 8, padding: 8 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(92px, 1fr))", gap: 6 }}>
+          <EvalMetric label="Base" value={formatTradeValue(asset.base_market_value)} />
+          <EvalMetric label="League" value={formatTradeValue(asset.league_market_value)} />
+          <EvalMetric label="Trade" value={formatTradeValue(asset.context_trade_value ?? asset.trade_power)} />
+        </div>
+        {sources && (
+          <div style={{ fontSize: 10, color: "var(--text-muted)", lineHeight: 1.5, overflowWrap: "anywhere" }}>
+            Sources: FC {formatTradeValue(sources.fc)} | KTC {formatTradeValue(sources.ktc)} | DP {formatTradeValue(sources.dp)} | Edge fallback {formatTradeValue(sources.edge_fallback)}
+          </div>
+        )}
+        {reasons.length > 0 && (
+          <div style={{ display: "grid", gap: 4 }}>
+            {reasons.map((reason, index) => (
+              <div key={`${reason.stage}-${index}`} style={{ fontSize: 10, color: "var(--text-dim)", lineHeight: 1.45 }}>
+                <strong style={{ color: "var(--text)" }}>{reason.stage.replaceAll("_", " ")}:</strong> {reason.reason}
+              </div>
+            ))}
+          </div>
+        )}
+        {warnings.length > 0 && (
+          <div style={{ display: "grid", gap: 4 }}>
+            {warnings.map((warning, index) => (
+              <div key={`${warning}-${index}`} style={{ fontSize: 10, color: "#fcd34d", lineHeight: 1.45 }}>{warning}</div>
+            ))}
+          </div>
+        )}
+      </div>
+    </details>
+  );
 }
 
 function buildTradeMessage(
@@ -234,7 +340,7 @@ function buildTradeMessage(
 
   if (acceptance && acceptance.accept_reasons.length > 0) {
     const compelling = acceptance.accept_reasons.filter(
-      (reason) => !reason.includes("Trade power") && !reason.includes("overpay")
+      (reason) => !reason.includes("Trade power") && !reason.includes("trade value") && !reason.includes("overpay")
     );
     if (compelling.length > 0) lines.push(`${compelling[0]}.`);
   }
@@ -290,15 +396,15 @@ function EvalBar({
   }
   if (!result) return null;
 
-  const sendTotal = result.sideA.total_trade_power;
-  const receiveTotal = result.sideB.total_trade_power;
+  const sendTotal = result.sideA.total_context_trade_value ?? result.sideA.total_trade_power;
+  const receiveTotal = result.sideB.total_context_trade_value ?? result.sideB.total_trade_power;
   const total = Math.max(1, sendTotal + receiveTotal);
   const sendPct = (sendTotal / total) * 100;
   const deltaLabel = result.delta > 0
-    ? `You overpay by ${Math.abs(result.delta).toFixed(1)} TP`
+    ? `You overpay by ${formatTradeValue(Math.abs(result.delta))}`
     : result.delta < 0
-      ? `You underpay by ${Math.abs(result.delta).toFixed(1)} TP`
-      : "Even trade power";
+      ? `You underpay by ${formatTradeValue(Math.abs(result.delta))}`
+      : "Even trade value";
   const deltaColor = result.delta > 0 ? "var(--red)" : result.delta < 0 ? "var(--green)" : "var(--text-dim)";
   const winner = result.winner ?? "even";
   const percentGap = result.percent_gap ?? 0;
@@ -330,8 +436,8 @@ function EvalBar({
         )}
       </div>
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--text-dim)", marginBottom: 4 }}>
-        <span>You Send {sendTotal.toFixed(1)} TP</span>
-        <span>You Get {receiveTotal.toFixed(1)} TP</span>
+        <span>You Send {formatTradeValue(sendTotal)}</span>
+        <span>You Get {formatTradeValue(receiveTotal)}</span>
       </div>
       <div style={{ display: "flex", height: 10, borderRadius: 6, overflow: "hidden", background: "var(--dark-base)" }}>
         <div style={{ width: `${sendPct}%`, background: "#ef4444" }} />
@@ -340,7 +446,7 @@ function EvalBar({
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(118px, 1fr))", gap: 8, marginTop: 10 }}>
         <EvalMetric label="Winner" value={winnerLabel(winner)} color={winnerColor(winner)} />
         <EvalMetric label="Gap" value={`${percentGap.toFixed(1)}%`} color={fairnessColor(result.fairness)} />
-        <EvalMetric label="Value adj" value={formatTradePower(valueAdjustment)} color={valueAdjustmentColor} />
+        <EvalMetric label="Value adj" value={formatSignedTradeValue(valueAdjustment)} color={valueAdjustmentColor} />
       </div>
       <div style={{ marginTop: 8, background: "rgba(96,165,250,0.10)", border: "1px solid rgba(96,165,250,0.22)", borderRadius: 8, padding: "9px 10px", color: "#bfdbfe", fontSize: 12, lineHeight: 1.45 }}>
         {neededToEvenLabel}
@@ -351,6 +457,21 @@ function EvalBar({
           <div style={{ color: "#fcd34d", fontSize: 12, lineHeight: 1.45 }}>{result.consolidation_warning}</div>
         </div>
       )}
+      {result.valuation_explanations?.length ? (
+        <details style={{ marginTop: 8 }}>
+          <summary style={{ cursor: "pointer", color: "var(--text-muted)", fontSize: 11, fontWeight: 800 }}>
+            Why this result?
+          </summary>
+          <div style={{ display: "grid", gap: 5, marginTop: 8 }}>
+            {result.valuation_explanations.map((explanation, index) => (
+              <div key={`${explanation}-${index}`} style={{ fontSize: 12, color: "var(--text-dim)", lineHeight: 1.45 }}>
+                {explanation}
+              </div>
+            ))}
+          </div>
+        </details>
+      ) : null}
+      <ValuationWarningPanel warnings={result.warnings ?? []} />
       <TradeHealthPanel warnings={result.healthCheck} />
     </div>
   );
@@ -402,20 +523,18 @@ function TradePanel({
   title,
   color,
   labels,
-  evaluated,
+  side,
   onRemove,
   onClear,
 }: {
   title: string;
   color: string;
   labels: string[];
-  evaluated: EvaluatedAsset[] | null;
+  side: TradeEvaluation["sideA"] | TradeEvaluation["sideB"] | null;
   onRemove: (idx: number) => void;
   onClear: () => void;
 }) {
-  const totalEdge = evaluated?.reduce((s, a) => s + a.edge_score, 0) ?? 0;
-  const penalty = packagePenalty(labels.length);
-  const totalTp = Math.max(0, totalEdge - penalty);
+  const evaluated = side?.assets ?? null;
 
   return (
     <div style={{ background: "var(--card)", border: `1px solid ${color}`, borderRadius: 10, padding: 12 }}>
@@ -427,7 +546,7 @@ function TradePanel({
       {labels.map((label, idx) => {
         const asset = evaluated?.[idx];
         return (
-          <div key={`${label}-${idx}`} style={{ display: "flex", alignItems: "flex-start", gap: 8, borderBottom: "1px solid var(--border)", padding: "7px 0" }}>
+          <div key={`${label}-${idx}`} style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-start", gap: 8, borderBottom: "1px solid var(--border)", padding: "7px 0" }}>
             {asset ? <EdgeScoreBadge score={Math.round(asset.edge_score)} size="sm" /> : <span style={{ width: 32 }} />}
             <div style={{ flex: 1, display: "grid", gap: 4 }}>
               {asset?.pick_breakdown ? (
@@ -443,16 +562,42 @@ function TradePanel({
                 <span style={{ fontSize: 12 }}>{asset?.label ?? label}</span>
               )}
             </div>
-            {asset && <span className="font-mono" style={{ fontSize: 11, color: "var(--text-dim)" }}>TP {Math.round(asset.trade_power)}</span>}
+            {asset && (
+              <div style={{ display: "grid", gap: 3, justifyItems: "end", minWidth: 58 }}>
+                <span className="font-mono" style={{ fontSize: 11, color: "var(--text-dim)" }}>
+                  TV {formatTradeValue(asset.context_trade_value ?? asset.trade_power)}
+                </span>
+                <span style={{ fontSize: 9, color: "var(--text-muted)", textTransform: "uppercase" }}>
+                  {asset.asset_type ?? (asset.player_id ? "player" : "pick")}
+                </span>
+              </div>
+            )}
             <button type="button" onClick={() => onRemove(idx)} style={{ border: "1px solid var(--border)", background: "transparent", color: "var(--red)", borderRadius: 6, padding: "2px 8px", fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>X</button>
+            {asset && (
+              <div style={{ width: "100%", minWidth: 0, paddingLeft: 40 }}>
+                <AssetValuationDetails asset={asset} />
+              </div>
+            )}
           </div>
         );
       })}
       {!!labels.length && (
         <div style={{ marginTop: 8, fontSize: 11, color: "var(--text-dim)", display: "flex", gap: 14, flexWrap: "wrap" }}>
-          <span>Total Edge: <strong style={{ color: "var(--text)" }}>{totalEdge.toFixed(1)}</strong></span>
-          <span>Package Penalty: <strong style={{ color: "var(--text)" }}>{penalty.toFixed(1)}</strong></span>
-          <span>Trade Power: <strong style={{ color: "var(--text)" }}>{totalTp.toFixed(1)}</strong></span>
+          {side ? (
+            <>
+              <span>Base: <strong style={{ color: "var(--text)" }}>{formatTradeValue(side.total_base_market_value)}</strong></span>
+              <span>League: <strong style={{ color: "var(--text)" }}>{formatTradeValue(side.total_league_market_value)}</strong></span>
+              <span>Trade Value: <strong style={{ color: "var(--text)" }}>{formatTradeValue(side.total_context_trade_value ?? side.total_trade_power)}</strong></span>
+              <span>Package: <strong style={{ color: "var(--text)" }}>{side.package_penalty_pct}%</strong></span>
+            </>
+          ) : (
+            <span>{labels.length} asset{labels.length === 1 ? "" : "s"} selected. Backend valuation will load when both sides are complete.</span>
+          )}
+        </div>
+      )}
+      {side?.adjustment_explanation && (
+        <div style={{ marginTop: 8, color: "var(--text-muted)", fontSize: 11, lineHeight: 1.45 }}>
+          {side.adjustment_explanation}
         </div>
       )}
     </div>
@@ -622,7 +767,7 @@ function VacuumSearchColumn({
       return;
     }
     onPickSlotChange(null);
-    onPickTierChange(value);
+    if (isPickTier(value)) onPickTierChange(value);
   }
 
   return (
@@ -1011,9 +1156,9 @@ export default function TradeCalculator() {
             />
           </div>
           <div style={{ ...centerPaneStyle, order: 2 }}>
-            <TradePanel title="YOU SEND" color="#ef4444" labels={sendLabels} evaluated={result?.sideA.assets ?? null} onRemove={removeSend} onClear={() => clearSide("send")} />
+            <TradePanel title="YOU SEND" color="#ef4444" labels={sendLabels} side={result?.sideA ?? null} onRemove={removeSend} onClear={() => clearSide("send")} />
             <EvalBar result={result} acceptance={null} hasBothSides={hasBothSides} isPending={evalMutation.isPending} />
-            <TradePanel title="YOU GET" color="#22c55e" labels={receiveLabels} evaluated={result?.sideB.assets ?? null} onRemove={removeReceive} onClear={() => clearSide("receive")} />
+            <TradePanel title="YOU GET" color="#22c55e" labels={receiveLabels} side={result?.sideB ?? null} onRemove={removeReceive} onClear={() => clearSide("receive")} />
           </div>
           <div style={{ ...rosterPaneStyle, display: "grid", gap: 12, alignSelf: "start", order: 3 }}>
             <VacuumSearchColumn
@@ -1046,9 +1191,9 @@ export default function TradeCalculator() {
             <RosterGrid roster={userRoster} usedPlayerIds={sendPlayerIds} usedPickKeys={sendPickKeys} onPlayerClick={(p) => addFromRoster(p, "send")} onPickClick={(p) => addPick(p, "send")} />
           </div>
           <div style={{ ...centerPaneStyle, order: isCompactLeagueLayout ? 1 : 2 }}>
-            <TradePanel title="YOU SEND" color="#ef4444" labels={sendLabels} evaluated={result?.sideA.assets ?? null} onRemove={removeSend} onClear={() => clearSide("send")} />
+            <TradePanel title="YOU SEND" color="#ef4444" labels={sendLabels} side={result?.sideA ?? null} onRemove={removeSend} onClear={() => clearSide("send")} />
             <EvalBar result={result} acceptance={liveAcceptance} hasBothSides={hasBothSides} isPending={evalMutation.isPending} />
-            <TradePanel title="YOU GET" color="#22c55e" labels={receiveLabels} evaluated={result?.sideB.assets ?? null} onRemove={removeReceive} onClear={() => clearSide("receive")} />
+            <TradePanel title="YOU GET" color="#22c55e" labels={receiveLabels} side={result?.sideB ?? null} onRemove={removeReceive} onClear={() => clearSide("receive")} />
             <AcceptanceBadge acceptance={liveAcceptance} opponent={activeOpponent} />
             {result && selectedLeague && (
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>

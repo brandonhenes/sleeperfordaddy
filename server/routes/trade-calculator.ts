@@ -4,6 +4,7 @@ import { parseWeights } from "../lib/parse-weights.js";
 import { parseClassStrengths } from "../lib/parse-class-strengths.js";
 import { buildLeagueBehaviors, type OpponentContext } from "../services/manager-behavior.js";
 import { getPowerRankings } from "../services/power-rankings.js";
+import { validateTradeAssets } from "../services/trade-asset-validation.js";
 import type { TradeAssetInput } from "../../shared/types.js";
 
 const router = Router();
@@ -31,7 +32,10 @@ router.post("/api/trade/evaluate", async (req, res) => {
       leagueId?: string;
     };
     if (!sideA?.length || !sideB?.length) {
-      return res.status(400).json({ message: "sideA and sideB are required" });
+      return res.status(400).json({
+        message: "sideA and sideB are required",
+        warnings: validateTradeAssets(sideA ?? [], sideB ?? []),
+      });
     }
     const weights = parseWeights(req);
     const classStrengths = parseClassStrengths(req);

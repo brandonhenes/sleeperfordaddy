@@ -24,8 +24,12 @@ export interface LeagueMarketContext {
   scoring: LeagueScoringSettings;
   rosterPositions: string[];
   mode: "sf" | "1qb";
+  requestedMode: "sf" | "1qb";
+  isSuperflex: boolean;
+  isTePremium: boolean;
   totalRosters: number;
   label: string;
+  warnings: string[];
 }
 
 export interface LeagueMarketAdjustment {
@@ -34,6 +38,8 @@ export interface LeagueMarketAdjustment {
   lineupScarcityMultiplier: number | null;
   scoringDeltaPpg: number | null;
   leagueAdjustedScore: number | null;
+  reasons: string[];
+  warnings: string[];
 }
 
 const BASELINE_REPLACEMENT_PPG: Record<string, number> = {
@@ -50,6 +56,50 @@ function clamp(value: number, min: number, max: number): number {
 function roundTo(value: number, decimals = 3): number {
   const factor = 10 ** decimals;
   return Math.round(value * factor) / factor;
+}
+
+export function detectSuperflexFromRosterPositions(rosterPositions: string[]): boolean {
+  const normalized = rosterPositions.map((slot) => slot.toUpperCase());
+  const qbSlots = normalized.filter((slot) => slot === "QB").length;
+  return normalized.some((slot) => slot === "SUPER_FLEX" || slot === "OP") || qbSlots >= 2;
+}
+
+export function detectTePremiumFromScoring(scoring: LeagueScoringSettings): boolean {
+  return scoring.te_premium > 0;
+}
+
+export function buildLeagueMarketContext(input: {
+  scoringSettings: Record<string, unknown> | null;
+  rosterPositions: string[] | null;
+  totalRosters: number | null;
+  fallbackMode: "sf" | "1qb";
+}): LeagueMarketContext {
+  const scoring = parseLeagueScoring(input.scoringSettings ?? null);
+  const rosterPositions = input.rosterPositions ?? [];
+  const hasRosterPositions = rosterPositions.length > 0;
+  const isSuperflex = hasRosterPositions
+    ? detectSuperflexFromRosterPositions(rosterPositions)
+    : input.fallbackMode === "sf";
+  const mode = isSuperflex ? "sf" : "1qb";
+  const warnings: string[] = [];
+
+  if (!hasRosterPositions) {
+    warnings.push("League roster positions were missing; selected format was used as a fallback.");
+  } else if (mode !== input.fallbackMode) {
+    warnings.push(`League format resolved as ${mode.toUpperCase()} from roster positions, overriding selected ${input.fallbackMode.toUpperCase()} fallback.`);
+  }
+
+  return {
+    scoring,
+    rosterPositions,
+    mode,
+    requestedMode: input.fallbackMode,
+    isSuperflex,
+    isTePremium: detectTePremiumFromScoring(scoring),
+    totalRosters: input.totalRosters ?? 12,
+    label: scoringLabel(scoring),
+    warnings,
+  };
 }
 
 export async function loadLeagueMarketContext(
@@ -71,14 +121,12 @@ export async function loadLeagueMarketContext(
   }>)[0];
   if (!row) return null;
 
-  const scoring = parseLeagueScoring(row.scoring_settings ?? null);
-  return {
-    scoring,
-    rosterPositions: row.roster_positions ?? [],
-    mode,
+  return buildLeagueMarketContext({
+    scoringSettings: row.scoring_settings ?? null,
+    rosterPositions: row.roster_positions ?? null,
     totalRosters: row.total_rosters ?? 12,
-    label: scoringLabel(scoring),
-  };
+    fallbackMode: mode,
+  });
 }
 
 export function scoringMultiplier(params: {
@@ -125,8 +173,7 @@ function lineupScarcityMultiplier(
 ): number | null {
   if (!position || !context) return null;
 
-  const slots = context.rosterPositions;
-  const hasSuperflex = slots.some((slot) => slot === "SUPER_FLEX" || slot === "OP");
+  const slots = context.rosterPositions.map((slot) => slot.toUpperCase());
   const qbSlots = slots.filter((slot) => slot === "QB").length;
   const teSlots = slots.filter((slot) => slot === "TE").length;
   const flexSlots = slots.filter((slot) => slot === "FLEX").length;
@@ -134,7 +181,7 @@ function lineupScarcityMultiplier(
 
   let multiplier = 1;
   if (position === "QB") {
-    multiplier = context.mode === "sf" || hasSuperflex || qbSlots >= 2 ? 1.10 : 0.88;
+    multiplier = context.isSuperflex || qbSlots >= 2 ? 1.10 : 0.88;
   } else if (position === "TE") {
     multiplier = teSlots >= 2 ? 1.12 : 1.0;
   } else if (position === "RB") {
@@ -158,6 +205,17 @@ export function applyLeagueMarketAdjustment(input: {
   let scoringMult: number | null = null;
   let scoringDeltaPpg: number | null = null;
   let leagueAdjustedScore: number | null = null;
+  const reasons: string[] = [];
+  const warnings: string[] = [];
+
+  if (!context) {
+    warnings.push("League settings were unavailable; league market value equals base market value.");
+  } else {
+    reasons.push(`League format resolved from roster positions as ${context.mode.toUpperCase()}.`);
+    if (context.isTePremium) {
+      reasons.push(`TE Premium detected from scoring settings at +${context.scoring.te_premium} per TE reception.`);
+    }
+  }
 
   if (context && input.usage && input.position) {
     const baselinePpg = estimateBaselineFPPG(input.usage, input.position);
@@ -181,10 +239,18 @@ export function applyLeagueMarketAdjustment(input: {
       clamp(input.edgeScore * scoringMult, 0, 99),
       1
     );
+    if (scoringMult !== 1 || scoringDeltaPpg !== 0) {
+      reasons.push(`Scoring adjustment applied from projected usage: ${scoringDeltaPpg >= 0 ? "+" : ""}${scoringDeltaPpg.toFixed(2)} PPG.`);
+    }
+  } else if (context && input.position && input.position !== "PICK" && !input.usage) {
+    warnings.push("Player usage profile was unavailable; scoring-specific adjustment was not applied.");
   }
 
   const scoringFactor = scoringMult ?? 1;
   const scarcityFactor = scarcity ?? 1;
+  if (scarcity != null && scarcity !== 1) {
+    reasons.push(`Lineup scarcity multiplier applied for ${input.position}: x${scarcity.toFixed(3)}.`);
+  }
   const leagueMarketValue = Math.round(
     clamp(
       input.baseMarketValue * scoringFactor * scarcityFactor,
@@ -199,5 +265,7 @@ export function applyLeagueMarketAdjustment(input: {
     lineupScarcityMultiplier: scarcity,
     scoringDeltaPpg,
     leagueAdjustedScore,
+    reasons,
+    warnings,
   };
 }

@@ -5,6 +5,8 @@ import type {
   TradeAssetInput,
   TradeEvaluation,
   TradeHealthWarning,
+  TradeValuationAdjustmentReason,
+  TradeValuationWarning,
 } from "../../shared/types.js";
 import type { SourceWeights } from "./edge-score.js";
 import {
@@ -16,9 +18,10 @@ import { computeEdgeScores } from "./edge-score.js";
 import { calculateMarketValueFromSources } from "./market-value.js";
 import {
   applyLeagueMarketAdjustment,
+  buildLeagueMarketContext,
   loadLeagueMarketContext,
 } from "./league-market-adjustment.js";
-import { evaluateTradeMarketValue } from "./trade-value.js";
+import { calculateTradeContext } from "./trade-context-value.js";
 import { getAgeCurveStatus } from "./age-curves.js";
 import { computeLeaguePPG } from "./league-ppg.js";
 import type { ValueType } from "./composite-values.js";
@@ -29,6 +32,7 @@ import {
 import {
   loadPlayerUsageStats,
 } from "./scoring-adjustment.js";
+import { tradeAssetKey, validateTradeAssets } from "./trade-asset-validation.js";
 
 const ROUND_NAMES: Record<number, string> = {
   1: "1st",
@@ -179,6 +183,10 @@ function interpolatePickValue(
 }
 
 type RawEval = {
+  asset_id: string | null;
+  asset_key: string;
+  asset_name: string;
+  asset_type: "player" | "pick";
   player_id: string | null;
   position: string | null;
   label: string;
@@ -187,6 +195,7 @@ type RawEval = {
   dp_value: number | null;
   direct_edge_score?: number | null;
   pick_breakdown?: EvaluatedAsset["pick_breakdown"];
+  fallback_warnings?: string[];
 };
 
 export interface TradeHealthAssetInput {
@@ -405,7 +414,8 @@ async function evaluateAssets(
   mode: "sf" | "1qb",
   valueType: ValueType,
   leagueId?: string,
-  classStrengths?: ClassStrengthMap
+  classStrengths?: ClassStrengthMap,
+  weights?: SourceWeights
 ): Promise<RawEval[]> {
   if (assets.length === 0) return [];
 
@@ -415,7 +425,7 @@ async function evaluateAssets(
 
   const uniquePlayerIds = [...new Set(playerIds)];
   const [compMap, nameRows, pickMaps] = await Promise.all([
-    getCompositeValues(uniquePlayerIds, mode, valueType),
+    getCompositeValues(uniquePlayerIds, mode, valueType, weights),
     uniquePlayerIds.length > 0
       ? db.execute(sql`
           SELECT player_id, full_name, position
@@ -444,13 +454,19 @@ async function evaluateAssets(
     if (asset.type === "player" && asset.player_id) {
       const comp = compMap.get(asset.player_id);
       const meta = names.get(asset.player_id);
+      const assetName = meta?.full_name ?? `Player ${asset.player_id}`;
       return {
+        asset_id: asset.player_id,
+        asset_key: tradeAssetKey(asset),
+        asset_name: assetName,
+        asset_type: "player" as const,
         player_id: asset.player_id,
         position: meta?.position ?? null,
-        label: meta ? `${meta.full_name} (${meta.position})` : `Player ${asset.player_id}`,
+        label: meta ? `${meta.full_name} (${meta.position})` : assetName,
         fc_value: comp?.fc_value ?? null,
         ktc_value: comp?.ktc_value ?? null,
         dp_value: comp?.dp_value ?? null,
+        fallback_warnings: comp ? [] : [`No player market row was found for ${assetName}; Edge fallback may be used.`],
       };
     }
 
@@ -475,17 +491,26 @@ async function evaluateAssets(
         asset.pick_slot,
         pick.round,
         pick.season,
-        pickMaps
+        pickMaps,
+        leagueSize
       );
+      const label = pickBreakdown.pickLabel ?? asset.pick_label ?? interpolated.label;
       return {
+        asset_id: tradeAssetKey(asset),
+        asset_key: tradeAssetKey(asset),
+        asset_name: label,
+        asset_type: "pick" as const,
         player_id: null,
         position: null,
-        label: pickBreakdown.pickLabel ?? asset.pick_label ?? interpolated.label,
+        label,
         fc_value: null,
         ktc_value: interpolated.ktcValue,
         dp_value: interpolated.dpValue,
         direct_edge_score: pickBreakdown.finalValue,
         pick_breakdown: pickBreakdown,
+        fallback_warnings: interpolated.ktcValue == null && interpolated.dpValue == null
+          ? [`No KTC or DynastyProcess exact-slot source was found for ${label}; pick curve fallback was used.`]
+          : [],
       };
     }
 
@@ -503,6 +528,10 @@ async function evaluateAssets(
       null;
 
     return {
+      asset_id: tradeAssetKey(asset),
+      asset_key: tradeAssetKey(asset),
+      asset_name: pickBreakdown.pickLabel ?? label,
+      asset_type: "pick" as const,
       player_id: null,
       position: null,
       label: pickBreakdown.pickLabel ?? label,
@@ -511,6 +540,9 @@ async function evaluateAssets(
       dp_value: dpValue,
       direct_edge_score: pickBreakdown.finalValue,
       pick_breakdown: pickBreakdown,
+      fallback_warnings: ktcValue == null && dpValue == null
+        ? [`No KTC or DynastyProcess tier source was found for ${pickBreakdown.pickLabel ?? label}; pick curve fallback was used.`]
+        : [],
     };
   }));
 }
@@ -532,8 +564,23 @@ function toEvaluatedAsset(
     globalScale,
     weights
   );
+  const fallbackWarnings = [
+    ...(raw.fallback_warnings ?? []),
+    ...marketValue.fallbackWarnings,
+  ];
+  const adjustmentReasons: TradeValuationAdjustmentReason[] =
+    marketValue.calculationReasons.map((reason) => ({
+      stage: "base_market_value",
+      label: "Base market value",
+      reason,
+      amount: marketValue.marketValue,
+    }));
 
   return {
+    asset_id: raw.asset_id,
+    asset_key: raw.asset_key,
+    asset_name: raw.asset_name,
+    asset_type: raw.asset_type,
     player_id: raw.player_id,
     position: raw.position,
     label: raw.label,
@@ -543,6 +590,8 @@ function toEvaluatedAsset(
     context_trade_value: marketValue.marketValue,
     market_value_source: marketValue.marketValueSource,
     source_market_values: marketValue.sourceMarketValues,
+    adjustment_reasons: adjustmentReasons,
+    fallback_warnings: fallbackWarnings,
     trade_power: marketValue.marketValue,
     fc_score: edge.fc_score,
     ktc_score: edge.ktc_score,
@@ -557,6 +606,44 @@ function toEvaluatedAsset(
   };
 }
 
+function valuationWarningsForAsset(
+  asset: EvaluatedAsset,
+  side: "sideA" | "sideB"
+): TradeValuationWarning[] {
+  const warnings: TradeValuationWarning[] = [];
+  if (asset.market_value_source === "edge_fallback") {
+    warnings.push({
+      type: "missing_data",
+      severity: "warning",
+      side,
+      asset_key: asset.asset_key ?? asset.player_id ?? asset.label,
+      message: `${asset.asset_name ?? asset.label} used Edge fallback because usable market source values were missing.`,
+    });
+  }
+  for (const message of asset.fallback_warnings ?? []) {
+    warnings.push({
+      type: "fallback",
+      severity: "info",
+      side,
+      asset_key: asset.asset_key ?? asset.player_id ?? asset.label,
+      message: `${asset.asset_name ?? asset.label}: ${message}`,
+    });
+  }
+  return warnings;
+}
+
+function dedupeWarnings(warnings: TradeValuationWarning[]): TradeValuationWarning[] {
+  const seen = new Set<string>();
+  const out: TradeValuationWarning[] = [];
+  for (const warning of warnings) {
+    const key = `${warning.type}:${warning.severity}:${warning.side ?? ""}:${warning.asset_key ?? ""}:${warning.message}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(warning);
+  }
+  return out;
+}
+
 export async function evaluateTrade(
   sideA: TradeAssetInput[],
   sideB: TradeAssetInput[],
@@ -566,9 +653,10 @@ export async function evaluateTrade(
   leagueId?: string,
   classStrengths?: ClassStrengthMap
 ): Promise<TradeEvaluation> {
+  const validationWarnings = validateTradeAssets(sideA, sideB);
   const [rawA, rawB, globalScale] = await Promise.all([
-    evaluateAssets(sideA, mode, valueType, leagueId, classStrengths),
-    evaluateAssets(sideB, mode, valueType, leagueId, classStrengths),
+    evaluateAssets(sideA, mode, valueType, leagueId, classStrengths, weights),
+    evaluateAssets(sideB, mode, valueType, leagueId, classStrengths, weights),
     getGlobalScaleParams(mode, valueType),
   ]);
 
@@ -599,7 +687,13 @@ export async function evaluateTrade(
     )
   );
 
-  const leagueContext = leagueId ? await loadLeagueMarketContext(leagueId, mode) : null;
+  const loadedLeagueContext = leagueId ? await loadLeagueMarketContext(leagueId, mode) : null;
+  const leagueContext = loadedLeagueContext ?? buildLeagueMarketContext({
+    scoringSettings: null,
+    rosterPositions: null,
+    totalRosters: null,
+    fallbackMode: mode,
+  });
   const allPlayerIds = [...new Set([...evalA, ...evalB].map((a) => a.player_id).filter((id): id is string => !!id))];
   const usageMap = leagueContext ? await loadPlayerUsageStats(allPlayerIds) : new Map();
   const ppgMap = leagueContext && valueType === "redraft"
@@ -621,21 +715,56 @@ export async function evaluateTrade(
     asset.scoring_delta_ppg = adjustment.scoringDeltaPpg;
     asset.league_adjusted_score = adjustment.leagueAdjustedScore;
     asset.ppg = asset.player_id ? ppgMap.get(asset.player_id)?.ppg ?? null : null;
+    asset.adjustment_reasons = [
+      ...(asset.adjustment_reasons ?? []),
+      ...adjustment.reasons.map((reason) => ({
+        stage: "league_market_value" as const,
+        label: "League market adjustment",
+        reason,
+        amount: adjustment.leagueMarketValue,
+      })),
+    ];
+    asset.fallback_warnings = [
+      ...(asset.fallback_warnings ?? []),
+      ...adjustment.warnings,
+    ];
   }
 
   const leagueValuesA = evalA.map((a) => a.league_market_value ?? a.base_market_value ?? 0);
   const leagueValuesB = evalB.map((a) => a.league_market_value ?? a.base_market_value ?? 0);
-  const tvResult = evaluateTradeMarketValue(leagueValuesA, leagueValuesB);
+  const tvResult = calculateTradeContext(leagueValuesA, leagueValuesB);
 
   for (let i = 0; i < evalA.length; i++) {
     const contextValue = tvResult.sideA.contextValues[i] ?? leagueValuesA[i] ?? 0;
     evalA[i].context_trade_value = contextValue;
     evalA[i].trade_power = contextValue;
+    evalA[i].adjustment_reasons = [
+      ...(evalA[i].adjustment_reasons ?? []),
+      {
+        stage: "context_trade_value",
+        label: "Trade context adjustment",
+        reason: contextValue !== leagueValuesA[i]
+          ? `Context trade value adjusted from league market value by ${Math.round((contextValue - (leagueValuesA[i] ?? 0)) * 10) / 10}.`
+          : "Context trade value equals league market value for this asset.",
+        amount: contextValue,
+      },
+    ];
   }
   for (let i = 0; i < evalB.length; i++) {
     const contextValue = tvResult.sideB.contextValues[i] ?? leagueValuesB[i] ?? 0;
     evalB[i].context_trade_value = contextValue;
     evalB[i].trade_power = contextValue;
+    evalB[i].adjustment_reasons = [
+      ...(evalB[i].adjustment_reasons ?? []),
+      {
+        stage: "context_trade_value",
+        label: "Trade context adjustment",
+        reason: contextValue !== leagueValuesB[i]
+          ? `Context trade value adjusted from league market value by ${Math.round((contextValue - (leagueValuesB[i] ?? 0)) * 10) / 10}.`
+          : "Context trade value equals league market value for this asset.",
+        amount: contextValue,
+      },
+    ];
   }
 
   const totalEdgeA = Math.round(evalA.reduce((s, a) => s + a.edge_score, 0) * 10) / 10;
@@ -658,6 +787,38 @@ export async function evaluateTrade(
     healthScoreMap
   );
   const healthCheck = tradeHealthCheck(evalA, evalB, tradeHealth, tvResult.fairness);
+  const leagueWarnings: TradeValuationWarning[] = [
+    ...leagueContext.warnings.map((message) => ({
+      type: "league_settings" as const,
+      severity: "info" as const,
+      side: null,
+      message,
+    })),
+    ...(leagueId && !loadedLeagueContext
+      ? [{
+          type: "league_settings" as const,
+          severity: "warning" as const,
+          side: null,
+          message: `League settings were not found for ${leagueId}; selected format fallback was used.`,
+        }]
+      : []),
+  ];
+  const assetWarnings = [
+    ...evalA.flatMap((asset) => valuationWarningsForAsset(asset, "sideA")),
+    ...evalB.flatMap((asset) => valuationWarningsForAsset(asset, "sideB")),
+  ];
+  const warnings = dedupeWarnings([
+    ...validationWarnings,
+    ...leagueWarnings,
+    ...assetWarnings,
+  ]);
+  const missingDataWarnings = warnings.filter((warning) => warning.type === "missing_data");
+  const duplicateAssetWarnings = warnings.filter((warning) => warning.type === "duplicate_asset");
+  const emptySideWarnings = warnings.filter((warning) => warning.type === "empty_side");
+  const valuationExplanations = [
+    "Trade Calculator pipeline: base_market_value -> league_market_value -> context_trade_value.",
+    ...tvResult.explanations,
+  ];
 
   return {
     sideA: {
@@ -665,18 +826,24 @@ export async function evaluateTrade(
       total_edge: totalEdgeA,
       total_base_market_value: totalBaseA,
       total_league_market_value: tvResult.sideA.baseTotal,
+      total_context_trade_value: tvResult.sideA.finalTotal,
       total_adjusted_trade_value: tvResult.sideA.finalTotal,
       total_trade_power: tvResult.sideA.finalTotal,
       package_penalty_pct: tvResult.sideA.packagePenaltyPct,
+      asset_count: evalA.length,
+      adjustment_explanation: tvResult.sideA.adjustmentExplanation,
     },
     sideB: {
       assets: evalB,
       total_edge: totalEdgeB,
       total_base_market_value: totalBaseB,
       total_league_market_value: tvResult.sideB.baseTotal,
+      total_context_trade_value: tvResult.sideB.finalTotal,
       total_adjusted_trade_value: tvResult.sideB.finalTotal,
       total_trade_power: tvResult.sideB.finalTotal,
       package_penalty_pct: tvResult.sideB.packagePenaltyPct,
+      asset_count: evalB.length,
+      adjustment_explanation: tvResult.sideB.adjustmentExplanation,
     },
     delta: tvResult.delta,
     delta_edge: Math.round((totalEdgeA - totalEdgeB) * 10) / 10,
@@ -697,8 +864,13 @@ export async function evaluateTrade(
       edgeEquivalent: tvResult.neededToEven.edgeEquivalent,
       label: tvResult.neededToEven.label,
     },
-    scoring_context_label: leagueContext?.label ?? null,
+    scoring_context_label: leagueContext.label || null,
     healthCheck,
+    valuation_explanations: valuationExplanations,
+    warnings,
+    missing_data_warnings: missingDataWarnings,
+    duplicate_asset_warnings: duplicateAssetWarnings,
+    empty_side_warnings: emptySideWarnings,
   };
 }
 

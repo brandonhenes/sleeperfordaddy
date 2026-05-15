@@ -257,24 +257,51 @@ export interface TradeAssetInput {
   pick_original_owner_id?: number | null;
 }
 
+export interface TradeValuationAdjustmentReason {
+  stage: "base_market_value" | "league_market_value" | "context_trade_value";
+  label: string;
+  reason: string;
+  amount?: number | null;
+}
+
+export interface TradeValuationWarning {
+  type:
+    | "missing_data"
+    | "fallback"
+    | "duplicate_asset"
+    | "empty_side"
+    | "league_settings"
+    | "validation";
+  severity: "info" | "warning" | "block";
+  message: string;
+  asset_key?: string | null;
+  side?: "sideA" | "sideB" | "both" | null;
+}
+
 export interface TradeEvaluation {
   sideA: {
     assets: EvaluatedAsset[];
     total_edge: number;
     total_base_market_value: number;
     total_league_market_value: number;
+    total_context_trade_value: number;
     total_adjusted_trade_value: number;
     total_trade_power: number;
     package_penalty_pct: number;
+    asset_count: number;
+    adjustment_explanation?: string | null;
   };
   sideB: {
     assets: EvaluatedAsset[];
     total_edge: number;
     total_base_market_value: number;
     total_league_market_value: number;
+    total_context_trade_value: number;
     total_adjusted_trade_value: number;
     total_trade_power: number;
     package_penalty_pct: number;
+    asset_count: number;
+    adjustment_explanation?: string | null;
   };
   delta: number; // positive = sideA wins by trade power
   delta_edge: number; // positive = sideA wins by raw edge
@@ -297,6 +324,11 @@ export interface TradeEvaluation {
   };
   scoring_context_label: string | null;
   healthCheck: TradeHealthWarning[];
+  valuation_explanations?: string[];
+  warnings?: TradeValuationWarning[];
+  missing_data_warnings?: TradeValuationWarning[];
+  duplicate_asset_warnings?: TradeValuationWarning[];
+  empty_side_warnings?: TradeValuationWarning[];
 }
 
 export interface TradePickBreakdown {
@@ -349,6 +381,10 @@ export interface RookieADP {
 }
 
 export interface EvaluatedAsset {
+  asset_id?: string | null;
+  asset_key?: string;
+  asset_name?: string;
+  asset_type?: "player" | "pick";
   player_id: string | null;
   position: string | null;
   label: string;
@@ -372,6 +408,8 @@ export interface EvaluatedAsset {
   scoring_multiplier?: number | null;
   lineup_scarcity_multiplier?: number | null;
   ppg?: number | null;
+  adjustment_reasons?: TradeValuationAdjustmentReason[];
+  fallback_warnings?: string[];
   source_agreement: "high" | "medium" | "low";
   pick_breakdown?: TradePickBreakdown | null;
 }
@@ -427,6 +465,9 @@ export interface TradePackage {
 }
 
 export interface TradePackageAsset {
+  asset_id?: string | null;
+  asset_key?: string;
+  asset_name?: string;
   player_id?: string | null;
   asset_type: "player" | "pick";
   label: string;
@@ -451,6 +492,8 @@ export interface TradePackageAsset {
   scoring_multiplier?: number | null;
   lineup_scarcity_multiplier?: number | null;
   ppg?: number | null;
+  adjustment_reasons?: TradeValuationAdjustmentReason[];
+  fallback_warnings?: string[];
   source_agreement: "high" | "medium" | "low";
   pick_breakdown?: TradePickBreakdown | null;
 }

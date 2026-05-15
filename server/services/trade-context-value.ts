@@ -31,6 +31,7 @@ export interface TradeContextResult {
     finalTotal: number;
     contextValues: number[];
     packagePenaltyPct: number;
+    adjustmentExplanation: string | null;
   };
   sideB: {
     baseTotal: number;
@@ -38,6 +39,7 @@ export interface TradeContextResult {
     finalTotal: number;
     contextValues: number[];
     packagePenaltyPct: number;
+    adjustmentExplanation: string | null;
   };
   delta: number;
   winner: TradeSide;
@@ -49,6 +51,7 @@ export interface TradeContextResult {
   bestAssetMarketValue: number;
   consolidationWarning: string | null;
   neededToEven: NeededToEven;
+  explanations: string[];
 }
 
 function roundTo(value: number, decimals = 1): number {
@@ -64,6 +67,27 @@ function adjustmentSlotMultiplier(index: number): number {
   return ADJUSTMENT_SLOT_MULTIPLIERS[
     Math.min(index, ADJUSTMENT_SLOT_MULTIPLIERS.length - 1)
   ];
+}
+
+export function retainedPackageMarketValue(values: number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => b - a);
+  return roundTo(
+    sorted.reduce(
+      (total, value, index) => total + value * adjustmentSlotMultiplier(index),
+      0
+    ),
+    1
+  );
+}
+
+export function packageDiscountIndicatorPct(assetCount: number): number {
+  if (assetCount <= 1) return 0;
+  let retained = 0;
+  for (let i = 0; i < assetCount; i++) {
+    retained += adjustmentSlotMultiplier(i);
+  }
+  return Math.round((1 - retained / assetCount) * 100);
 }
 
 export function rawAdjustmentForAsset(
@@ -151,12 +175,7 @@ function allocateVisibleAdjustment(
 }
 
 function packagePenaltyPct(values: number[]): number {
-  if (values.length <= 1) return 0;
-  let retained = 0;
-  for (let i = 0; i < values.length; i++) {
-    retained += adjustmentSlotMultiplier(i);
-  }
-  return Math.round((1 - retained / values.length) * 100);
+  return packageDiscountIndicatorPct(values.length);
 }
 
 function consolidationWarning(
@@ -212,6 +231,23 @@ function sideNeedsLabel(side: "sideA" | "sideB", marketValue: number): string {
   const sideLabel = side === "sideA" ? "Side A" : "Side B";
   const base = labelMarketValue(marketValue);
   return `${sideLabel} ${base.charAt(0).toLowerCase()}${base.slice(1)}`;
+}
+
+function sideAdjustmentExplanation(
+  sideLabel: "Side A" | "Side B",
+  assetCount: number,
+  adjustment: number,
+  packagePenalty: number
+): string | null {
+  if (assetCount === 0) return null;
+  const parts: string[] = [];
+  if (adjustment > 0) {
+    parts.push(`${sideLabel} received a ${roundTo(adjustment, 1)} context premium for holding the stronger trade-side asset profile.`);
+  }
+  if (packagePenalty > 0) {
+    parts.push(`${sideLabel} package discount indicator is ${packagePenalty}% because multi-asset packages retain less consolidation value than a single comparable asset.`);
+  }
+  return parts.length > 0 ? parts.join(" ") : null;
 }
 
 function calculateTradeContextCore(
@@ -270,6 +306,18 @@ function calculateTradeContextCore(
         suggestedEdgeScore: null,
         label: "No meaningful sweetener needed.",
       };
+  const sideAPackagePenaltyPct = packagePenaltyPct(sideAValues);
+  const sideBPackagePenaltyPct = packagePenaltyPct(sideBValues);
+  const contextExplanations = [
+    best.side !== "even"
+      ? `Best asset is on ${best.side === "sideA" ? "Side A" : "Side B"} at ${Math.round(best.value)} league market value.`
+      : "Best asset strength is even across both trade sides.",
+    valueAdjustmentSide !== "none"
+      ? `Context adjustment favors ${valueAdjustmentSide === "sideA" ? "Side A" : "Side B"} by ${visibleAdjustment.toFixed(1)}.`
+      : "No visible context adjustment was needed after comparing asset concentration.",
+  ];
+  const warning = consolidationWarning(sideAValues, sideBValues, best);
+  if (warning) contextExplanations.push(warning);
 
   return {
     sideA: {
@@ -277,14 +325,26 @@ function calculateTradeContextCore(
       adjustment: valueAdjustmentSide === "sideA" ? visibleAdjustment : 0,
       finalTotal: finalA,
       contextValues: contextValuesA,
-      packagePenaltyPct: packagePenaltyPct(sideAValues),
+      packagePenaltyPct: sideAPackagePenaltyPct,
+      adjustmentExplanation: sideAdjustmentExplanation(
+        "Side A",
+        sideAValues.length,
+        valueAdjustmentSide === "sideA" ? visibleAdjustment : 0,
+        sideAPackagePenaltyPct
+      ),
     },
     sideB: {
       baseTotal: baseB,
       adjustment: valueAdjustmentSide === "sideB" ? visibleAdjustment : 0,
       finalTotal: finalB,
       contextValues: contextValuesB,
-      packagePenaltyPct: packagePenaltyPct(sideBValues),
+      packagePenaltyPct: sideBPackagePenaltyPct,
+      adjustmentExplanation: sideAdjustmentExplanation(
+        "Side B",
+        sideBValues.length,
+        valueAdjustmentSide === "sideB" ? visibleAdjustment : 0,
+        sideBPackagePenaltyPct
+      ),
     },
     delta,
     winner,
@@ -294,8 +354,9 @@ function calculateTradeContextCore(
     percentGap,
     bestAssetSide: best.side,
     bestAssetMarketValue: Math.round(best.value),
-    consolidationWarning: consolidationWarning(sideAValues, sideBValues, best),
+    consolidationWarning: warning,
     neededToEven,
+    explanations: contextExplanations,
   };
 }
 
