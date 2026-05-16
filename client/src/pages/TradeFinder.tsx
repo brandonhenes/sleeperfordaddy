@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import AppShell from "../components/AppShell";
@@ -18,6 +18,7 @@ import {
 import { usePortfolio } from "../hooks/use-portfolio";
 import { apiFetch } from "../lib/api";
 import { classStrengthQueryParams } from "../lib/pick-strengths";
+import { buildTradeFinderUrl, parseTradeFinderQuery } from "../lib/trade-finder-url";
 import type {
   PickValue,
   TradeSuggestion,
@@ -755,6 +756,9 @@ export default function TradeFinder() {
   const [showShopRedraft, setShowShopRedraft] = useState(false);
   const [shopPathFilter, setShopPathFilter] = useState<string | null>(null);
   const [selectedScoutRosterId, setSelectedScoutRosterId] = useState<number | null>(null);
+  const [pendingScoutRosterId, setPendingScoutRosterId] = useState<number | null>(null);
+  const [scoutRouteWarning, setScoutRouteWarning] = useState<string | null>(null);
+  const scoutDetailRef = useRef<HTMLDivElement | null>(null);
 
   const { data: leagues, isLoading: leaguesLoading } = usePowerRankings(phase === "ready" ? username : "", showShopRedraft);
   const { data: suggestions, isLoading: suggestionsLoading, error: suggestionsError } = useTradeSuggestions(phase === "ready" ? username : "", selectedLeague);
@@ -810,27 +814,57 @@ export default function TradeFinder() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const params = new URLSearchParams(window.location.search);
-    const urlMode = params.get("mode");
-    const urlPlayer = params.get("player");
-    const urlLeague = params.get("league");
+    const routeState = parseTradeFinderQuery(window.location.search);
 
-    if (urlLeague) {
-      setSelectedLeague(urlLeague);
+    if (routeState.leagueId) {
+      setSelectedLeague(routeState.leagueId);
     }
-    if (urlMode === "shop" && urlPlayer) {
+
+    if (routeState.mode === "shop" && routeState.playerId) {
       setMode("shop");
-      setSelectedPlayer(urlPlayer);
+      setSelectedPlayer(routeState.playerId);
+      return;
+    }
+
+    if (routeState.mode === "scout") {
+      setMode("scout");
+      if (!routeState.leagueId) {
+        setScoutRouteWarning("Scout link is missing a league. Select a league to continue.");
+      }
+      if (routeState.invalidOpponentParam) {
+        setScoutRouteWarning(`Scout link has an invalid opponent id: ${routeState.invalidOpponentParam}.`);
+      } else if (routeState.opponentRosterId != null) {
+        setSelectedScoutRosterId(routeState.opponentRosterId);
+        setPendingScoutRosterId(routeState.opponentRosterId);
+      } else {
+        setScoutRouteWarning("Scout link is missing an opponent. Select an opponent card below.");
+      }
+      return;
+    }
+
+    if (routeState.mode === "find" || routeState.mode === "acquire") {
+      setMode(routeState.mode);
     }
   }, []);
 
   useEffect(() => {
+    if (pendingScoutRosterId != null) return;
     setSelectedScoutRosterId(null);
-  }, [selectedLeague]);
+    setScoutRouteWarning(null);
+  }, [pendingScoutRosterId, selectedLeague]);
 
   useEffect(() => {
     if (mode !== "scout") return;
     if (scoutProfilesWithScores.length === 0) {
+      if (pendingScoutRosterId == null) setSelectedScoutRosterId(null);
+      return;
+    }
+    if (
+      pendingScoutRosterId != null &&
+      !scoutProfilesWithScores.some(({ profile }) => profile.rosterId === pendingScoutRosterId)
+    ) {
+      setScoutRouteWarning(`Opponent roster ${pendingScoutRosterId} was not found in this league.`);
+      setPendingScoutRosterId(null);
       setSelectedScoutRosterId(null);
       return;
     }
@@ -838,9 +872,43 @@ export default function TradeFinder() {
       selectedScoutRosterId == null ||
       !scoutProfilesWithScores.some(({ profile }) => profile.rosterId === selectedScoutRosterId)
     ) {
+      if (scoutRouteWarning) return;
       setSelectedScoutRosterId(scoutProfilesWithScores[0].profile.rosterId);
+      return;
     }
-  }, [mode, scoutProfilesWithScores, selectedScoutRosterId]);
+    if (pendingScoutRosterId === selectedScoutRosterId) {
+      setPendingScoutRosterId(null);
+      setScoutRouteWarning(null);
+    }
+  }, [mode, pendingScoutRosterId, scoutProfilesWithScores, scoutRouteWarning, selectedScoutRosterId]);
+
+  useEffect(() => {
+    if (mode !== "scout" || !selectedScoutProfile) return;
+    const id = window.setTimeout(() => {
+      scoutDetailRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      scoutDetailRef.current?.focus({ preventScroll: true });
+    }, 0);
+    return () => window.clearTimeout(id);
+  }, [mode, selectedScoutProfile?.rosterId]);
+
+  function openExploitLink(rosterId: number) {
+    if (!selectedLeague || !username) {
+      setScoutRouteWarning("Select a league before opening exploit angles.");
+      return;
+    }
+    setMode("scout");
+    setSelectedScoutRosterId(rosterId);
+    setPendingScoutRosterId(null);
+    setScoutRouteWarning(null);
+    if (typeof window !== "undefined") {
+      const url = buildTradeFinderUrl(username, {
+        mode: "scout",
+        leagueId: selectedLeague,
+        opponentRosterId: rosterId,
+      });
+      window.history.pushState(null, "", url);
+    }
+  }
 
   if (phase === "checking" || phase === "syncing") {
     return (
@@ -874,7 +942,7 @@ export default function TradeFinder() {
         ]).map((m) => (
           <button
             key={m.key}
-            onClick={() => { setMode(m.key); setSelectedTarget(null); setSelectedPlayer(""); setShopPathFilter(null); }}
+            onClick={() => { setMode(m.key); setSelectedTarget(null); setSelectedPlayer(""); setShopPathFilter(null); if (m.key !== "scout") setScoutRouteWarning(null); }}
             style={{ background: "transparent", border: "none", borderBottom: mode === m.key ? "2px solid var(--amber)" : "2px solid transparent", color: mode === m.key ? "var(--amber)" : "var(--text-muted)", padding: "10px 20px", fontSize: 14, fontWeight: 700, cursor: "pointer", letterSpacing: 0.3, transition: "color 0.15s, border-color 0.15s", fontFamily: "inherit" }}
           >
             {m.label}
@@ -1166,6 +1234,12 @@ export default function TradeFinder() {
             </div>
           </div>
 
+          {scoutRouteWarning && (
+            <div style={{ background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.25)", borderRadius: 10, padding: "12px 16px", marginTop: 12, color: "var(--amber)", fontSize: 12, lineHeight: 1.5 }}>
+              {scoutRouteWarning}
+            </div>
+          )}
+
           {!selectedLeague && (
             <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: "48px 24px", marginTop: 16, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>
               Select a league above to scout opponent tendencies.
@@ -1201,22 +1275,32 @@ export default function TradeFinder() {
                     profile={profile}
                     exploitability={exploitability}
                     selected={profile.rosterId === selectedScoutRosterId}
-                    onExploit={() => setSelectedScoutRosterId(profile.rosterId)}
+                    onExploit={() => openExploitLink(profile.rosterId)}
                   />
                 ))}
               </div>
 
               {selectedScoutProfile && (
-                <OpponentDetail
-                  profile={selectedScoutProfile}
-                  angles={exploitAnglesQuery.data?.angles ?? []}
-                  isLoading={exploitAnglesQuery.isLoading}
-                  onFindTrades={() => {
-                    setMode("find");
-                    setSelectedScoutRosterId(selectedScoutProfile.rosterId);
-                  }}
-                  onClose={() => setSelectedScoutRosterId(null)}
-                />
+                <div ref={scoutDetailRef} tabIndex={-1} style={{ outline: "none" }}>
+                  {exploitAnglesQuery.error && (
+                    <div style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.25)", borderRadius: 10, padding: "12px 16px", marginBottom: 12, color: "var(--red)", fontSize: 12, lineHeight: 1.5 }}>
+                      {(exploitAnglesQuery.error as Error).message || "Failed to load exploit angles."}
+                    </div>
+                  )}
+                  <OpponentDetail
+                    profile={selectedScoutProfile}
+                    angles={exploitAnglesQuery.data?.angles ?? []}
+                    isLoading={exploitAnglesQuery.isLoading}
+                    onFindTrades={() => {
+                      setMode("find");
+                      setSelectedScoutRosterId(selectedScoutProfile.rosterId);
+                    }}
+                    onClose={() => {
+                      setSelectedScoutRosterId(null);
+                      setScoutRouteWarning(null);
+                    }}
+                  />
+                </div>
               )}
             </div>
           )}

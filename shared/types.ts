@@ -451,6 +451,16 @@ export interface TradePackage {
   delta_edge: number;
   package_penalty_pct_send: number;
   package_penalty_pct_receive: number;
+  send_base_market_value?: number;
+  receive_base_market_value?: number;
+  send_league_market_value?: number;
+  receive_league_market_value?: number;
+  send_context_trade_value?: number;
+  receive_context_trade_value?: number;
+  valuation_edge?: number;
+  valuation_percent_gap?: number;
+  valuation_warnings?: TradeValuationWarning[];
+  valuation_explanations?: string[];
   fairness: "fair" | "slight_edge" | "lopsided";
   why_you_do_it: string;
   why_they_accept: string;
@@ -470,6 +480,11 @@ export interface TradePackageAsset {
   asset_name?: string;
   player_id?: string | null;
   asset_type: "player" | "pick";
+  pick_season?: string;
+  pick_round?: number;
+  pick_tier?: "early" | "mid" | "late";
+  pick_slot?: number | null;
+  pick_original_owner_id?: number | null;
   label: string;
   position: string | null;
   edge_score: number;
