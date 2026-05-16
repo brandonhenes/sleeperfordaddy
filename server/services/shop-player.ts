@@ -1,11 +1,22 @@
 import { getPowerRankings, type LeaguePowerRanking, type RosterRanking, type CoreAsset } from "./power-rankings.js";
 import type { ScoredPick } from "./draft-picks.js";
-import type { ShopPlayerResult, ShopOpportunity, EvaluatedAsset } from "../../shared/types.js";
-import { evaluateTradeValue } from "./trade-value.js";
+import type {
+  ShopPlayerResult,
+  ShopOpportunity,
+  EvaluatedAsset,
+  TradePackageAsset,
+  TradeValuationWarning,
+} from "../../shared/types.js";
 import { buildLeagueBehaviors, estimateAcceptance, type ManagerBehavior } from "./manager-behavior.js";
 import { loadTradeHealthPlayerInfo, tradeHealthCheck } from "./trade-calculator.js";
 import { enrichScoredPick, type ClassStrengthMap } from "./pick-values.js";
 import type { ValueType } from "./composite-values.js";
+import {
+  evaluateOpportunityPackage,
+  opportunityValuationFields,
+  type OpportunityPackageValuation,
+  type OpportunityPackageValuationInput,
+} from "./trade-opportunity-valuation.js";
 
 const POSITIONS = ["QB", "RB", "WR", "TE"];
 const MIN_STARTERS: Record<string, number> = { QB: 1, RB: 2, WR: 2, TE: 1 };
@@ -24,8 +35,13 @@ type EnrichedPick = ScoredPick & {
   pick_breakdown: EvaluatedAsset["pick_breakdown"];
 };
 
-function toEval(a: CoreAsset): EvaluatedAsset {
+type EvaluateOpportunityPackageFn = (
+  input: OpportunityPackageValuationInput
+) => Promise<OpportunityPackageValuation>;
+
+export function shopPlayerAssetToTradePackageAsset(a: CoreAsset): TradePackageAsset {
   return {
+    asset_type: "player",
     player_id: a.player_id,
     position: a.position,
     label: a.full_name,
@@ -41,9 +57,15 @@ function toEval(a: CoreAsset): EvaluatedAsset {
   };
 }
 
-function pickToEval(p: EnrichedPick): EvaluatedAsset {
+export function shopPickToTradePackageAsset(p: EnrichedPick): TradePackageAsset {
   return {
+    asset_type: "pick",
     player_id: null,
+    pick_season: p.pick_breakdown?.season ?? p.season,
+    pick_round: p.pick_breakdown?.round ?? p.round,
+    pick_tier: p.pick_breakdown?.tier ?? p.tier,
+    pick_slot: p.pick_slot ?? null,
+    pick_original_owner_id: p.original_owner_id ?? null,
     position: null,
     label: p.label,
     edge_score: p.edge_score,
@@ -55,6 +77,37 @@ function pickToEval(p: EnrichedPick): EvaluatedAsset {
     scoring_delta_ppg: null,
     source_agreement: "high",
     pick_breakdown: p.pick_breakdown ?? null,
+  };
+}
+
+function tradePackageAssetToEvaluatedAsset(asset: TradePackageAsset): EvaluatedAsset {
+  return {
+    asset_id: asset.asset_id,
+    asset_key: asset.asset_key,
+    asset_name: asset.asset_name,
+    asset_type: asset.asset_type,
+    player_id: asset.player_id ?? null,
+    position: asset.position,
+    label: asset.label,
+    edge_score: asset.edge_score,
+    base_market_value: asset.base_market_value,
+    league_market_value: asset.league_market_value,
+    context_trade_value: asset.context_trade_value,
+    market_value_source: asset.market_value_source,
+    source_market_values: asset.source_market_values,
+    trade_power: asset.trade_power,
+    fc_score: asset.fc_score,
+    ktc_score: asset.ktc_score,
+    dp_score: asset.dp_score,
+    league_adjusted_score: asset.league_adjusted_score,
+    scoring_delta_ppg: asset.scoring_delta_ppg,
+    scoring_multiplier: asset.scoring_multiplier,
+    lineup_scarcity_multiplier: asset.lineup_scarcity_multiplier,
+    ppg: asset.ppg,
+    adjustment_reasons: asset.adjustment_reasons,
+    fallback_warnings: asset.fallback_warnings,
+    source_agreement: asset.source_agreement,
+    pick_breakdown: asset.pick_breakdown ?? null,
   };
 }
 
@@ -94,19 +147,67 @@ function scoreBuyerMotivation(
   return { score, reason: reasons.join(", ") };
 }
 
-function fillTradePower(assets: EvaluatedAsset[], tps: number[]): EvaluatedAsset[] {
-  return assets.map((a, i) => ({ ...a, trade_power: tps[i] ?? 0 }));
+export interface ShopPackageScore {
+  sendAssets: EvaluatedAsset[];
+  receiveAssets: EvaluatedAsset[];
+  sendTotal: number;
+  receiveTotal: number;
+  delta: number;
+  valuationEdge: number;
+  fairness: ShopOpportunity["fairness"];
+  sendBaseMarketValue: number;
+  receiveBaseMarketValue: number;
+  sendLeagueMarketValue: number;
+  receiveLeagueMarketValue: number;
+  sendContextTradeValue: number;
+  receiveContextTradeValue: number;
+  percentGap: number;
+  valuationWarnings: TradeValuationWarning[];
+  valuationExplanations: string[];
 }
 
-function scorePackage(sendEdges: number[], receiveEdges: number[]) {
-  const tv = evaluateTradeValue(sendEdges, receiveEdges);
+function roundTo(value: number, decimals = 1): number {
+  const factor = 10 ** decimals;
+  return Math.round(value * factor) / factor;
+}
+
+export async function scoreShopPackage(
+  send: TradePackageAsset[],
+  receive: TradePackageAsset[],
+  leagueId: string,
+  mode: "sf" | "1qb",
+  classStrengths?: ClassStrengthMap,
+  valueType: ValueType = "dynasty",
+  evaluatePackage: EvaluateOpportunityPackageFn = evaluateOpportunityPackage
+): Promise<ShopPackageScore> {
+  const valuation = await evaluatePackage({
+    send,
+    receive,
+    leagueId,
+    mode,
+    classStrengths,
+    valueType,
+  });
+  const metadata = opportunityValuationFields(valuation);
+  const delta = roundTo(valuation.sendContextTradeValue - valuation.receiveContextTradeValue);
+
   return {
-    sendTPs: tv.sideA.trade_powers,
-    receiveTPs: tv.sideB.trade_powers,
-    sendTotal: tv.sideA.total_tp,
-    receiveTotal: tv.sideB.total_tp,
-    delta: tv.delta_tp,
-    fairness: tv.fairness,
+    sendAssets: valuation.sendAssets.map(tradePackageAssetToEvaluatedAsset),
+    receiveAssets: valuation.receiveAssets.map(tradePackageAssetToEvaluatedAsset),
+    sendTotal: valuation.sendContextTradeValue,
+    receiveTotal: valuation.receiveContextTradeValue,
+    delta,
+    valuationEdge: metadata.valuation_edge,
+    fairness: valuation.fairness,
+    sendBaseMarketValue: metadata.send_base_market_value,
+    receiveBaseMarketValue: metadata.receive_base_market_value,
+    sendLeagueMarketValue: metadata.send_league_market_value,
+    receiveLeagueMarketValue: metadata.receive_league_market_value,
+    sendContextTradeValue: metadata.send_context_trade_value,
+    receiveContextTradeValue: metadata.receive_context_trade_value,
+    percentGap: metadata.valuation_percent_gap,
+    valuationWarnings: metadata.valuation_warnings,
+    valuationExplanations: metadata.valuation_explanations,
   };
 }
 
@@ -134,6 +235,8 @@ function computeTopPlayerIdsByPos(roster: RosterRanking): Record<string, string>
 }
 
 interface PackageContext {
+  leagueId: string;
+  mode: "sf" | "1qb";
   userRoster: RosterRanking;
   opp: RosterRanking;
   playerAsset: CoreAsset;
@@ -141,6 +244,9 @@ interface PackageContext {
   ambition: number;
   userPicks: EnrichedPick[];
   oppPicks: EnrichedPick[];
+  classStrengths?: ClassStrengthMap;
+  valueType: ValueType;
+  valuationCache: Map<string, Promise<ShopPackageScore>>;
 }
 
 interface RawPackage {
@@ -151,12 +257,106 @@ interface RawPackage {
   sendTotal: number;
   receiveTotal: number;
   delta: number;
+  valuationEdge: number;
+  sendBaseMarketValue: number;
+  receiveBaseMarketValue: number;
+  sendLeagueMarketValue: number;
+  receiveLeagueMarketValue: number;
+  sendContextTradeValue: number;
+  receiveContextTradeValue: number;
+  percentGap: number;
+  valuationWarnings: TradeValuationWarning[];
+  valuationExplanations: string[];
   fairness: ShopOpportunity["fairness"];
   why_you_do_it: string;
   why_they_accept: string;
 }
 
-function generatePackages(ctx: PackageContext): RawPackage[] {
+function rawPackageValuationFields(scored: ShopPackageScore): Pick<
+  RawPackage,
+  | "you_send"
+  | "you_receive"
+  | "sendTotal"
+  | "receiveTotal"
+  | "delta"
+  | "valuationEdge"
+  | "sendBaseMarketValue"
+  | "receiveBaseMarketValue"
+  | "sendLeagueMarketValue"
+  | "receiveLeagueMarketValue"
+  | "sendContextTradeValue"
+  | "receiveContextTradeValue"
+  | "percentGap"
+  | "valuationWarnings"
+  | "valuationExplanations"
+  | "fairness"
+> {
+  return {
+    you_send: scored.sendAssets,
+    you_receive: scored.receiveAssets,
+    sendTotal: scored.sendTotal,
+    receiveTotal: scored.receiveTotal,
+    delta: scored.delta,
+    valuationEdge: scored.valuationEdge,
+    sendBaseMarketValue: scored.sendBaseMarketValue,
+    receiveBaseMarketValue: scored.receiveBaseMarketValue,
+    sendLeagueMarketValue: scored.sendLeagueMarketValue,
+    receiveLeagueMarketValue: scored.receiveLeagueMarketValue,
+    sendContextTradeValue: scored.sendContextTradeValue,
+    receiveContextTradeValue: scored.receiveContextTradeValue,
+    percentGap: scored.percentGap,
+    valuationWarnings: scored.valuationWarnings,
+    valuationExplanations: scored.valuationExplanations,
+    fairness: scored.fairness,
+  };
+}
+
+async function scorePackageForContext(
+  ctx: PackageContext,
+  send: TradePackageAsset[],
+  receive: TradePackageAsset[]
+): Promise<ShopPackageScore> {
+  const cacheKey = [
+    ctx.leagueId,
+    ctx.mode,
+    ctx.valueType,
+    send.map(assetCacheKey).join("+"),
+    receive.map(assetCacheKey).join("+"),
+  ].join("|");
+  const cached = ctx.valuationCache.get(cacheKey);
+  if (cached) return cached;
+
+  const scorePromise = scoreShopPackage(
+    send,
+    receive,
+    ctx.leagueId,
+    ctx.mode,
+    ctx.classStrengths,
+    ctx.valueType
+  ).catch((error) => {
+    ctx.valuationCache.delete(cacheKey);
+    throw error;
+  });
+  ctx.valuationCache.set(cacheKey, scorePromise);
+  return scorePromise;
+}
+
+function assetCacheKey(asset: TradePackageAsset): string {
+  if (asset.asset_type === "player") {
+    return `player:${asset.player_id ?? asset.label}`;
+  }
+  return [
+    "pick",
+    asset.pick_season ?? asset.pick_breakdown?.season ?? "",
+    asset.pick_round ?? asset.pick_breakdown?.round ?? "",
+    asset.pick_tier ?? asset.pick_breakdown?.tier ?? "",
+    asset.pick_slot ?? "tier",
+    asset.pick_original_owner_id ?? "",
+    asset.label,
+  ].join(":");
+}
+
+async function generatePackages(ctx: PackageContext): Promise<RawPackage[]> {
   const { userRoster, opp, playerAsset, leagueMedians, ambition, userPicks, oppPicks } = ctx;
   const packages: RawPackage[] = [];
 
@@ -180,20 +380,17 @@ function generatePackages(ctx: PackageContext): RawPackage[] {
     .sort((a, b) => b.edge_score - a.edge_score);
 
   for (const candidate of returnCandidates.slice(0, 10)) {
-    const scored = scorePackage([playerAsset.edge_score], [candidate.edge_score]);
+    const scored = await scorePackageForContext(
+      ctx,
+      [shopPlayerAssetToTradePackageAsset(playerAsset)],
+      [shopPlayerAssetToTradePackageAsset(candidate)]
+    );
     if (scored.fairness === "lopsided") continue;
-    const sendAssets = fillTradePower([toEval(playerAsset)], scored.sendTPs);
-    const receiveAssets = fillTradePower([toEval(candidate)], scored.receiveTPs);
     const fillsUserNeed = userNeeds.includes(candidate.position);
     packages.push({
       path: "even_swap",
       path_label: "Even Swap",
-      you_send: sendAssets,
-      you_receive: receiveAssets,
-      sendTotal: scored.sendTotal,
-      receiveTotal: scored.receiveTotal,
-      delta: scored.delta,
-      fairness: scored.fairness,
+      ...rawPackageValuationFields(scored),
       why_you_do_it: fillsUserNeed
         ? `Swap ${playerAsset.position} for ${candidate.position} help you actually need`
         : `Pivot ${playerAsset.position} value into ${candidate.position}`,
@@ -203,17 +400,16 @@ function generatePackages(ctx: PackageContext): RawPackage[] {
 
   for (const candidate of returnCandidates.filter((c) => c.edge_score < playerAsset.edge_score - 5).slice(0, 6)) {
     for (const pick of oppPicks.slice(0, 4)) {
-      const scored = scorePackage([playerAsset.edge_score], [candidate.edge_score, pick.edge_score]);
+      const scored = await scorePackageForContext(
+        ctx,
+        [shopPlayerAssetToTradePackageAsset(playerAsset)],
+        [shopPlayerAssetToTradePackageAsset(candidate), shopPickToTradePackageAsset(pick)]
+      );
       if (scored.fairness === "lopsided") continue;
       packages.push({
         path: "they_add_pick",
         path_label: "Player + Pick Return",
-        you_send: fillTradePower([toEval(playerAsset)], scored.sendTPs),
-        you_receive: fillTradePower([toEval(candidate), pickToEval(pick)], scored.receiveTPs),
-        sendTotal: scored.sendTotal,
-        receiveTotal: scored.receiveTotal,
-        delta: scored.delta,
-        fairness: scored.fairness,
+        ...rawPackageValuationFields(scored),
         why_you_do_it: `Take back ${candidate.position} depth plus draft capital`,
         why_they_accept: `Upgrades to ${playerAsset.full_name} and pays the gap with a pick`,
       });
@@ -227,17 +423,16 @@ function generatePackages(ctx: PackageContext): RawPackage[] {
 
   for (const target of upgradeTargets) {
     for (const pick of userPicks.slice(0, 4)) {
-      const scored = scorePackage([playerAsset.edge_score, pick.edge_score], [target.edge_score]);
+      const scored = await scorePackageForContext(
+        ctx,
+        [shopPlayerAssetToTradePackageAsset(playerAsset), shopPickToTradePackageAsset(pick)],
+        [shopPlayerAssetToTradePackageAsset(target)]
+      );
       if (scored.fairness === "lopsided") continue;
       packages.push({
         path: "you_upgrade",
         path_label: "Player + Pick Upgrade",
-        you_send: fillTradePower([toEval(playerAsset), pickToEval(pick)], scored.sendTPs),
-        you_receive: fillTradePower([toEval(target)], scored.receiveTPs),
-        sendTotal: scored.sendTotal,
-        receiveTotal: scored.receiveTotal,
-        delta: scored.delta,
-        fairness: scored.fairness,
+        ...rawPackageValuationFields(scored),
         why_you_do_it: `Package up for a clear ${target.position} upgrade in ${target.full_name}`,
         why_they_accept: `Gets current production plus a future pick`,
       });
@@ -246,17 +441,16 @@ function generatePackages(ctx: PackageContext): RawPackage[] {
 
     if (ambition >= 2) {
       for (const depth of userDepth.slice(0, 3)) {
-        const scored = scorePackage([playerAsset.edge_score, depth.edge_score], [target.edge_score]);
+        const scored = await scorePackageForContext(
+          ctx,
+          [shopPlayerAssetToTradePackageAsset(playerAsset), shopPlayerAssetToTradePackageAsset(depth)],
+          [shopPlayerAssetToTradePackageAsset(target)]
+        );
         if (scored.fairness === "lopsided") continue;
         packages.push({
           path: "you_upgrade",
           path_label: "2-for-1 Upgrade",
-          you_send: fillTradePower([toEval(playerAsset), toEval(depth)], scored.sendTPs),
-          you_receive: fillTradePower([toEval(target)], scored.receiveTPs),
-          sendTotal: scored.sendTotal,
-          receiveTotal: scored.receiveTotal,
-          delta: scored.delta,
-          fairness: scored.fairness,
+          ...rawPackageValuationFields(scored),
           why_you_do_it: `Consolidate depth into a better weekly starter`,
           why_they_accept: `Turns one asset into two usable pieces`,
         });
@@ -267,20 +461,20 @@ function generatePackages(ctx: PackageContext): RawPackage[] {
     if (ambition >= 3 && userPicks.length > 0 && userDepth.length > 0) {
       const pick = userPicks[0];
       const depth = userDepth[0];
-      const scored = scorePackage(
-        [playerAsset.edge_score, pick.edge_score, depth.edge_score],
-        [target.edge_score]
+      const scored = await scorePackageForContext(
+        ctx,
+        [
+          shopPlayerAssetToTradePackageAsset(playerAsset),
+          shopPickToTradePackageAsset(pick),
+          shopPlayerAssetToTradePackageAsset(depth),
+        ],
+        [shopPlayerAssetToTradePackageAsset(target)]
       );
       if (scored.delta >= 0) {
         packages.push({
           path: "you_upgrade",
           path_label: "3-for-1 Upgrade",
-          you_send: fillTradePower([toEval(playerAsset), pickToEval(pick), toEval(depth)], scored.sendTPs),
-          you_receive: fillTradePower([toEval(target)], scored.receiveTPs),
-          sendTotal: scored.sendTotal,
-          receiveTotal: scored.receiveTotal,
-          delta: scored.delta,
-          fairness: scored.fairness,
+          ...rawPackageValuationFields(scored),
           why_you_do_it: `Reach for a stud by combining player, pick, and depth`,
           why_they_accept: `They cash out one star into multiple usable assets`,
         });
@@ -296,17 +490,16 @@ function generatePackages(ctx: PackageContext): RawPackage[] {
     for (let j = i + 1; j < Math.min(youngPieces.length, i + 4); j++) {
       const p1 = youngPieces[i];
       const p2 = youngPieces[j];
-      const scored = scorePackage([playerAsset.edge_score], [p1.edge_score, p2.edge_score]);
+      const scored = await scorePackageForContext(
+        ctx,
+        [shopPlayerAssetToTradePackageAsset(playerAsset)],
+        [shopPlayerAssetToTradePackageAsset(p1), shopPlayerAssetToTradePackageAsset(p2)]
+      );
       if (scored.fairness === "lopsided" && scored.delta < 0) continue;
       packages.push({
         path: "sell_for_pieces",
         path_label: "Sell for Youth",
-        you_send: fillTradePower([toEval(playerAsset)], scored.sendTPs),
-        you_receive: fillTradePower([toEval(p1), toEval(p2)], scored.receiveTPs),
-        sendTotal: scored.sendTotal,
-        receiveTotal: scored.receiveTotal,
-        delta: scored.delta,
-        fairness: scored.fairness,
+        ...rawPackageValuationFields(scored),
         why_you_do_it: `Turn one veteran slot into two younger assets`,
         why_they_accept: `Consolidates depth into a stronger starter`,
       });
@@ -316,17 +509,16 @@ function generatePackages(ctx: PackageContext): RawPackage[] {
 
   for (const candidate of returnCandidates.filter((c) => (c.age ?? 30) <= 25 && c.edge_score >= 45).slice(0, 4)) {
     for (const pick of oppPicks.slice(0, 3)) {
-      const scored = scorePackage([playerAsset.edge_score], [candidate.edge_score, pick.edge_score]);
+      const scored = await scorePackageForContext(
+        ctx,
+        [shopPlayerAssetToTradePackageAsset(playerAsset)],
+        [shopPlayerAssetToTradePackageAsset(candidate), shopPickToTradePackageAsset(pick)]
+      );
       if (scored.fairness === "lopsided" && scored.delta < 0) continue;
       packages.push({
         path: "sell_for_pieces",
         path_label: "Sell for Youth + Pick",
-        you_send: fillTradePower([toEval(playerAsset)], scored.sendTPs),
-        you_receive: fillTradePower([toEval(candidate), pickToEval(pick)], scored.receiveTPs),
-        sendTotal: scored.sendTotal,
-        receiveTotal: scored.receiveTotal,
-        delta: scored.delta,
-        fairness: scored.fairness,
+        ...rawPackageValuationFields(scored),
         why_you_do_it: `Cash out into a young piece plus a future pick`,
         why_they_accept: `Buys immediate points with one outgoing package`,
       });
@@ -336,17 +528,16 @@ function generatePackages(ctx: PackageContext): RawPackage[] {
 
   if (oppPicks.length > 0) {
     for (const firstPick of oppPicks.slice(0, 4)) {
-      const solo = scorePackage([playerAsset.edge_score], [firstPick.edge_score]);
+      const solo = await scorePackageForContext(
+        ctx,
+        [shopPlayerAssetToTradePackageAsset(playerAsset)],
+        [shopPickToTradePackageAsset(firstPick)]
+      );
       if (solo.fairness !== "lopsided") {
         packages.push({
           path: "sell_for_pieces",
           path_label: "Sell for Picks",
-          you_send: fillTradePower([toEval(playerAsset)], solo.sendTPs),
-          you_receive: fillTradePower([pickToEval(firstPick)], solo.receiveTPs),
-          sendTotal: solo.sendTotal,
-          receiveTotal: solo.receiveTotal,
-          delta: solo.delta,
-          fairness: solo.fairness,
+          ...rawPackageValuationFields(solo),
           why_you_do_it: `Turn ${playerAsset.full_name} into direct draft capital`,
           why_they_accept: "Converts picks into a lineup starter right now.",
         });
@@ -355,20 +546,16 @@ function generatePackages(ctx: PackageContext): RawPackage[] {
 
       const secondPick = oppPicks.find((pick) => pick.label !== firstPick.label);
       if (!secondPick) continue;
-      const duo = scorePackage(
-        [playerAsset.edge_score],
-        [firstPick.edge_score, secondPick.edge_score]
+      const duo = await scorePackageForContext(
+        ctx,
+        [shopPlayerAssetToTradePackageAsset(playerAsset)],
+        [shopPickToTradePackageAsset(firstPick), shopPickToTradePackageAsset(secondPick)]
       );
       if (duo.fairness === "lopsided" && duo.delta < 0) continue;
       packages.push({
         path: "sell_for_pieces",
         path_label: "Sell for Picks",
-        you_send: fillTradePower([toEval(playerAsset)], duo.sendTPs),
-        you_receive: fillTradePower([pickToEval(firstPick), pickToEval(secondPick)], duo.receiveTPs),
-        sendTotal: duo.sendTotal,
-        receiveTotal: duo.receiveTotal,
-        delta: duo.delta,
-        fairness: duo.fairness,
+        ...rawPackageValuationFields(duo),
         why_you_do_it: `Cash out ${playerAsset.full_name} into multiple future darts`,
         why_they_accept: "Consolidates pick surplus into a lineup upgrade.",
       });
@@ -386,20 +573,16 @@ function generatePackages(ctx: PackageContext): RawPackage[] {
             ((offerB.pick_breakdown?.round ?? offerB.round) === 1 ? 1 : 0);
           if (firstRoundCount > 1) continue;
 
-          const scored = scorePackage(
-            [offerA.edge_score, offerB.edge_score],
-            [target.edge_score]
+          const scored = await scorePackageForContext(
+            ctx,
+            [shopPickToTradePackageAsset(offerA), shopPickToTradePackageAsset(offerB)],
+            [shopPlayerAssetToTradePackageAsset(target)]
           );
           if (scored.fairness === "lopsided") continue;
           packages.push({
             path: "you_upgrade",
             path_label: "Pick Package Upgrade",
-            you_send: fillTradePower([pickToEval(offerA), pickToEval(offerB)], scored.sendTPs),
-            you_receive: fillTradePower([toEval(target)], scored.receiveTPs),
-            sendTotal: scored.sendTotal,
-            receiveTotal: scored.receiveTotal,
-            delta: scored.delta,
-            fairness: scored.fairness,
+            ...rawPackageValuationFields(scored),
             why_you_do_it: `Buy ${target.full_name} with picks instead of a core player`,
             why_they_accept: "Gets multiple future assets for one veteran cornerstone.",
           });
@@ -479,6 +662,7 @@ export async function shopPlayer(
 
     const behaviors = await buildLeagueBehaviors(league.league_id);
     const opponents = league.rosters.filter((r) => !r.is_user);
+    const valuationCache = new Map<string, Promise<ShopPackageScore>>();
     const getLeaguePicks = async (roster: RosterRanking) => {
       const cacheKey = `${league.league_id}:${roster.roster_id}`;
       if (pickMap.has(cacheKey)) return pickMap.get(cacheKey) ?? [];
@@ -503,7 +687,9 @@ export async function shopPlayer(
       const oppNeeds = computeNeeds(opp, leagueMedians);
       const topPlayerIdsByPos = computeTopPlayerIdsByPos(opp);
       const behavior: ManagerBehavior | null = behaviors.get(opp.roster_id) ?? null;
-      const packages = generatePackages({
+      const packages = await generatePackages({
+        leagueId: league.league_id,
+        mode: league.mode,
         userRoster,
         opp,
         playerAsset,
@@ -511,6 +697,9 @@ export async function shopPlayer(
         ambition: clampedAmbition,
         userPicks: await getLeaguePicks(userRoster),
         oppPicks: await getLeaguePicks(opp),
+        classStrengths,
+        valueType,
+        valuationCache,
       });
 
       for (const pkg of packages) {
@@ -564,6 +753,16 @@ export async function shopPlayer(
           send_total_tp: pkg.sendTotal,
           receive_total_tp: pkg.receiveTotal,
           delta_tp: pkg.delta,
+          send_base_market_value: pkg.sendBaseMarketValue,
+          receive_base_market_value: pkg.receiveBaseMarketValue,
+          send_league_market_value: pkg.sendLeagueMarketValue,
+          receive_league_market_value: pkg.receiveLeagueMarketValue,
+          send_context_trade_value: pkg.sendContextTradeValue,
+          receive_context_trade_value: pkg.receiveContextTradeValue,
+          valuation_edge: pkg.valuationEdge,
+          valuation_percent_gap: pkg.percentGap,
+          valuation_warnings: pkg.valuationWarnings,
+          valuation_explanations: pkg.valuationExplanations,
           fairness: pkg.fairness,
           why_you_do_it: pkg.why_you_do_it,
           why_they_accept: pkg.why_they_accept,

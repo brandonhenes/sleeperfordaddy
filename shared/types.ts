@@ -760,6 +760,16 @@ export interface ShopOpportunity {
   send_total_tp: number;
   receive_total_tp: number;
   delta_tp: number;
+  send_base_market_value?: number;
+  receive_base_market_value?: number;
+  send_league_market_value?: number;
+  receive_league_market_value?: number;
+  send_context_trade_value?: number;
+  receive_context_trade_value?: number;
+  valuation_edge?: number;
+  valuation_percent_gap?: number;
+  valuation_warnings?: TradeValuationWarning[];
+  valuation_explanations?: string[];
   fairness: "fair" | "slight_edge" | "lopsided";
   why_you_do_it: string;
   why_they_accept: string;

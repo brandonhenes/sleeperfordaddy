@@ -605,6 +605,16 @@ function AssetChip({ asset }: { asset: EvaluatedAsset }) {
 }
 
 function ShopOpportunityCard({ opp }: { opp: ShopOpportunity }) {
+  const [showValuation, setShowValuation] = useState(false);
+  const sendContextValue = opp.send_context_trade_value ?? opp.send_total_tp;
+  const receiveContextValue = opp.receive_context_trade_value ?? opp.receive_total_tp;
+  const valuationEdge = opp.valuation_edge ?? (receiveContextValue - sendContextValue);
+  const hasValuationDetails =
+    opp.send_base_market_value != null ||
+    opp.receive_base_market_value != null ||
+    opp.valuation_warnings?.length ||
+    opp.valuation_explanations?.length;
+
   return (
     <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 12, padding: 16, marginBottom: 12 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
@@ -625,7 +635,7 @@ function ShopOpportunityCard({ opp }: { opp: ShopOpportunity }) {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
         <div>
           <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", borderBottom: "2px solid #ef4444", paddingBottom: 4, marginBottom: 6 }}>
-            You Send ({opp.send_total_tp.toFixed(1)} TP)
+            You Send ({sendContextValue.toFixed(1)} TP)
           </div>
           {opp.you_send.map((a, i) => (
             <AssetChip key={`send-${i}-${a.label}`} asset={a} />
@@ -633,7 +643,7 @@ function ShopOpportunityCard({ opp }: { opp: ShopOpportunity }) {
         </div>
         <div>
           <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", borderBottom: "2px solid #22c55e", paddingBottom: 4, marginBottom: 6 }}>
-            You Receive from {opp.from_team} ({opp.receive_total_tp.toFixed(1)} TP)
+            You Receive from {opp.from_team} ({receiveContextValue.toFixed(1)} TP)
           </div>
           {opp.you_receive.map((a, i) => (
             <AssetChip key={`receive-${i}-${a.label}`} asset={a} />
@@ -693,6 +703,56 @@ function ShopOpportunityCard({ opp }: { opp: ShopOpportunity }) {
           {opp.delta_tp > 0 ? "You overpay" : opp.delta_tp < 0 ? "You underpay" : "Even"} by {Math.abs(opp.delta_tp).toFixed(1)} TP
         </span>
       </div>
+
+      {hasValuationDetails && (
+        <div style={{ marginTop: 10 }}>
+          <button
+            type="button"
+            onClick={() => setShowValuation((current) => !current)}
+            style={{
+              border: "1px solid var(--border)",
+              background: "rgba(255,255,255,0.03)",
+              color: "var(--text-muted)",
+              borderRadius: 6,
+              padding: "5px 8px",
+              fontSize: 11,
+              fontWeight: 700,
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            {showValuation ? "Hide valuation details" : "Show valuation details"}
+          </button>
+          {showValuation && (
+            <div style={{ marginTop: 8, padding: 10, border: "1px solid var(--border)", borderRadius: 8, background: "rgba(255,255,255,0.02)", fontSize: 11, color: "var(--text-dim)", lineHeight: 1.5 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8, marginBottom: 8 }}>
+                <div>
+                  <span style={{ color: "var(--text-muted)", fontWeight: 700 }}>Base: </span>
+                  {Math.round(opp.send_base_market_value ?? 0)} sent / {Math.round(opp.receive_base_market_value ?? 0)} received
+                </div>
+                <div>
+                  <span style={{ color: "var(--text-muted)", fontWeight: 700 }}>League: </span>
+                  {Math.round(opp.send_league_market_value ?? 0)} sent / {Math.round(opp.receive_league_market_value ?? 0)} received
+                </div>
+                <div>
+                  <span style={{ color: "var(--text-muted)", fontWeight: 700 }}>Context edge: </span>
+                  {valuationEdge > 0 ? "+" : ""}{valuationEdge.toFixed(1)}
+                </div>
+              </div>
+              {opp.valuation_warnings && opp.valuation_warnings.length > 0 && (
+                <div style={{ marginBottom: 6, color: "var(--amber)" }}>
+                  {opp.valuation_warnings.slice(0, 2).map((warning) => warning.message).join(" | ")}
+                </div>
+              )}
+              {opp.valuation_explanations && opp.valuation_explanations.length > 0 && (
+                <div>
+                  {opp.valuation_explanations.slice(0, 2).join(" | ")}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

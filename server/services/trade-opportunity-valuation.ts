@@ -41,6 +41,19 @@ export interface OpportunityPackageValuation {
   valuationExplanations: string[];
 }
 
+export interface OpportunityValuationMetadata {
+  send_base_market_value: number;
+  receive_base_market_value: number;
+  send_league_market_value: number;
+  receive_league_market_value: number;
+  send_context_trade_value: number;
+  receive_context_trade_value: number;
+  valuation_edge: number;
+  valuation_percent_gap: number;
+  valuation_warnings: TradeValuationWarning[];
+  valuation_explanations: string[];
+}
+
 function roundTo(value: number, decimals = 1): number {
   const factor = 10 ** decimals;
   return Math.round(value * factor) / factor;
@@ -128,6 +141,23 @@ export function packageScoreFromTradeEvaluation(
     percentGap: evaluation.percent_gap,
     warnings: evaluation.warnings ?? [],
     valuationExplanations: evaluation.valuation_explanations ?? [],
+  };
+}
+
+export function opportunityValuationFields(
+  valuation: OpportunityPackageValuation
+): OpportunityValuationMetadata {
+  return {
+    send_base_market_value: valuation.sendBaseMarketValue,
+    receive_base_market_value: valuation.receiveBaseMarketValue,
+    send_league_market_value: valuation.sendLeagueMarketValue,
+    receive_league_market_value: valuation.receiveLeagueMarketValue,
+    send_context_trade_value: valuation.sendContextTradeValue,
+    receive_context_trade_value: valuation.receiveContextTradeValue,
+    valuation_edge: valuation.delta,
+    valuation_percent_gap: valuation.percentGap,
+    valuation_warnings: valuation.warnings,
+    valuation_explanations: valuation.valuationExplanations,
   };
 }
 
