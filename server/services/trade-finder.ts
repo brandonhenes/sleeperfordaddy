@@ -2,6 +2,9 @@ import type {
   TradeSuggestion,
   TradePackage,
   TradePackageAsset,
+  TradePackageQualityLabel,
+  TradePackageRankingComponents,
+  TradeOpportunityType,
   TradeValuationWarning,
 } from "../../shared/types.js";
 import { db } from "../db/connection.js";
@@ -44,6 +47,9 @@ type Pos = (typeof POSITIONS)[number];
 
 const MIN_STARTERS: Record<Pos, number> = { QB: 1, RB: 2, WR: 2, TE: 1 };
 const MIN_EDGE_SCORE = 42;
+const ANCHOR_EDGE_SCORE = 62;
+const ELITE_EDGE_SCORE = 85;
+const MAJOR_VALUATION_EDGE = 1_500;
 
 const ARCHETYPE_WANTS: Record<string, string> = {
   "Dynasty Juggernaut": "depth maintenance",
@@ -158,6 +164,474 @@ function packageContainsPick(pkg: Pick<TradePackage, "you_send" | "you_receive">
   );
 }
 
+export function isPickOnlyTradePackage(pkg: Pick<TradePackage, "you_send" | "you_receive">): boolean {
+  const assets = [...pkg.you_send, ...pkg.you_receive];
+  return assets.length > 0 && assets.every((asset) => asset.asset_type === "pick");
+}
+
+function packageContainsPlayer(pkg: Pick<TradePackage, "you_send" | "you_receive">): boolean {
+  return (
+    pkg.you_send.some((asset) => asset.asset_type === "player") ||
+    pkg.you_receive.some((asset) => asset.asset_type === "player")
+  );
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function assetMarketValue(asset: TradePackageAsset): number {
+  return (
+    asset.context_trade_value ??
+    asset.league_market_value ??
+    asset.base_market_value ??
+    asset.trade_power ??
+    asset.edge_score * 100
+  );
+}
+
+function assetRound(asset: TradePackageAsset): number | null {
+  return asset.pick_breakdown?.round ?? asset.pick_round ?? null;
+}
+
+function pickQualityKey(asset: TradePackageAsset): string {
+  const round = assetRound(asset) ?? "?";
+  const slot = asset.pick_breakdown?.pickSlot ?? asset.pick_slot ?? null;
+  const tier = asset.pick_breakdown?.tier ?? asset.pick_tier ?? "?";
+  const season = asset.pick_breakdown?.season ?? asset.pick_season ?? "?";
+  return `${season}:r${round}:s${slot ?? tier}`;
+}
+
+function assetShapeKey(asset: TradePackageAsset): string {
+  if (asset.asset_type === "pick") return `pick:${pickQualityKey(asset)}`;
+  return `player:${asset.player_id ?? normalizeLabel(asset.label)}`;
+}
+
+function packageShapeKey(pkg: Pick<TradePackage, "you_send" | "you_receive" | "opportunity_type">): string {
+  const send = pkg.you_send.map(assetShapeKey).sort().join("+");
+  const receive = pkg.you_receive.map(assetShapeKey).sort().join("+");
+  return `${pkg.opportunity_type ?? "unknown"}:${send}->${receive}`;
+}
+
+function pickOnlyShapeKey(pkg: Pick<TradePackage, "you_send" | "you_receive">): string {
+  const send = pkg.you_send.map(pickQualityKey).sort().join("+");
+  const receive = pkg.you_receive.map(pickQualityKey).sort().join("+");
+  return `${send}->${receive}`;
+}
+
+function bestAsset(assets: TradePackageAsset[]): TradePackageAsset | null {
+  if (assets.length === 0) return null;
+  return [...assets].sort((a, b) => assetMarketValue(b) - assetMarketValue(a))[0];
+}
+
+function bestEdge(assets: TradePackageAsset[]): number {
+  return Math.max(0, ...assets.map((asset) => asset.edge_score));
+}
+
+function hasEliteAsset(assets: TradePackageAsset[]): boolean {
+  return assets.some(
+    (asset) => asset.edge_score >= ELITE_EDGE_SCORE || assetMarketValue(asset) >= 8_500
+  );
+}
+
+function isPremiumPick(asset: TradePackageAsset): boolean {
+  if (asset.asset_type !== "pick") return false;
+  const round = assetRound(asset);
+  const slot = asset.pick_breakdown?.pickSlot ?? asset.pick_slot ?? null;
+  return round === 1 || asset.edge_score >= 58 || (round === 2 && (slot == null || slot <= 18));
+}
+
+function isAnchorAsset(asset: TradePackageAsset): boolean {
+  if (asset.asset_type === "pick") return isPremiumPick(asset);
+  return asset.edge_score >= ANCHOR_EDGE_SCORE || assetMarketValue(asset) >= 2_500;
+}
+
+function hasAnchorAsset(assets: TradePackageAsset[]): boolean {
+  return assets.some(isAnchorAsset);
+}
+
+function hasUsefulReturn(pkg: Pick<TradePackage, "you_receive">): boolean {
+  return pkg.you_receive.some(
+    (asset) => asset.edge_score >= 55 || assetMarketValue(asset) >= 1_500 || isPremiumPick(asset)
+  );
+}
+
+function positionsIn(assets: TradePackageAsset[]): Pos[] {
+  const positions = new Set<Pos>();
+  for (const asset of assets) {
+    const pos = asset.position as Pos | null;
+    if (pos && POSITIONS.includes(pos)) positions.add(pos);
+  }
+  return [...positions];
+}
+
+function assetsAddressNeeds(assets: TradePackageAsset[], needs: readonly string[]): boolean {
+  const needSet = new Set(needs);
+  return positionsIn(assets).some((pos) => needSet.has(pos));
+}
+
+function wantsFutureAssets(archetype: string): boolean {
+  return (
+    archetype === "Rebuilder" ||
+    archetype === "Productive Struggle" ||
+    archetype === "Dead Zone"
+  );
+}
+
+function isAgingOrFragilePlayer(asset: CoreAsset): boolean {
+  if (asset.age_curve.score < 72) return true;
+  if (asset.position === "RB" && (asset.age ?? 0) >= 27) return true;
+  if ((asset.position === "WR" || asset.position === "TE") && (asset.age ?? 0) >= 29) return true;
+  if (asset.position === "QB" && (asset.age ?? 0) >= 34) return true;
+  return asset.availability !== "active";
+}
+
+function packageHasPickReturn(pkg: Pick<TradePackage, "you_receive">): boolean {
+  return pkg.you_receive.some((asset) => asset.asset_type === "pick");
+}
+
+function packageHasPickSend(pkg: Pick<TradePackage, "you_send">): boolean {
+  return pkg.you_send.some((asset) => asset.asset_type === "pick");
+}
+
+export function isMaterialPickOnlyTrade(pkg: Pick<TradePackage, "you_send" | "you_receive" | "delta" | "valuation_percent_gap">): boolean {
+  if (!isPickOnlyTradePackage(pkg)) return false;
+
+  const bestSent = bestAsset(pkg.you_send);
+  const bestReceived = bestAsset(pkg.you_receive);
+  if (!bestSent || !bestReceived) return false;
+
+  const receivedRound = assetRound(bestReceived);
+  const sentRounds = pkg.you_send.map(assetRound).filter((round): round is number => round != null);
+  const receivedValue = assetMarketValue(bestReceived);
+  const bestSentValue = assetMarketValue(bestSent);
+  const totalSentValue = pkg.you_send.reduce((sum, asset) => sum + assetMarketValue(asset), 0);
+  const totalReceivedValue = pkg.you_receive.reduce((sum, asset) => sum + assetMarketValue(asset), 0);
+
+  const tierUp =
+    receivedValue >= bestSentValue + 850 ||
+    bestReceived.edge_score >= bestSent.edge_score + 8 ||
+    (receivedRound === 1 && !sentRounds.includes(1) && receivedValue >= bestSentValue + 350);
+  const weakPicksToPremium =
+    pkg.you_send.length >= 2 &&
+    bestReceived.asset_type === "pick" &&
+    isPremiumPick(bestReceived) &&
+    bestSent.edge_score < bestReceived.edge_score;
+  const moveDownForLiquidity =
+    pkg.you_send.length === 1 &&
+    pkg.you_receive.length >= 2 &&
+    totalReceivedValue >= totalSentValue + 1_000;
+
+  return tierUp || weakPicksToPremium || moveDownForLiquidity;
+}
+
+function majorValuationEdge(pkg: Pick<TradePackage, "delta" | "valuation_edge" | "valuation_percent_gap">): boolean {
+  const edge = Math.abs(pkg.valuation_edge ?? pkg.delta);
+  return edge >= MAJOR_VALUATION_EDGE || (pkg.valuation_percent_gap ?? 0) > 24;
+}
+
+function anchorRuleViolation(pkg: Pick<TradePackage, "you_send" | "you_receive">): string | null {
+  const sendElite = hasEliteAsset(pkg.you_send);
+  const receiveElite = hasEliteAsset(pkg.you_receive);
+  const sendAnchor = hasAnchorAsset(pkg.you_send);
+  const receiveAnchor = hasAnchorAsset(pkg.you_receive);
+  const sendBestEdge = bestEdge(pkg.you_send);
+  const receiveBestEdge = bestEdge(pkg.you_receive);
+
+  if (receiveElite && pkg.you_send.length > 1 && !sendAnchor) {
+    return "Rejecting superstar-for-junk volume.";
+  }
+  if (receiveElite && sendBestEdge < receiveBestEdge - 20 && pkg.you_send.length >= 2) {
+    return "Package lacks a real anchor for an elite target.";
+  }
+  if (sendElite && pkg.you_receive.length > 1 && !receiveAnchor) {
+    return "Do not sell an elite asset without a meaningful anchor coming back.";
+  }
+  if (pkg.you_receive.length > 1 && packageContainsPlayer(pkg) && !receiveAnchor) {
+    return "Multi-asset return has no useful anchor.";
+  }
+
+  return null;
+}
+
+function qualityReason(pkg: TradePackage): string {
+  const anchorViolation = anchorRuleViolation(pkg);
+  if (anchorViolation) return anchorViolation;
+  if (isPickOnlyTradePackage(pkg) && !isMaterialPickOnlyTrade(pkg)) {
+    return "Pick swap is not a meaningful tier-up or liquidity move.";
+  }
+  if (!hasUsefulReturn(pkg)) return "Return lacks a useful fantasy asset.";
+  if (!pkg.addresses_my_need && !pkg.addresses_their_need) {
+    return "Does not address either roster unless the valuation edge is strong.";
+  }
+  return "Package has a useful anchor and a clear strategic purpose.";
+}
+
+function opportunityTypeForPackage(pkg: TradePackage): TradeOpportunityType {
+  const sendPlayers = pkg.you_send.filter((asset) => asset.asset_type === "player").length;
+  const receivePlayers = pkg.you_receive.filter((asset) => asset.asset_type === "player").length;
+  const sendPicks = pkg.you_send.length - sendPlayers;
+  const receivePicks = pkg.you_receive.length - receivePlayers;
+
+  if (isPickOnlyTradePackage(pkg)) return "pick_swap";
+  if (pkg.addresses_my_need && pkg.addresses_their_need) return "need_based";
+  if (pkg.type === "consolidation" || (pkg.you_send.length > 1 && pkg.you_receive.length === 1)) {
+    return "consolidate";
+  }
+  if (pkg.you_send.length === 1 && pkg.you_receive.length > 1 && hasAnchorAsset(pkg.you_receive)) {
+    return "deconsolidate";
+  }
+  if (sendPlayers > 0 && sendPicks > 0 && receivePlayers > 0) return "player_plus_pick";
+  if (sendPlayers > 0 && receivePlayers > 0 && receivePicks > 0) return "sell_player";
+  if (sendPicks > 0 || receivePicks > 0) return "pick_sweetener";
+  return "buy_target";
+}
+
+function qualityScore(pkg: TradePackage): number {
+  let score = 50;
+  if (pkg.has_anchor_asset) score += 18;
+  if (pkg.addresses_my_need) score += 14;
+  if (pkg.addresses_their_need) score += 14;
+  if (isPickOnlyTradePackage(pkg)) score -= 25;
+  if (isPickOnlyTradePackage(pkg) && isMaterialPickOnlyTrade(pkg)) score += 15;
+  if (pkg.you_send.length >= 3 && bestEdge(pkg.you_send) < 58) score -= 20;
+  if (pkg.you_receive.length >= 2 && !hasAnchorAsset(pkg.you_receive)) score -= 28;
+  if (anchorRuleViolation(pkg)) score -= 40;
+  return clamp(score, 0, 100);
+}
+
+function qualityLabel(score: number): TradePackageQualityLabel {
+  if (score >= 78) return "premium";
+  if (score >= 58) return "solid";
+  if (score >= 40) return "speculative";
+  return "poor";
+}
+
+function rankingComponents(pkg: TradePackage, quality: number): TradePackageRankingComponents {
+  const valuationEdge = clamp(55 + ((pkg.valuation_edge ?? pkg.delta) / 1_500) * 16, 5, 95);
+  const rosterFit = pkg.addresses_my_need
+    ? 90
+    : packageHasPickReturn(pkg)
+      ? 58
+      : hasAnchorAsset(pkg.you_receive)
+        ? 62
+        : 20;
+  const opponentNeed = pkg.addresses_their_need
+    ? 90
+    : packageHasPickSend(pkg)
+      ? 58
+      : 20;
+  const acceptance = pkg.acceptance?.probability ?? (pkg.addresses_their_need ? 62 : 42);
+  const liquidity = isPickOnlyTradePackage(pkg)
+    ? 56
+    : packageContainsPick(pkg)
+      ? 72
+      : 48;
+  const risk = anchorRuleViolation(pkg)
+    ? 12
+    : pkg.fairness === "lopsided"
+      ? 35
+      : 76;
+  const diversity = pkg.opportunity_type === "pick_swap" ? 20 : 70;
+  const total =
+    valuationEdge * 0.22 +
+    rosterFit * 0.2 +
+    opponentNeed * 0.18 +
+    acceptance * 0.14 +
+    quality * 0.16 +
+    liquidity * 0.04 +
+    risk * 0.04 +
+    diversity * 0.02;
+
+  return {
+    valuation_edge: Math.round(valuationEdge),
+    roster_fit: Math.round(rosterFit),
+    opponent_need: Math.round(opponentNeed),
+    acceptance_likelihood: Math.round(acceptance),
+    package_quality: Math.round(quality),
+    liquidity: Math.round(liquidity),
+    risk: Math.round(risk),
+    diversity: Math.round(diversity),
+    total: Math.round(total),
+  };
+}
+
+export interface TradeFinderQualityContext {
+  userNeeds: readonly string[];
+  opponentNeeds: readonly string[];
+  userArchetype: string;
+  opponentArchetype: string;
+}
+
+export function annotateTradeFinderPackage(
+  pkg: TradePackage,
+  context: TradeFinderQualityContext
+): TradePackage {
+  const pickOnly = isPickOnlyTradePackage(pkg);
+  const addressesMyNeed =
+    assetsAddressNeeds(pkg.you_receive, context.userNeeds) ||
+    (packageHasPickReturn(pkg) && wantsFutureAssets(context.userArchetype)) ||
+    (pickOnly && isMaterialPickOnlyTrade(pkg));
+  const addressesTheirNeed =
+    assetsAddressNeeds(pkg.you_send, context.opponentNeeds) ||
+    (packageHasPickSend(pkg) && wantsFutureAssets(context.opponentArchetype));
+  const hasAnchor = hasAnchorAsset(pkg.you_receive);
+  const provisional: TradePackage = {
+    ...pkg,
+    is_pick_only: pickOnly,
+    has_anchor_asset: hasAnchor,
+    addresses_my_need: addressesMyNeed,
+    addresses_their_need: addressesTheirNeed,
+  };
+  const opportunityType = opportunityTypeForPackage(provisional);
+  const withType: TradePackage = {
+    ...provisional,
+    opportunity_type: opportunityType,
+    roster_fit_reason: addressesMyNeed
+      ? "Return matches your roster need or strategic build direction."
+      : "Return is value-driven rather than a direct roster need.",
+    opponent_need_reason: addressesTheirNeed
+      ? "Outgoing package matches their roster need or rebuild direction."
+      : "Opponent fit is weaker because the package does not solve a clear need.",
+    risk_reason: qualityReason(provisional),
+  };
+  const quality = qualityScore(withType);
+  return {
+    ...withType,
+    package_quality_label: qualityLabel(quality),
+    ranking_components: rankingComponents(withType, quality),
+  };
+}
+
+export function shouldSurfaceTradeFinderPackage(pkg: TradePackage): boolean {
+  if (isPickOnlyTradePackage(pkg) && !isMaterialPickOnlyTrade(pkg)) return false;
+  if (anchorRuleViolation(pkg)) return false;
+  if (!hasUsefulReturn(pkg)) return false;
+  if (!pkg.addresses_my_need && !pkg.addresses_their_need && !majorValuationEdge(pkg)) {
+    return false;
+  }
+  if (
+    pkg.acceptance?.reject_reasons.some((reason) => reason.includes("Does not address a clear need")) &&
+    pkg.fairness !== "lopsided" &&
+    !majorValuationEdge(pkg)
+  ) {
+    return false;
+  }
+  if (pkg.package_quality_label === "poor" && !majorValuationEdge(pkg)) return false;
+  return true;
+}
+
+function withAcceptanceMetadata(pkg: TradePackage): TradePackage {
+  const probability = pkg.acceptance?.probability ?? pkg.ranking_components?.acceptance_likelihood ?? 50;
+  const acceptanceReason =
+    pkg.acceptance?.accept_reasons[0] ??
+    pkg.acceptance?.reject_reasons[0] ??
+    pkg.acceptance_reason ??
+    null;
+  const components = pkg.ranking_components
+    ? {
+        ...pkg.ranking_components,
+        acceptance_likelihood: Math.round(probability),
+        total: Math.round(pkg.ranking_components.total + (probability - pkg.ranking_components.acceptance_likelihood) * 0.14),
+      }
+    : undefined;
+
+  return {
+    ...pkg,
+    acceptance_reason: acceptanceReason ?? undefined,
+    ranking_components: components,
+  };
+}
+
+export function dedupeAndRankTradeFinderPackages(
+  packages: TradePackage[],
+  maxPackages = 4
+): TradePackage[] {
+  const seen = new Set<string>();
+  const typeCounts = new Map<TradeOpportunityType, number>();
+  const sorted = [...packages].sort(
+    (a, b) =>
+      (b.ranking_components?.total ?? 0) - (a.ranking_components?.total ?? 0) ||
+      (b.receive_total - b.send_total) - (a.receive_total - a.send_total)
+  );
+  const selected: TradePackage[] = [];
+
+  for (const pkg of sorted) {
+    if (selected.length >= maxPackages) break;
+    const key = packageShapeKey(pkg);
+    if (seen.has(key)) continue;
+    const type = pkg.opportunity_type ?? "buy_target";
+    const typeCount = typeCounts.get(type) ?? 0;
+    if (typeCount >= 2 && selected.length < maxPackages - 1) continue;
+    if (isPickOnlyTradePackage(pkg) && selected.some(isPickOnlyTradePackage)) continue;
+
+    seen.add(key);
+    typeCounts.set(type, typeCount + 1);
+    selected.push(pkg);
+  }
+
+  if (selected.length < maxPackages) {
+    for (const pkg of sorted) {
+      if (selected.length >= maxPackages) break;
+      const key = packageShapeKey(pkg);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      selected.push(pkg);
+    }
+  }
+
+  return selected;
+}
+
+export function applyDisplayedTradeDiversity(
+  suggestions: TradeSuggestion[]
+): TradeSuggestion[] {
+  const pickEntries: Array<{ suggestionIndex: number; packageIndex: number; pkg: TradePackage; rank: number }> = [];
+  let playerBasedCount = 0;
+
+  suggestions.forEach((suggestion, suggestionIndex) => {
+    suggestion.packages.forEach((pkg, packageIndex) => {
+      if (isPickOnlyTradePackage(pkg)) {
+        pickEntries.push({
+          suggestionIndex,
+          packageIndex,
+          pkg,
+          rank: pkg.ranking_components?.total ?? 0,
+        });
+      } else {
+        playerBasedCount += 1;
+      }
+    });
+  });
+
+  if (pickEntries.length === 0) {
+    return suggestions.filter((suggestion) => suggestion.packages.length > 0);
+  }
+
+  const allowedPickOnly = playerBasedCount > 0
+    ? Math.floor(playerBasedCount / 4)
+    : pickEntries.length;
+  const keepPickEntries = new Set<string>();
+  const seenPickShapes = new Set<string>();
+  for (const entry of [...pickEntries].sort((a, b) => b.rank - a.rank)) {
+    if (keepPickEntries.size >= allowedPickOnly) break;
+    const shape = pickOnlyShapeKey(entry.pkg);
+    if (seenPickShapes.has(shape)) continue;
+    seenPickShapes.add(shape);
+    keepPickEntries.add(`${entry.suggestionIndex}:${entry.packageIndex}`);
+  }
+
+  return suggestions
+    .map((suggestion, suggestionIndex) => ({
+      ...suggestion,
+      packages: suggestion.packages.filter((pkg, packageIndex) => {
+        if (!isPickOnlyTradePackage(pkg)) return true;
+        return keepPickEntries.has(`${suggestionIndex}:${packageIndex}`);
+      }),
+    }))
+    .filter((suggestion) => suggestion.packages.length > 0);
+}
+
 type PackageScore = {
   sendAssets: TradePackageAsset[];
   receiveAssets: TradePackageAsset[];
@@ -181,7 +655,7 @@ type PackageScore = {
   fairness: "fair" | "slight_edge" | "lopsided";
 };
 
-async function scorePackage(
+export async function scoreTradeFinderPackage(
   send: TradePackageAsset[],
   receive: TradePackageAsset[],
   leagueId: string,
@@ -219,6 +693,8 @@ async function scorePackage(
     fairness: valuation.fairness,
   };
 }
+
+type TradeFinderPackageScorer = typeof scoreTradeFinderPackage;
 
 function valuationFields(scored: PackageScore): Pick<
   TradePackage,
@@ -441,7 +917,7 @@ function scoreCompatibility(
 
 // Package Generation
 
-async function generatePackages(
+export async function generateTradeFinderPackages(
   user: RosterProfile,
   opp: RosterProfile,
   mode: "sf" | "1qb",
@@ -449,7 +925,8 @@ async function generatePackages(
   scoring: LeagueScoringSettings,
   usage: UsageStats,
   hasCustom: boolean,
-  classStrengths?: ClassStrengthMap
+  classStrengths?: ClassStrengthMap,
+  scorePackage: TradeFinderPackageScorer = scoreTradeFinderPackage
 ): Promise<TradePackage[]> {
   const packages: TradePackage[] = [];
 
@@ -619,6 +1096,77 @@ async function generatePackages(
     }
   }
 
+  for (const userPos of POSITIONS) {
+    const sellCandidates = user.surplus[userPos].filter(
+      (asset) => asset.edge_score >= ANCHOR_EDGE_SCORE
+    );
+    if (sellCandidates.length === 0) continue;
+
+    for (const oppPos of POSITIONS) {
+      if (opp.surplus[oppPos].length === 0) continue;
+
+      const outgoing = sellCandidates.find(
+        (asset) =>
+          opp.needs.includes(userPos as Pos) ||
+          isAgingOrFragilePlayer(asset) ||
+          asset.edge_score >= (opp.surplus[oppPos][0]?.edge_score ?? 0) + 8
+      );
+      if (!outgoing) continue;
+
+      const anchor = opp.surplus[oppPos].find(
+        (asset) =>
+          asset.player_id !== outgoing.player_id &&
+          asset.edge_score >= 55 &&
+          asset.edge_score <= outgoing.edge_score - 3 &&
+          asset.edge_score >= outgoing.edge_score - 18
+      );
+      const pick = opp.tradeablePicks.find((candidate) => candidate.edge_score >= 18);
+      if (!anchor || !pick) continue;
+      if (!user.needs.includes(oppPos as Pos) && !isAgingOrFragilePlayer(outgoing)) {
+        continue;
+      }
+
+      const send = [assetFromPlayerWithScoring(outgoing, scoring, usage, hasCustom)];
+      const receive = [
+        assetFromPlayerWithScoring(anchor, scoring, usage, hasCustom),
+        assetFromPick(pick),
+      ];
+      const scored = await scorePackage(send, receive, leagueId, mode, classStrengths);
+      if (scored.fairness === "lopsided" || scored.sendTotal <= 0 || scored.receiveTotal <= 0) {
+        continue;
+      }
+
+      packages.push({
+        type: "player_plus_pick",
+        trade_type: tradeTypeForPackage("player_plus_pick"),
+        label: isAgingOrFragilePlayer(outgoing) ? "Sell for Youth" : "Player + Pick Return",
+        you_send: scored.sendAssets,
+        you_receive: scored.receiveAssets,
+        send_total: scored.sendTotal,
+        receive_total: scored.receiveTotal,
+        delta: scored.delta,
+        send_edge: scored.sendEdge,
+        receive_edge: scored.receiveEdge,
+        delta_edge: scored.deltaEdge,
+        package_penalty_pct_send: scored.packagePenaltySend,
+        package_penalty_pct_receive: scored.packagePenaltyReceive,
+        ...valuationFields(scored),
+        fairness: scored.fairness,
+        why_you_do_it: isAgingOrFragilePlayer(outgoing)
+          ? `Move an aging or availability-risk ${userPos} for a younger ${oppPos} anchor plus pick liquidity`
+          : `Turn ${userPos} surplus into a ${oppPos} anchor plus draft liquidity`,
+        why_they_accept: opp.needs.includes(userPos as Pos)
+          ? `Fills their ${userPos} need while they pay with ${oppPos} surplus and a pick.`
+          : `Consolidates a player-plus-pick package into the better single player.`,
+        sweetener_hint: scored.deltaEdge < -5
+          ? "Ask for a smaller pick if this return is too ambitious."
+          : null,
+        acceptance: null,
+        healthCheck: [],
+      });
+    }
+  }
+
   if (user.tradeablePicks.length > 0) {
     for (const oppPos of POSITIONS) {
       if (!user.needs.includes(oppPos as Pos)) continue;
@@ -693,13 +1241,18 @@ async function generatePackages(
   }
 
   if (user.tradeablePicks.length >= 2 && opp.tradeablePicks.length > 0) {
-    for (const targetPick of opp.tradeablePicks.slice(0, 2)) {
+    let pickOnlyGenerated = 0;
+    const premiumTargetPicks = opp.tradeablePicks
+      .filter((targetPick) => isPremiumPick(assetFromPick(targetPick)))
+      .slice(0, 1);
+
+    for (const targetPick of premiumTargetPicks) {
       const sendPool = user.tradeablePicks.filter(
         (pick) =>
           pick.label !== targetPick.label &&
           (pick.pick_breakdown?.round ?? pick.round) <= 4
-      );
-      for (let i = 0; i < sendPool.length; i++) {
+      ).slice(0, 8);
+      for (let i = 0; i < sendPool.length && pickOnlyGenerated < 1; i++) {
         for (let j = i + 1; j < Math.min(sendPool.length, i + 4); j++) {
           const offerA = sendPool[i];
           const offerB = sendPool[j];
@@ -710,8 +1263,29 @@ async function generatePackages(
 
           const send = [assetFromPick(offerA), assetFromPick(offerB)];
           const receive = [assetFromPick(targetPick)];
+          if (
+            !isMaterialPickOnlyTrade({
+              you_send: send,
+              you_receive: receive,
+              delta: receive[0].edge_score - offerA.edge_score - offerB.edge_score,
+              valuation_percent_gap: 0,
+            })
+          ) {
+            continue;
+          }
+
           const scored = await scorePackage(send, receive, leagueId, mode, classStrengths);
           if (scored.fairness === "lopsided" || scored.sendTotal <= 0 || scored.receiveTotal <= 0) {
+            continue;
+          }
+          if (
+            !isMaterialPickOnlyTrade({
+              you_send: scored.sendAssets,
+              you_receive: scored.receiveAssets,
+              delta: scored.delta,
+              valuation_percent_gap: scored.percentGap,
+            })
+          ) {
             continue;
           }
 
@@ -737,56 +1311,24 @@ async function generatePackages(
             acceptance: null,
             healthCheck: [],
           });
+          pickOnlyGenerated += 1;
+          break;
         }
       }
     }
   }
 
-  const seen = new Set<string>();
-  const deduped: TradePackage[] = [];
-  for (const pkg of packages) {
-    const key = `${pkg.type}:${pkg.you_receive.map((a) => a.label).join(",")}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    deduped.push(pkg);
-  }
-
-  const typeOrder = { player_plus_pick: 0, picks_heavy: 1, balanced: 2, consolidation: 3 };
-  const fairnessRank = { fair: 0, slight_edge: 1, lopsided: 2 };
-  deduped.sort((a, b) => {
-    return (
-      (fairnessRank[a.fairness] ?? 9) - (fairnessRank[b.fairness] ?? 9) ||
-      b.receive_total - a.receive_total ||
-      b.delta - a.delta ||
-      (typeOrder[a.type] ?? 9) - (typeOrder[b.type] ?? 9)
-    );
-  });
-
-  const selected: TradePackage[] = [];
-  const pushPackage = (pkg: TradePackage) => {
-    if (selected.some(
-      (existing) =>
-        existing.type === pkg.type &&
-        existing.you_send.map((asset) => asset.label).join("|") === pkg.you_send.map((asset) => asset.label).join("|") &&
-        existing.you_receive.map((asset) => asset.label).join("|") === pkg.you_receive.map((asset) => asset.label).join("|")
-    )) {
-      return;
-    }
-    selected.push(pkg);
+  const context: TradeFinderQualityContext = {
+    userNeeds: user.needs,
+    opponentNeeds: opp.needs,
+    userArchetype: user.roster.archetype,
+    opponentArchetype: opp.roster.archetype,
   };
+  const qualified = packages
+    .map((pkg) => annotateTradeFinderPackage(pkg, context))
+    .filter(shouldSurfaceTradeFinderPackage);
 
-  const pickPackages = deduped.filter(packageContainsPick);
-  const nonPickPackages = deduped.filter((pkg) => !packageContainsPick(pkg));
-  const minimumPickPackages = Math.min(2, pickPackages.length);
-  for (const pkg of pickPackages.slice(0, minimumPickPackages)) {
-    pushPackage(pkg);
-  }
-  for (const pkg of [...nonPickPackages, ...pickPackages.slice(minimumPickPackages)]) {
-    if (selected.length >= 4) break;
-    pushPackage(pkg);
-  }
-
-  return selected.slice(0, 4);
+  return dedupeAndRankTradeFinderPackages(qualified, 4);
 }
 
 // Main
@@ -864,7 +1406,7 @@ export async function findTrades(
   const suggestions: TradeSuggestion[] = [];
 
   for (const { opp, score, reason } of ranked) {
-    const basePackages = await generatePackages(
+    const basePackages = await generateTradeFinderPackages(
       userProfile,
       opp,
       mode,
@@ -875,6 +1417,7 @@ export async function findTrades(
       classStrengths
     );
     const packages = applyAcceptanceAndBehavior(basePackages, userProfile, opp)
+      .map(withAcceptanceMetadata)
       .map((pkg) => ({
         ...pkg,
         healthCheck: tradeHealthCheck(
@@ -884,7 +1427,12 @@ export async function findTrades(
           pkg.fairness
         ),
       }))
-      .filter((pkg) => !pkg.healthCheck.some((warning) => warning.type === "block"));
+      .filter((pkg) => !pkg.healthCheck.some((warning) => warning.type === "block"))
+      .filter(shouldSurfaceTradeFinderPackage)
+      .sort(
+        (a, b) =>
+          (b.ranking_components?.total ?? 0) - (a.ranking_components?.total ?? 0)
+      );
     if (packages.length === 0) continue;
 
     suggestions.push({
@@ -903,5 +1451,5 @@ export async function findTrades(
     });
   }
 
-  return suggestions;
+  return applyDisplayedTradeDiversity(suggestions);
 }

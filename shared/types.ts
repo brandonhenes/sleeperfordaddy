@@ -437,10 +437,40 @@ export interface TradeSuggestion {
   packages: TradePackage[];
 }
 
+export type TradeOpportunityType =
+  | "buy_target"
+  | "sell_player"
+  | "consolidate"
+  | "deconsolidate"
+  | "need_based"
+  | "player_plus_pick"
+  | "pick_sweetener"
+  | "pick_swap";
+
+export type TradePackageQualityLabel = "premium" | "solid" | "speculative" | "poor";
+
+export interface TradePackageRankingComponents {
+  valuation_edge: number;
+  roster_fit: number;
+  opponent_need: number;
+  acceptance_likelihood: number;
+  package_quality: number;
+  liquidity: number;
+  risk: number;
+  diversity: number;
+  total: number;
+}
+
 export interface TradePackage {
   type: "balanced" | "consolidation" | "picks_heavy" | "player_plus_pick";
   trade_type: "1-for-1" | "player-plus-pick" | "2-for-1" | "pick-package";
   label: string;
+  opportunity_type?: TradeOpportunityType;
+  package_quality_label?: TradePackageQualityLabel;
+  is_pick_only?: boolean;
+  has_anchor_asset?: boolean;
+  addresses_my_need?: boolean;
+  addresses_their_need?: boolean;
   you_send: TradePackageAsset[];
   you_receive: TradePackageAsset[];
   send_total: number; // trade power
@@ -462,6 +492,11 @@ export interface TradePackage {
   valuation_warnings?: TradeValuationWarning[];
   valuation_explanations?: string[];
   fairness: "fair" | "slight_edge" | "lopsided";
+  roster_fit_reason?: string;
+  opponent_need_reason?: string;
+  acceptance_reason?: string;
+  risk_reason?: string;
+  ranking_components?: TradePackageRankingComponents;
   why_you_do_it: string;
   why_they_accept: string;
   sweetener_hint: string | null;

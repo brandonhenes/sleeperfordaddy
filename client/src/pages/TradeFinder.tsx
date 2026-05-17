@@ -55,6 +55,21 @@ function fairnessLabel(fairness: string): string {
   return "LOPSIDED";
 }
 
+function opportunityLabel(type: TradePackage["opportunity_type"]): string | null {
+  if (!type) return null;
+  const labels: Record<NonNullable<TradePackage["opportunity_type"]>, string> = {
+    buy_target: "Buy Target",
+    sell_player: "Sell for Youth",
+    consolidate: "Consolidate",
+    deconsolidate: "Deconsolidate",
+    need_based: "Need-Based",
+    player_plus_pick: "Player + Pick",
+    pick_sweetener: "Pick Sweetener",
+    pick_swap: "Pick Swap",
+  };
+  return labels[type];
+}
+
 function acceptanceColor(label: "Likely" | "Possible" | "Unlikely" | "Hard"): string {
   if (label === "Likely") return "var(--green)";
   if (label === "Possible") return "var(--amber)";
@@ -235,8 +250,32 @@ function AssetRow({ asset }: { asset: TradePackageAsset }) {
 }
 
 function PackageView({ pkg }: { pkg: TradePackage }) {
+  const oppLabel = opportunityLabel(pkg.opportunity_type);
+  const qualityLabel = pkg.package_quality_label
+    ? humanize(pkg.package_quality_label)
+    : null;
+
   return (
     <div>
+      {(oppLabel || qualityLabel || pkg.is_pick_only != null) && (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+          {oppLabel && (
+            <span style={{ fontSize: 10, fontWeight: 800, color: "var(--amber)", border: "1px solid rgba(245,158,11,0.35)", borderRadius: 999, padding: "3px 8px", textTransform: "uppercase", letterSpacing: 0.4 }}>
+              {oppLabel}
+            </span>
+          )}
+          {qualityLabel && (
+            <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-dim)", border: "1px solid var(--border)", borderRadius: 999, padding: "3px 8px", textTransform: "uppercase", letterSpacing: 0.4 }}>
+              {qualityLabel}
+            </span>
+          )}
+          {pkg.is_pick_only && (
+            <span style={{ fontSize: 10, fontWeight: 700, color: "#06b6d4", border: "1px solid rgba(6,182,212,0.32)", borderRadius: 999, padding: "3px 8px", textTransform: "uppercase", letterSpacing: 0.4 }}>
+              Pick Only
+            </span>
+          )}
+        </div>
+      )}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
         <div>
           <div style={{ fontSize: 11, fontWeight: 700, color: "#ef4444", letterSpacing: 0.5, marginBottom: 8, borderBottom: "2px solid #ef4444", paddingBottom: 4 }}>
@@ -993,7 +1032,7 @@ export default function TradeFinder() {
         <FreshnessBar leagueId={selectedLeague || undefined} />
       </div>
 
-      <div style={{ display: "flex", gap: 0, borderBottom: "1px solid var(--border)", marginBottom: 16, marginTop: 8 }}>
+      <div style={{ display: "flex", gap: 0, borderBottom: "1px solid var(--border)", marginBottom: 16, marginTop: 8, flexWrap: "wrap" }}>
         {([
           { key: "find" as const, label: "Find Trades" },
           { key: "acquire" as const, label: "What Would It Take?" },
@@ -1003,7 +1042,7 @@ export default function TradeFinder() {
           <button
             key={m.key}
             onClick={() => { setMode(m.key); setSelectedTarget(null); setSelectedPlayer(""); setShopPathFilter(null); if (m.key !== "scout") setScoutRouteWarning(null); }}
-            style={{ background: "transparent", border: "none", borderBottom: mode === m.key ? "2px solid var(--amber)" : "2px solid transparent", color: mode === m.key ? "var(--amber)" : "var(--text-muted)", padding: "10px 20px", fontSize: 14, fontWeight: 700, cursor: "pointer", letterSpacing: 0.3, transition: "color 0.15s, border-color 0.15s", fontFamily: "inherit" }}
+            style={{ background: "transparent", border: "none", borderBottom: mode === m.key ? "2px solid var(--amber)" : "2px solid transparent", color: mode === m.key ? "var(--amber)" : "var(--text-muted)", padding: "10px 16px", fontSize: 14, fontWeight: 700, cursor: "pointer", letterSpacing: 0.3, transition: "color 0.15s, border-color 0.15s", fontFamily: "inherit", flex: "1 1 auto", minWidth: 0 }}
           >
             {m.label}
           </button>
