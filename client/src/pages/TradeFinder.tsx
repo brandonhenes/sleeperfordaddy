@@ -70,6 +70,12 @@ function opportunityLabel(type: TradePackage["opportunity_type"]): string | null
   return labels[type];
 }
 
+function qualityTierLabel(tier: TradePackage["quality_tier"]): string | null {
+  if (!tier) return null;
+  if (tier === "low_confidence") return "Low Confidence";
+  return humanize(tier);
+}
+
 function acceptanceColor(label: "Likely" | "Possible" | "Unlikely" | "Hard"): string {
   if (label === "Likely") return "var(--green)";
   if (label === "Possible") return "var(--amber)";
@@ -251,17 +257,23 @@ function AssetRow({ asset }: { asset: TradePackageAsset }) {
 
 function PackageView({ pkg }: { pkg: TradePackage }) {
   const oppLabel = opportunityLabel(pkg.opportunity_type);
+  const tierLabel = qualityTierLabel(pkg.quality_tier);
   const qualityLabel = pkg.package_quality_label
     ? humanize(pkg.package_quality_label)
     : null;
 
   return (
     <div>
-      {(oppLabel || qualityLabel || pkg.is_pick_only != null) && (
+      {(oppLabel || tierLabel || qualityLabel || pkg.is_pick_only != null) && (
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
           {oppLabel && (
             <span style={{ fontSize: 10, fontWeight: 800, color: "var(--amber)", border: "1px solid rgba(245,158,11,0.35)", borderRadius: 999, padding: "3px 8px", textTransform: "uppercase", letterSpacing: 0.4 }}>
               {oppLabel}
+            </span>
+          )}
+          {tierLabel && (
+            <span style={{ fontSize: 10, fontWeight: 800, color: pkg.quality_tier === "strong" ? "var(--green)" : pkg.quality_tier === "speculative" ? "var(--amber)" : "var(--text-muted)", border: "1px solid var(--border)", borderRadius: 999, padding: "3px 8px", textTransform: "uppercase", letterSpacing: 0.4 }}>
+              {tierLabel}
             </span>
           )}
           {qualityLabel && (
@@ -276,7 +288,7 @@ function PackageView({ pkg }: { pkg: TradePackage }) {
           )}
         </div>
       )}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16 }}>
         <div>
           <div style={{ fontSize: 11, fontWeight: 700, color: "#ef4444", letterSpacing: 0.5, marginBottom: 8, borderBottom: "2px solid #ef4444", paddingBottom: 4 }}>
             YOU SEND ({pkg.send_total.toFixed(1)} TP)
@@ -327,7 +339,7 @@ function PackageView({ pkg }: { pkg: TradePackage }) {
               {pkg.acceptance.label} ({Math.round(pkg.acceptance.probability)}%)
             </span>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
             <div>
               {pkg.acceptance.accept_reasons.slice(0, 2).map((r, i) => (
                 <div key={`acc-${i}`} style={{ fontSize: 11, color: "var(--green)", lineHeight: 1.5 }}>
@@ -346,7 +358,7 @@ function PackageView({ pkg }: { pkg: TradePackage }) {
         </div>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12, fontSize: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12, marginTop: 12, fontSize: 12 }}>
         <div style={{ background: "var(--dark-base)", borderRadius: 8, padding: "10px 14px" }}>
           <div style={{ fontSize: 10, fontWeight: 700, color: "var(--amber)", marginBottom: 4, letterSpacing: 0.5 }}>WHY YOU DO IT</div>
           <div style={{ color: "var(--text-dim)", lineHeight: 1.5 }}>{pkg.why_you_do_it}</div>
@@ -376,7 +388,7 @@ function PartnerCard({ suggestion }: { suggestion: TradeSuggestion }) {
     <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 12, marginBottom: 12, overflow: "hidden" }}>
       <button
         onClick={() => setOpen((v) => !v)}
-        style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, padding: "14px 18px", background: "none", border: "none", color: "var(--text)", cursor: "pointer", fontFamily: "inherit" }}
+        style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, padding: "14px 18px", background: "none", border: "none", color: "var(--text)", cursor: "pointer", fontFamily: "inherit", flexWrap: "wrap" }}
       >
         <div
           style={{
@@ -394,7 +406,7 @@ function PartnerCard({ suggestion }: { suggestion: TradeSuggestion }) {
         >
           {partner.compatibility_score}
         </div>
-        <div style={{ flex: 1, textAlign: "left" }}>
+        <div style={{ flex: "1 1 180px", textAlign: "left", minWidth: 0 }}>
           <div style={{ fontSize: 15, fontWeight: 700 }}>{partner.display_name}</div>
           <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
             {partner.archetype} | {packages.length} package{packages.length !== 1 ? "s" : ""} | {partner.recent_trades}/{partner.total_trades} recent trades
@@ -427,7 +439,7 @@ function PartnerCard({ suggestion }: { suggestion: TradeSuggestion }) {
             {pkg.trade_type.replace(/-/g, " ")}
           </span>
         )}
-        <div style={{ fontSize: 12, color: "var(--text-muted)", maxWidth: 300, textAlign: "right" }}>{partner.compatibility_reason}</div>
+        <div style={{ fontSize: 12, color: "var(--text-muted)", maxWidth: 300, flex: "1 1 220px", textAlign: "right", lineHeight: 1.4 }}>{partner.compatibility_reason}</div>
         <span style={{ fontSize: 12, color: "var(--text-muted)", marginLeft: 8 }}>{open ? "▲" : "▼"}</span>
       </button>
 
@@ -1091,8 +1103,8 @@ export default function TradeFinder() {
 
           {selectedLeague && !suggestionsLoading && suggestions && suggestions.length === 0 && (
             <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: "48px 24px", marginTop: 16, textAlign: "center" }}>
-              <div style={{ fontSize: 14, color: "var(--text-muted)" }}>No trade partner fits found for this league</div>
-              <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 8 }}>This can happen if there is limited need overlap. Try the Trade Calculator for custom scenarios.</p>
+              <div style={{ fontSize: 14, color: "var(--text-muted)" }}>No strong fits found for this league</div>
+              <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 8 }}>No valid speculative packages survived the quality checks. Try the Trade Calculator for custom scenarios.</p>
               <Link href="/trade-calculator" style={{ display: "inline-block", marginTop: 12, padding: "8px 16px", background: "linear-gradient(135deg, var(--amber), var(--amber-dark))", color: "var(--dark-base)", borderRadius: 8, fontSize: 13, fontWeight: 700, textDecoration: "none" }}>Open Trade Calculator</Link>
             </div>
           )}

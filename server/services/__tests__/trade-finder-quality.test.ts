@@ -21,6 +21,7 @@ import { evaluateOpportunityPackage } from "../trade-opportunity-valuation.js";
 import {
   annotateTradeFinderPackage,
   applyDisplayedTradeDiversity,
+  dedupeAndRankTradeFinderPackages,
   generateTradeFinderPackages,
   isMaterialPickOnlyTrade,
   isPickOnlyTradePackage,
@@ -401,7 +402,41 @@ describe("Find Trades generator quality", () => {
     expect(annotated.opportunity_type).toBe("need_based");
   });
 
-  it("penalizes minor fair trades that do not address either roster need", () => {
+  it("does not return empty when speculative valid packages exist", () => {
+    const speculative = annotateTradeFinderPackage(
+      packageFrom([player("Send QB", "QB", 66)], [player("Receive RB", "RB", 66)]),
+      { userNeeds: ["WR"], opponentNeeds: ["QB"], userArchetype: "Competitor", opponentArchetype: "Competitor" }
+    );
+
+    const ranked = dedupeAndRankTradeFinderPackages([speculative], 4);
+
+    expect(speculative.quality_tier).toBe("speculative");
+    expect(shouldSurfaceTradeFinderPackage(speculative)).toBe(true);
+    expect(ranked).toHaveLength(1);
+  });
+
+  it("prefers strong results over speculative results", () => {
+    const strong = annotateTradeFinderPackage(
+      packageFrom([player("Send QB", "QB", 68)], [player("Receive WR", "WR", 68)]),
+      { userNeeds: ["WR"], opponentNeeds: ["QB"], userArchetype: "Competitor", opponentArchetype: "Competitor" }
+    );
+    const speculative = annotateTradeFinderPackage(
+      packageFrom([player("Send QB Depth", "QB", 66)], [player("Receive RB Depth", "RB", 66)]),
+      { userNeeds: ["WR"], opponentNeeds: ["QB"], userArchetype: "Competitor", opponentArchetype: "Competitor" }
+    );
+
+    const ranked = dedupeAndRankTradeFinderPackages([speculative, strong], 2);
+
+    expect(strong.quality_tier).toBe("strong");
+    expect(speculative.quality_tier).toBe("speculative");
+    expect(ranked.map((pkg) => pkg.quality_tier)).toEqual(["strong", "speculative"]);
+  });
+
+  it("uses low-confidence fallback only when better results are unavailable", () => {
+    const strong = annotateTradeFinderPackage(
+      packageFrom([player("Send QB", "QB", 68)], [player("Receive WR", "WR", 68)]),
+      { userNeeds: ["WR"], opponentNeeds: ["QB"], userArchetype: "Competitor", opponentArchetype: "Competitor" }
+    );
     const annotated = annotateTradeFinderPackage(
       packageFrom([player("Send WR", "WR", 65)], [player("Receive RB", "RB", 65)]),
       { userNeeds: ["TE"], opponentNeeds: ["QB"], userArchetype: "Competitor", opponentArchetype: "Competitor" }
@@ -409,7 +444,46 @@ describe("Find Trades generator quality", () => {
 
     expect(annotated.addresses_my_need).toBe(false);
     expect(annotated.addresses_their_need).toBe(false);
-    expect(shouldSurfaceTradeFinderPackage(annotated)).toBe(false);
+    expect(annotated.quality_tier).toBe("low_confidence");
+    expect(dedupeAndRankTradeFinderPackages([strong, annotated], 4)).not.toContain(annotated);
+    expect(dedupeAndRankTradeFinderPackages([annotated], 4)).toEqual([annotated]);
+  });
+
+  it("penalizes clear-need rejection reasons without hard-rejecting fair trades", () => {
+    const annotated = annotateTradeFinderPackage(
+      packageFrom(
+        [player("Send WR", "WR", 65)],
+        [player("Receive RB", "RB", 65)],
+        {
+          acceptance: {
+            probability: 35,
+            label: "Unlikely",
+            accept_reasons: ["Trade power is balanced"],
+            reject_reasons: ["Does not address a clear need"],
+          },
+        }
+      ),
+      { userNeeds: ["TE"], opponentNeeds: ["QB"], userArchetype: "Competitor", opponentArchetype: "Competitor" }
+    );
+
+    expect(shouldSurfaceTradeFinderPackage(annotated)).toBe(true);
+    expect(annotated.quality_tier).toBe("low_confidence");
+    expect(annotated.ranking_components?.roster_fit).toBeLessThan(50);
+  });
+
+  it("treats lopsided but otherwise valid player packages as low-confidence fallback", () => {
+    const annotated = annotateTradeFinderPackage(
+      packageFrom(
+        [player("Send QB", "QB", 68)],
+        [player("Receive WR", "WR", 78)],
+        { fairness: "lopsided" }
+      ),
+      { userNeeds: ["WR"], opponentNeeds: ["QB"], userArchetype: "Competitor", opponentArchetype: "Competitor" }
+    );
+
+    expect(shouldSurfaceTradeFinderPackage(annotated)).toBe(true);
+    expect(annotated.quality_tier).toBe("low_confidence");
+    expect(dedupeAndRankTradeFinderPackages([annotated], 4)).toEqual([annotated]);
   });
 
   it("rejects superstar-for-junk packages", () => {
@@ -439,6 +513,41 @@ describe("Find Trades generator quality", () => {
     expect(isMaterialPickOnlyTrade(tierUp)).toBe(true);
   });
 
+  it("allows a small pick-only fallback when no player-based opportunities exist", () => {
+    const pickPackages = Array.from({ length: 5 }, (_, index) =>
+      annotateTradeFinderPackage(
+        packageFrom(
+          [pick(`2027 Mid 2nd ${index}`, 42, 2), pick(`2027 Mid 3rd ${index}`, 28, 3)],
+          [pick(`2027 1.${index + 5}`, 62 + index, 1, index + 5)]
+        ),
+        { userNeeds: [], opponentNeeds: [], userArchetype: "Competitor", opponentArchetype: "Rebuilder" }
+      )
+    );
+    const suggestions: TradeSuggestion[] = [
+      {
+        partner: {
+          roster_id: 1,
+          display_name: "Partner",
+          archetype: "Rebuilder",
+          compatibility_score: 40,
+          compatibility_reason: "Test",
+          bias_flags: [],
+          preferred_structure: "mixed",
+          total_trades: 0,
+          recent_trades: 0,
+        },
+        packages: pickPackages,
+      },
+    ];
+
+    const displayed = applyDisplayedTradeDiversity(suggestions);
+    const remaining = displayed.flatMap((suggestion) => suggestion.packages);
+
+    expect(remaining.length).toBeGreaterThan(0);
+    expect(remaining.length).toBeLessThanOrEqual(2);
+    expect(remaining.every(isPickOnlyTradePackage)).toBe(true);
+  });
+
   it("uses the shared opportunity valuation helper after generation", async () => {
     const send = [player("Send WR", "WR", 65)];
     const receive = [player("Receive RB", "RB", 66)];
@@ -466,7 +575,14 @@ describe("Find Trades generator quality", () => {
     expect(annotated.ranking_components?.valuation_edge).not.toBe(annotated.ranking_components?.acceptance_likelihood);
   });
 
-  it("preserves the empty/no-opportunity state after filters", () => {
+  it("preserves the empty/no-opportunity state only when no valid fallback packages exist", () => {
+    const invalidPickSwap = annotateTradeFinderPackage(
+      packageFrom(
+        [pick("2027 Mid 2nd", 42, 2), pick("2027 Mid 3rd", 28, 3)],
+        [pick("2027 Late 2nd", 43, 2)]
+      ),
+      { userNeeds: [], opponentNeeds: [], userArchetype: "Competitor", opponentArchetype: "Competitor" }
+    );
     const suggestions: TradeSuggestion[] = [
       {
         partner: {
@@ -480,10 +596,11 @@ describe("Find Trades generator quality", () => {
           total_trades: 0,
           recent_trades: 0,
         },
-        packages: [],
+        packages: dedupeAndRankTradeFinderPackages([invalidPickSwap], 4),
       },
     ];
 
+    expect(shouldSurfaceTradeFinderPackage(invalidPickSwap)).toBe(false);
     expect(applyDisplayedTradeDiversity(suggestions)).toEqual([]);
   });
 });

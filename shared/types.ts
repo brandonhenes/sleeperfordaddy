@@ -448,6 +448,7 @@ export type TradeOpportunityType =
   | "pick_swap";
 
 export type TradePackageQualityLabel = "premium" | "solid" | "speculative" | "poor";
+export type TradePackageQualityTier = "strong" | "speculative" | "low_confidence";
 
 export interface TradePackageRankingComponents {
   valuation_edge: number;
@@ -467,6 +468,7 @@ export interface TradePackage {
   label: string;
   opportunity_type?: TradeOpportunityType;
   package_quality_label?: TradePackageQualityLabel;
+  quality_tier?: TradePackageQualityTier;
   is_pick_only?: boolean;
   has_anchor_asset?: boolean;
   addresses_my_need?: boolean;
