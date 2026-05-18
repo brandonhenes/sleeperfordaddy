@@ -27,10 +27,11 @@ export default function AppShell({ children }: AppShellProps) {
         fontFamily:
           "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
         color: "var(--text)",
+        overflowX: "hidden",
       }}
     >
       <NavBar username={username} />
-      <div style={{ maxWidth: 1100, margin: "0 auto", padding: "0 24px 48px" }}>
+      <div style={{ width: "100%", maxWidth: 1100, boxSizing: "border-box", margin: "0 auto", padding: "0 clamp(16px, 5vw, 24px) 48px" }}>
         {children}
       </div>
     </div>

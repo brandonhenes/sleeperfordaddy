@@ -20,6 +20,13 @@ import {
 
 const POSITIONS = ["QB", "RB", "WR", "TE"];
 const MIN_STARTERS: Record<string, number> = { QB: 1, RB: 2, WR: 2, TE: 1 };
+const SHOP_REQUEST_TIMEOUT_MS = 18_000;
+const SHOP_MAX_EVALUATIONS_PER_REQUEST = 180;
+const SHOP_MAX_EVALUATIONS_PER_LEAGUE = 24;
+const SHOP_MAX_EVALUATIONS_PER_OPPONENT = 4;
+const SHOP_MAX_CANDIDATES_PER_OPPONENT = 24;
+const SHOP_MAX_OPPONENTS_PER_LEAGUE = 8;
+const SHOP_EVALUATION_CONCURRENCY = 4;
 
 const ARCHETYPE_BUY_MOTIVATION: Record<string, { wants_vets: number; wants_youth: number; wants_picks: number }> = {
   "Dynasty Juggernaut": { wants_vets: 30, wants_youth: 60, wants_picks: 20 },
@@ -31,7 +38,7 @@ const ARCHETYPE_BUY_MOTIVATION: Record<string, { wants_vets: number; wants_youth
   Competitor: { wants_vets: 60, wants_youth: 50, wants_picks: 40 },
 };
 
-type EnrichedPick = ScoredPick & {
+export type EnrichedPick = ScoredPick & {
   pick_breakdown: EvaluatedAsset["pick_breakdown"];
 };
 
@@ -234,7 +241,7 @@ function computeTopPlayerIdsByPos(roster: RosterRanking): Record<string, string>
   return out;
 }
 
-interface PackageContext {
+export interface PackageContext {
   leagueId: string;
   mode: "sf" | "1qb";
   userRoster: RosterRanking;
@@ -247,9 +254,11 @@ interface PackageContext {
   classStrengths?: ClassStrengthMap;
   valueType: ValueType;
   valuationCache: Map<string, Promise<ShopPackageScore>>;
+  evaluationBudget: ShopEvaluationBudget;
+  evaluatePackage?: EvaluateOpportunityPackageFn;
 }
 
-interface RawPackage {
+export interface RawPackage {
   path: ShopOpportunity["path"];
   path_label: string;
   you_send: EvaluatedAsset[];
@@ -270,6 +279,55 @@ interface RawPackage {
   fairness: ShopOpportunity["fairness"];
   why_you_do_it: string;
   why_they_accept: string;
+}
+
+export type CandidateScoreFilter = "not_lopsided" | "not_negative_lopsided" | "delta_nonnegative";
+
+export interface ShopPackageCandidate {
+  path: ShopOpportunity["path"];
+  path_label: string;
+  send: TradePackageAsset[];
+  receive: TradePackageAsset[];
+  why_you_do_it: string;
+  why_they_accept: string;
+  cheap_score: number;
+  score_filter: CandidateScoreFilter;
+}
+
+interface ShopEvaluationBudgetOptions {
+  maxEvaluations?: number;
+  perLeagueCap?: number;
+  timeoutMs?: number;
+  now?: number;
+}
+
+export interface ShopEvaluationBudget {
+  maxEvaluations: number;
+  perLeagueCap: number;
+  deadlineMs: number;
+  evaluationsStarted: number;
+  cacheHits: number;
+  timedOut: boolean;
+  partialResults: boolean;
+  warnings: Set<string>;
+  leagueEvaluations: Map<string, number>;
+}
+
+export function createShopEvaluationBudget(
+  options: ShopEvaluationBudgetOptions = {}
+): ShopEvaluationBudget {
+  const now = options.now ?? Date.now();
+  return {
+    maxEvaluations: options.maxEvaluations ?? SHOP_MAX_EVALUATIONS_PER_REQUEST,
+    perLeagueCap: options.perLeagueCap ?? SHOP_MAX_EVALUATIONS_PER_LEAGUE,
+    deadlineMs: now + (options.timeoutMs ?? SHOP_REQUEST_TIMEOUT_MS),
+    evaluationsStarted: 0,
+    cacheHits: 0,
+    timedOut: false,
+    partialResults: false,
+    warnings: new Set<string>(),
+    leagueEvaluations: new Map<string, number>(),
+  };
 }
 
 function rawPackageValuationFields(scored: ShopPackageScore): Pick<
@@ -311,7 +369,45 @@ function rawPackageValuationFields(scored: ShopPackageScore): Pick<
   };
 }
 
-async function scorePackageForContext(
+function markShopPartial(budget: ShopEvaluationBudget, warning: string) {
+  budget.partialResults = true;
+  budget.warnings.add(warning);
+}
+
+function shopBudgetTimedOut(budget: ShopEvaluationBudget): boolean {
+  if (Date.now() <= budget.deadlineMs) return false;
+  budget.timedOut = true;
+  markShopPartial(budget, "Shop a Player reached its time budget and returned the best evaluated results so far.");
+  return true;
+}
+
+function shopRequestEvaluationCapReached(budget: ShopEvaluationBudget): boolean {
+  return budget.evaluationsStarted >= budget.maxEvaluations;
+}
+
+function shopLeagueEvaluationCapReached(budget: ShopEvaluationBudget, leagueId: string): boolean {
+  return (budget.leagueEvaluations.get(leagueId) ?? 0) >= budget.perLeagueCap;
+}
+
+function claimShopEvaluation(budget: ShopEvaluationBudget, leagueId: string): boolean {
+  if (shopBudgetTimedOut(budget)) return false;
+  if (shopRequestEvaluationCapReached(budget)) {
+    markShopPartial(budget, `Shop a Player reached the ${budget.maxEvaluations} package valuation cap.`);
+    return false;
+  }
+
+  if (shopLeagueEvaluationCapReached(budget, leagueId)) {
+    markShopPartial(budget, `League package valuation cap reached for league ${leagueId}.`);
+    return false;
+  }
+
+  const leagueCount = budget.leagueEvaluations.get(leagueId) ?? 0;
+  budget.evaluationsStarted += 1;
+  budget.leagueEvaluations.set(leagueId, leagueCount + 1);
+  return true;
+}
+
+export async function scorePackageForContext(
   ctx: PackageContext,
   send: TradePackageAsset[],
   receive: TradePackageAsset[]
@@ -320,11 +416,18 @@ async function scorePackageForContext(
     ctx.leagueId,
     ctx.mode,
     ctx.valueType,
-    send.map(assetCacheKey).join("+"),
-    receive.map(assetCacheKey).join("+"),
+    send.map(assetCacheKey).sort().join("+"),
+    receive.map(assetCacheKey).sort().join("+"),
   ].join("|");
   const cached = ctx.valuationCache.get(cacheKey);
-  if (cached) return cached;
+  if (cached) {
+    ctx.evaluationBudget.cacheHits += 1;
+    return cached;
+  }
+
+  if (!claimShopEvaluation(ctx.evaluationBudget, ctx.leagueId)) {
+    throw new Error("SHOP_EVALUATION_BUDGET_EXHAUSTED");
+  }
 
   const scorePromise = scoreShopPackage(
     send,
@@ -332,7 +435,8 @@ async function scorePackageForContext(
     ctx.leagueId,
     ctx.mode,
     ctx.classStrengths,
-    ctx.valueType
+    ctx.valueType,
+    ctx.evaluatePackage
   ).catch((error) => {
     ctx.valuationCache.delete(cacheKey);
     throw error;
@@ -356,9 +460,90 @@ function assetCacheKey(asset: TradePackageAsset): string {
   ].join(":");
 }
 
-async function generatePackages(ctx: PackageContext): Promise<RawPackage[]> {
+function roughAssetValue(asset: TradePackageAsset): number {
+  return asset.context_trade_value ?? asset.league_market_value ?? asset.base_market_value ?? asset.edge_score * 100;
+}
+
+function candidateKey(candidate: ShopPackageCandidate): string {
+  return [
+    candidate.path,
+    candidate.send.map(assetCacheKey).sort().join("+"),
+    candidate.receive.map(assetCacheKey).sort().join("+"),
+  ].join("|");
+}
+
+function scoreCheapCandidate(
+  ctx: PackageContext,
+  send: TradePackageAsset[],
+  receive: TradePackageAsset[],
+  path: ShopOpportunity["path"],
+  userNeeds: string[],
+  oppNeeds: string[]
+): number {
+  const sendValue = send.reduce((sum, asset) => sum + roughAssetValue(asset), 0);
+  const receiveValue = receive.reduce((sum, asset) => sum + roughAssetValue(asset), 0);
+  const valueGapPct = Math.abs(sendValue - receiveValue) / Math.max(sendValue, receiveValue, 1);
+  const valueFit = Math.max(0, 100 - valueGapPct * 140);
+  const fillsOpponentNeed = send.some((asset) => asset.position && oppNeeds.includes(asset.position));
+  const fillsUserNeed = receive.some((asset) => asset.position && userNeeds.includes(asset.position));
+  const pathBoost =
+    path === "even_swap" ? 8 :
+    path === "they_add_pick" ? 10 :
+    path === "you_upgrade" ? (ctx.ambition >= 2 ? 12 : 4) :
+    6;
+
+  return Math.round(
+    valueFit +
+    (fillsOpponentNeed ? 18 : 0) +
+    (fillsUserNeed ? 14 : 0) +
+    pathBoost -
+    Math.max(0, send.length - 2) * 5 -
+    Math.max(0, receive.length - 2) * 4
+  );
+}
+
+function makeCandidate(
+  ctx: PackageContext,
+  userNeeds: string[],
+  oppNeeds: string[],
+  candidate: Omit<ShopPackageCandidate, "cheap_score">
+): ShopPackageCandidate {
+  return {
+    ...candidate,
+    cheap_score: scoreCheapCandidate(ctx, candidate.send, candidate.receive, candidate.path, userNeeds, oppNeeds),
+  };
+}
+
+function scorePassesCandidateFilter(
+  candidate: ShopPackageCandidate,
+  scored: ShopPackageScore
+): boolean {
+  if (candidate.score_filter === "not_lopsided") return scored.fairness !== "lopsided";
+  if (candidate.score_filter === "delta_nonnegative") return scored.delta >= 0;
+  return !(scored.fairness === "lopsided" && scored.delta < 0);
+}
+
+export function selectShopCandidatesForEvaluation(
+  candidates: ShopPackageCandidate[],
+  maxCandidates = SHOP_MAX_CANDIDATES_PER_OPPONENT
+): ShopPackageCandidate[] {
+  const unique = new Map<string, ShopPackageCandidate>();
+  for (const candidate of candidates) {
+    const key = candidateKey(candidate);
+    const existing = unique.get(key);
+    if (!existing || candidate.cheap_score > existing.cheap_score) {
+      unique.set(key, candidate);
+    }
+  }
+
+  return [...unique.values()]
+    .sort((a, b) => b.cheap_score - a.cheap_score)
+    .slice(0, maxCandidates);
+}
+
+export function buildShopPackageCandidates(ctx: PackageContext): ShopPackageCandidate[] {
   const { userRoster, opp, playerAsset, leagueMedians, ambition, userPicks, oppPicks } = ctx;
-  const packages: RawPackage[] = [];
+  const candidates: ShopPackageCandidate[] = [];
 
   const oppSurplus: CoreAsset[] = [];
   for (const pos of POSITIONS) {
@@ -378,42 +563,35 @@ async function generatePackages(ctx: PackageContext): Promise<RawPackage[]> {
   const returnCandidates = opp.core_assets
     .filter((a) => POSITIONS.includes(a.position) && a.edge_score >= 42)
     .sort((a, b) => b.edge_score - a.edge_score);
+  const oppNeeds = computeNeeds(opp, leagueMedians);
+  const playerSend = shopPlayerAssetToTradePackageAsset(playerAsset);
 
   for (const candidate of returnCandidates.slice(0, 10)) {
-    const scored = await scorePackageForContext(
-      ctx,
-      [shopPlayerAssetToTradePackageAsset(playerAsset)],
-      [shopPlayerAssetToTradePackageAsset(candidate)]
-    );
-    if (scored.fairness === "lopsided") continue;
     const fillsUserNeed = userNeeds.includes(candidate.position);
-    packages.push({
+    candidates.push(makeCandidate(ctx, userNeeds, oppNeeds, {
       path: "even_swap",
       path_label: "Even Swap",
-      ...rawPackageValuationFields(scored),
+      send: [playerSend],
+      receive: [shopPlayerAssetToTradePackageAsset(candidate)],
       why_you_do_it: fillsUserNeed
         ? `Swap ${playerAsset.position} for ${candidate.position} help you actually need`
         : `Pivot ${playerAsset.position} value into ${candidate.position}`,
       why_they_accept: `Gets ${playerAsset.position} help while moving ${candidate.position} surplus`,
-    });
+      score_filter: "not_lopsided",
+    }));
   }
 
   for (const candidate of returnCandidates.filter((c) => c.edge_score < playerAsset.edge_score - 5).slice(0, 6)) {
     for (const pick of oppPicks.slice(0, 4)) {
-      const scored = await scorePackageForContext(
-        ctx,
-        [shopPlayerAssetToTradePackageAsset(playerAsset)],
-        [shopPlayerAssetToTradePackageAsset(candidate), shopPickToTradePackageAsset(pick)]
-      );
-      if (scored.fairness === "lopsided") continue;
-      packages.push({
+      candidates.push(makeCandidate(ctx, userNeeds, oppNeeds, {
         path: "they_add_pick",
         path_label: "Player + Pick Return",
-        ...rawPackageValuationFields(scored),
+        send: [playerSend],
+        receive: [shopPlayerAssetToTradePackageAsset(candidate), shopPickToTradePackageAsset(pick)],
         why_you_do_it: `Take back ${candidate.position} depth plus draft capital`,
         why_they_accept: `Upgrades to ${playerAsset.full_name} and pays the gap with a pick`,
-      });
-      break;
+        score_filter: "not_lopsided",
+      }));
     }
   }
 
@@ -423,62 +601,47 @@ async function generatePackages(ctx: PackageContext): Promise<RawPackage[]> {
 
   for (const target of upgradeTargets) {
     for (const pick of userPicks.slice(0, 4)) {
-      const scored = await scorePackageForContext(
-        ctx,
-        [shopPlayerAssetToTradePackageAsset(playerAsset), shopPickToTradePackageAsset(pick)],
-        [shopPlayerAssetToTradePackageAsset(target)]
-      );
-      if (scored.fairness === "lopsided") continue;
-      packages.push({
+      candidates.push(makeCandidate(ctx, userNeeds, oppNeeds, {
         path: "you_upgrade",
         path_label: "Player + Pick Upgrade",
-        ...rawPackageValuationFields(scored),
+        send: [playerSend, shopPickToTradePackageAsset(pick)],
+        receive: [shopPlayerAssetToTradePackageAsset(target)],
         why_you_do_it: `Package up for a clear ${target.position} upgrade in ${target.full_name}`,
         why_they_accept: `Gets current production plus a future pick`,
-      });
-      break;
+        score_filter: "not_lopsided",
+      }));
     }
 
     if (ambition >= 2) {
       for (const depth of userDepth.slice(0, 3)) {
-        const scored = await scorePackageForContext(
-          ctx,
-          [shopPlayerAssetToTradePackageAsset(playerAsset), shopPlayerAssetToTradePackageAsset(depth)],
-          [shopPlayerAssetToTradePackageAsset(target)]
-        );
-        if (scored.fairness === "lopsided") continue;
-        packages.push({
+        candidates.push(makeCandidate(ctx, userNeeds, oppNeeds, {
           path: "you_upgrade",
           path_label: "2-for-1 Upgrade",
-          ...rawPackageValuationFields(scored),
+          send: [playerSend, shopPlayerAssetToTradePackageAsset(depth)],
+          receive: [shopPlayerAssetToTradePackageAsset(target)],
           why_you_do_it: `Consolidate depth into a better weekly starter`,
           why_they_accept: `Turns one asset into two usable pieces`,
-        });
-        break;
+          score_filter: "not_lopsided",
+        }));
       }
     }
 
     if (ambition >= 3 && userPicks.length > 0 && userDepth.length > 0) {
       const pick = userPicks[0];
       const depth = userDepth[0];
-      const scored = await scorePackageForContext(
-        ctx,
-        [
-          shopPlayerAssetToTradePackageAsset(playerAsset),
+      candidates.push(makeCandidate(ctx, userNeeds, oppNeeds, {
+        path: "you_upgrade",
+        path_label: "3-for-1 Upgrade",
+        send: [
+          playerSend,
           shopPickToTradePackageAsset(pick),
           shopPlayerAssetToTradePackageAsset(depth),
         ],
-        [shopPlayerAssetToTradePackageAsset(target)]
-      );
-      if (scored.delta >= 0) {
-        packages.push({
-          path: "you_upgrade",
-          path_label: "3-for-1 Upgrade",
-          ...rawPackageValuationFields(scored),
-          why_you_do_it: `Reach for a stud by combining player, pick, and depth`,
-          why_they_accept: `They cash out one star into multiple usable assets`,
-        });
-      }
+        receive: [shopPlayerAssetToTradePackageAsset(target)],
+        why_you_do_it: `Reach for a stud by combining player, pick, and depth`,
+        why_they_accept: `They cash out one star into multiple usable assets`,
+        score_filter: "delta_nonnegative",
+      }));
     }
   }
 
@@ -490,117 +653,134 @@ async function generatePackages(ctx: PackageContext): Promise<RawPackage[]> {
     for (let j = i + 1; j < Math.min(youngPieces.length, i + 4); j++) {
       const p1 = youngPieces[i];
       const p2 = youngPieces[j];
-      const scored = await scorePackageForContext(
-        ctx,
-        [shopPlayerAssetToTradePackageAsset(playerAsset)],
-        [shopPlayerAssetToTradePackageAsset(p1), shopPlayerAssetToTradePackageAsset(p2)]
-      );
-      if (scored.fairness === "lopsided" && scored.delta < 0) continue;
-      packages.push({
+      candidates.push(makeCandidate(ctx, userNeeds, oppNeeds, {
         path: "sell_for_pieces",
         path_label: "Sell for Youth",
-        ...rawPackageValuationFields(scored),
+        send: [playerSend],
+        receive: [shopPlayerAssetToTradePackageAsset(p1), shopPlayerAssetToTradePackageAsset(p2)],
         why_you_do_it: `Turn one veteran slot into two younger assets`,
         why_they_accept: `Consolidates depth into a stronger starter`,
-      });
-      break;
+        score_filter: "not_negative_lopsided",
+      }));
     }
   }
 
   for (const candidate of returnCandidates.filter((c) => (c.age ?? 30) <= 25 && c.edge_score >= 45).slice(0, 4)) {
     for (const pick of oppPicks.slice(0, 3)) {
-      const scored = await scorePackageForContext(
-        ctx,
-        [shopPlayerAssetToTradePackageAsset(playerAsset)],
-        [shopPlayerAssetToTradePackageAsset(candidate), shopPickToTradePackageAsset(pick)]
-      );
-      if (scored.fairness === "lopsided" && scored.delta < 0) continue;
-      packages.push({
+      candidates.push(makeCandidate(ctx, userNeeds, oppNeeds, {
         path: "sell_for_pieces",
         path_label: "Sell for Youth + Pick",
-        ...rawPackageValuationFields(scored),
+        send: [playerSend],
+        receive: [shopPlayerAssetToTradePackageAsset(candidate), shopPickToTradePackageAsset(pick)],
         why_you_do_it: `Cash out into a young piece plus a future pick`,
         why_they_accept: `Buys immediate points with one outgoing package`,
-      });
-      break;
+        score_filter: "not_negative_lopsided",
+      }));
     }
   }
 
   if (oppPicks.length > 0) {
     for (const firstPick of oppPicks.slice(0, 4)) {
-      const solo = await scorePackageForContext(
-        ctx,
-        [shopPlayerAssetToTradePackageAsset(playerAsset)],
-        [shopPickToTradePackageAsset(firstPick)]
-      );
-      if (solo.fairness !== "lopsided") {
-        packages.push({
-          path: "sell_for_pieces",
-          path_label: "Sell for Picks",
-          ...rawPackageValuationFields(solo),
-          why_you_do_it: `Turn ${playerAsset.full_name} into direct draft capital`,
-          why_they_accept: "Converts picks into a lineup starter right now.",
-        });
-        continue;
-      }
+      candidates.push(makeCandidate(ctx, userNeeds, oppNeeds, {
+        path: "sell_for_pieces",
+        path_label: "Sell for Picks",
+        send: [playerSend],
+        receive: [shopPickToTradePackageAsset(firstPick)],
+        why_you_do_it: `Turn ${playerAsset.full_name} into direct draft capital`,
+        why_they_accept: "Converts picks into a lineup starter right now.",
+        score_filter: "not_lopsided",
+      }));
 
       const secondPick = oppPicks.find((pick) => pick.label !== firstPick.label);
       if (!secondPick) continue;
-      const duo = await scorePackageForContext(
-        ctx,
-        [shopPlayerAssetToTradePackageAsset(playerAsset)],
-        [shopPickToTradePackageAsset(firstPick), shopPickToTradePackageAsset(secondPick)]
-      );
-      if (duo.fairness === "lopsided" && duo.delta < 0) continue;
-      packages.push({
+      candidates.push(makeCandidate(ctx, userNeeds, oppNeeds, {
         path: "sell_for_pieces",
         path_label: "Sell for Picks",
-        ...rawPackageValuationFields(duo),
+        send: [playerSend],
+        receive: [shopPickToTradePackageAsset(firstPick), shopPickToTradePackageAsset(secondPick)],
         why_you_do_it: `Cash out ${playerAsset.full_name} into multiple future darts`,
         why_they_accept: "Consolidates pick surplus into a lineup upgrade.",
-      });
+        score_filter: "not_negative_lopsided",
+      }));
     }
   }
 
   if (userPicks.length >= 2) {
     for (const target of returnCandidates.filter((candidate) => candidate.edge_score >= playerAsset.edge_score + 8).slice(0, 4)) {
-      for (let i = 0; i < userPicks.length; i++) {
-        for (let j = i + 1; j < Math.min(userPicks.length, i + 4); j++) {
-          const offerA = userPicks[i];
-          const offerB = userPicks[j];
+      const pickPool = userPicks.slice(0, 8);
+      for (let i = 0; i < pickPool.length; i++) {
+        for (let j = i + 1; j < Math.min(pickPool.length, i + 4); j++) {
+          const offerA = pickPool[i];
+          const offerB = pickPool[j];
           const firstRoundCount =
             ((offerA.pick_breakdown?.round ?? offerA.round) === 1 ? 1 : 0) +
             ((offerB.pick_breakdown?.round ?? offerB.round) === 1 ? 1 : 0);
           if (firstRoundCount > 1) continue;
 
-          const scored = await scorePackageForContext(
-            ctx,
-            [shopPickToTradePackageAsset(offerA), shopPickToTradePackageAsset(offerB)],
-            [shopPlayerAssetToTradePackageAsset(target)]
-          );
-          if (scored.fairness === "lopsided") continue;
-          packages.push({
+          candidates.push(makeCandidate(ctx, userNeeds, oppNeeds, {
             path: "you_upgrade",
             path_label: "Pick Package Upgrade",
-            ...rawPackageValuationFields(scored),
+            send: [shopPickToTradePackageAsset(offerA), shopPickToTradePackageAsset(offerB)],
+            receive: [shopPlayerAssetToTradePackageAsset(target)],
             why_you_do_it: `Buy ${target.full_name} with picks instead of a core player`,
             why_they_accept: "Gets multiple future assets for one veteran cornerstone.",
-          });
+            score_filter: "not_lopsided",
+          }));
         }
       }
     }
   }
 
-  const unique = new Map<string, RawPackage>();
-  for (const pkg of packages) {
-    const key = `${pkg.path}|${pkg.you_send.map((a) => a.label).join("+")}|${pkg.you_receive.map((a) => a.label).join("+")}`;
-    const existing = unique.get(key);
-    if (!existing || pkg.sendTotal + pkg.receiveTotal > existing.sendTotal + existing.receiveTotal) {
-      unique.set(key, pkg);
+  return selectShopCandidatesForEvaluation(candidates);
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  worker: (item: T) => Promise<R | null>
+): Promise<R[]> {
+  const results: R[] = [];
+  let index = 0;
+
+  async function runNext() {
+    while (index < items.length) {
+      const item = items[index++];
+      const result = await worker(item);
+      if (result) results.push(result);
     }
   }
 
-  return [...unique.values()];
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, runNext));
+  return results;
+}
+
+export async function evaluateShopPackageCandidates(
+  ctx: PackageContext,
+  candidates: ShopPackageCandidate[],
+  maxEvaluations = SHOP_MAX_EVALUATIONS_PER_OPPONENT
+): Promise<RawPackage[]> {
+  const selected = selectShopCandidatesForEvaluation(candidates, maxEvaluations);
+  return mapWithConcurrency(selected, SHOP_EVALUATION_CONCURRENCY, async (candidate) => {
+    try {
+      const scored = await scorePackageForContext(ctx, candidate.send, candidate.receive);
+      if (!scorePassesCandidateFilter(candidate, scored)) return null;
+      return {
+        path: candidate.path,
+        path_label: candidate.path_label,
+        ...rawPackageValuationFields(scored),
+        why_you_do_it: candidate.why_you_do_it,
+        why_they_accept: candidate.why_they_accept,
+      };
+    } catch (error) {
+      if ((error as Error).message === "SHOP_EVALUATION_BUDGET_EXHAUSTED") return null;
+      throw error;
+    }
+  });
+}
+
+export async function generatePackages(ctx: PackageContext): Promise<RawPackage[]> {
+  const candidates = buildShopPackageCandidates(ctx);
+  return evaluateShopPackageCandidates(ctx, candidates);
 }
 
 export async function shopPlayer(
@@ -632,6 +812,16 @@ export async function shopPlayer(
   const clampedAmbition = Math.max(1, Math.min(3, ambition));
   const firstAsset = leaguesWithPlayer[0].playerAsset;
   const allOpportunities: ShopOpportunity[] = [];
+  const evaluationBudget = createShopEvaluationBudget();
+  const valuationCache = new Map<string, Promise<ShopPackageScore>>();
+  const evaluationStats = {
+    leagues_scanned: allLeagues.length,
+    leagues_with_player: leaguesWithPlayer.length,
+    leagues_completed: 0,
+    opponents_considered: 0,
+    opponents_evaluated: 0,
+    candidates_generated: 0,
+  };
   const healthScoreMap = new Map<string, number>();
   for (const { league } of leaguesWithPlayer) {
     for (const roster of league.rosters) {
@@ -647,6 +837,8 @@ export async function shopPlayer(
   const pickMap = new Map<string, EnrichedPick[]>();
 
   for (const { league, userRoster, playerAsset } of leaguesWithPlayer) {
+    if (shopBudgetTimedOut(evaluationBudget)) break;
+    if (shopRequestEvaluationCapReached(evaluationBudget)) break;
     const leagueMedians: Record<string, number> = {};
     for (const pos of POSITIONS) {
       const allScores: number[] = [];
@@ -662,7 +854,6 @@ export async function shopPlayer(
 
     const behaviors = await buildLeagueBehaviors(league.league_id);
     const opponents = league.rosters.filter((r) => !r.is_user);
-    const valuationCache = new Map<string, Promise<ShopPackageScore>>();
     const getLeaguePicks = async (roster: RosterRanking) => {
       const cacheKey = `${league.league_id}:${roster.roster_id}`;
       if (pickMap.has(cacheKey)) return pickMap.get(cacheKey) ?? [];
@@ -680,14 +871,29 @@ export async function shopPlayer(
       return picks;
     };
 
-    for (const opp of opponents) {
-      const motivation = scoreBuyerMotivation(opp, playerAsset, leagueMedians);
-      if (motivation.score < 20) continue;
+    const rankedOpponents = opponents
+      .map((opp) => ({
+        opp,
+        motivation: scoreBuyerMotivation(opp, playerAsset, leagueMedians),
+      }))
+      .filter(({ motivation }) => motivation.score >= 20)
+      .sort((a, b) => b.motivation.score - a.motivation.score);
+    evaluationStats.opponents_considered += rankedOpponents.length;
+    if (rankedOpponents.length > SHOP_MAX_OPPONENTS_PER_LEAGUE) {
+      markShopPartial(
+        evaluationBudget,
+        `Shop a Player evaluated the top ${SHOP_MAX_OPPONENTS_PER_LEAGUE} buyers in ${league.league_name}.`
+      );
+    }
 
+    for (const { opp, motivation } of rankedOpponents.slice(0, SHOP_MAX_OPPONENTS_PER_LEAGUE)) {
+      if (shopBudgetTimedOut(evaluationBudget)) break;
+      if (shopRequestEvaluationCapReached(evaluationBudget)) break;
+      if (shopLeagueEvaluationCapReached(evaluationBudget, league.league_id)) break;
       const oppNeeds = computeNeeds(opp, leagueMedians);
       const topPlayerIdsByPos = computeTopPlayerIdsByPos(opp);
       const behavior: ManagerBehavior | null = behaviors.get(opp.roster_id) ?? null;
-      const packages = await generatePackages({
+      const ctx: PackageContext = {
         leagueId: league.league_id,
         mode: league.mode,
         userRoster,
@@ -700,7 +906,16 @@ export async function shopPlayer(
         classStrengths,
         valueType,
         valuationCache,
-      });
+        evaluationBudget,
+      };
+      const candidates = buildShopPackageCandidates(ctx);
+      evaluationStats.candidates_generated += candidates.length;
+      const packages = await evaluateShopPackageCandidates(
+        ctx,
+        candidates,
+        SHOP_MAX_EVALUATIONS_PER_OPPONENT
+      );
+      evaluationStats.opponents_evaluated += 1;
 
       for (const pkg of packages) {
         const acceptance = estimateAcceptance({
@@ -776,6 +991,8 @@ export async function shopPlayer(
         });
       }
     }
+
+    evaluationStats.leagues_completed += 1;
   }
 
   const grouped = new Map<string, ShopOpportunity[]>();
@@ -800,6 +1017,15 @@ export async function shopPlayer(
     position: firstAsset.position,
     edge_score: firstAsset.edge_score,
     leagues_owned: leaguesWithPlayer.length,
+    partial_results: evaluationBudget.partialResults,
+    warnings: [...evaluationBudget.warnings],
+    evaluation_stats: {
+      ...evaluationStats,
+      candidates_evaluated: evaluationBudget.evaluationsStarted,
+      valuation_cache_hits: evaluationBudget.cacheHits,
+      evaluation_cap: evaluationBudget.maxEvaluations,
+      timed_out: evaluationBudget.timedOut,
+    },
     opportunities: deduped.slice(0, 30),
   };
 }

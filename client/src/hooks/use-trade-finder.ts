@@ -3,6 +3,8 @@ import { apiFetch } from "../lib/api";
 import { classStrengthQueryParams } from "../lib/pick-strengths";
 import type { TradeSuggestion, ShopPlayerResult } from "../../../shared/types";
 
+const SHOP_PLAYER_REQUEST_TIMEOUT_MS = 30_000;
+
 export function useTradeSuggestions(username: string, leagueId: string) {
   const classStrengths = classStrengthQueryParams();
   const suffix = classStrengths ? `?${classStrengths.slice(1)}` : "";
@@ -28,10 +30,27 @@ export function useShopPlayer(
     : "";
   return useQuery<ShopPlayerResult>({
     queryKey: ["shop-player", username, playerId, ambition, suffix, showRedraft],
-    queryFn: () =>
-      apiFetch(
-        `/api/trade/shop/${encodeURIComponent(username)}/${encodeURIComponent(playerId)}?ambition=${ambition}${suffix}${showRedraft ? "&redraft=true" : ""}`
-      ),
+    queryFn: async () => {
+      const controller = new AbortController();
+      const timeout = window.setTimeout(
+        () => controller.abort(),
+        SHOP_PLAYER_REQUEST_TIMEOUT_MS
+      );
+      try {
+        return await apiFetch(
+          `/api/trade/shop/${encodeURIComponent(username)}/${encodeURIComponent(playerId)}?ambition=${ambition}${suffix}${showRedraft ? "&redraft=true" : ""}`,
+          { signal: controller.signal }
+        );
+      } catch (error) {
+        if ((error as Error).name === "AbortError") {
+          throw new Error("Shop a Player timed out. Try a lower ambition level or retry in a moment.");
+        }
+        throw error;
+      } finally {
+        window.clearTimeout(timeout);
+      }
+    },
     enabled: !!username && !!playerId,
+    retry: 1,
   });
 }

@@ -6,9 +6,15 @@ import type {
   OpportunityPackageValuationInput,
 } from "../trade-opportunity-valuation.js";
 import {
+  createShopEvaluationBudget,
+  evaluateShopPackageCandidates,
   scoreShopPackage,
+  scorePackageForContext,
+  selectShopCandidatesForEvaluation,
   shopPickToTradePackageAsset,
   shopPlayerAssetToTradePackageAsset,
+  type PackageContext,
+  type ShopPackageCandidate,
 } from "../shop-player.js";
 
 function coreAsset(overrides: Partial<CoreAsset> = {}): CoreAsset {
@@ -219,4 +225,162 @@ describe("Shop a Player valuation helpers", () => {
     expect(scored.valuationWarnings[0].message).toContain("fallback");
     expect(scored.valuationExplanations[0]).toContain("base_market_value");
   });
+
+  it("caches duplicate package valuation by league and package shape", async () => {
+    const calls: OpportunityPackageValuationInput[] = [];
+    const evaluatePackage = async (
+      input: OpportunityPackageValuationInput
+    ): Promise<OpportunityPackageValuation> => {
+      calls.push(input);
+      return {
+        sendAssets: input.send.map((asset) => evaluated(asset, 7_000)),
+        receiveAssets: input.receive.map((asset) => evaluated(asset, 6_500)),
+        sendEdge: 70,
+        receiveEdge: 65,
+        deltaEdge: -5,
+        sendBaseMarketValue: 6_500,
+        receiveBaseMarketValue: 6_000,
+        sendLeagueMarketValue: 6_750,
+        receiveLeagueMarketValue: 6_250,
+        sendContextTradeValue: 7_000,
+        receiveContextTradeValue: 6_500,
+        delta: -500,
+        fairness: "fair",
+        packagePenaltySend: 0,
+        packagePenaltyReceive: 0,
+        percentGap: 7.1,
+        warnings: [],
+        valuationExplanations: ["Shared valuation helper output."],
+      };
+    };
+    const ctx = packageContext(evaluatePackage, createShopEvaluationBudget({ maxEvaluations: 10 }));
+    const send = [shopPlayerAssetToTradePackageAsset(coreAsset({ player_id: "send-cache" }))];
+    const receive = [shopPlayerAssetToTradePackageAsset(coreAsset({ player_id: "receive-cache" }))];
+
+    await scorePackageForContext(ctx, send, receive);
+    await scorePackageForContext(ctx, send, receive);
+
+    expect(calls).toHaveLength(1);
+    expect(ctx.evaluationBudget.evaluationsStarted).toBe(1);
+    expect(ctx.evaluationBudget.cacheHits).toBe(1);
+  });
+
+  it("candidate caps limit expensive valuation calls", async () => {
+    const calls: OpportunityPackageValuationInput[] = [];
+    const evaluatePackage = async (
+      input: OpportunityPackageValuationInput
+    ): Promise<OpportunityPackageValuation> => {
+      calls.push(input);
+      return fairValuation(input);
+    };
+    const ctx = packageContext(evaluatePackage, createShopEvaluationBudget({ maxEvaluations: 10 }));
+    const candidates = Array.from({ length: 8 }, (_, index) =>
+      candidate(`receive-${index}`, 100 - index)
+    );
+
+    const evaluatedPackages = await evaluateShopPackageCandidates(ctx, candidates, 3);
+
+    expect(evaluatedPackages).toHaveLength(3);
+    expect(calls).toHaveLength(3);
+    expect(selectShopCandidatesForEvaluation(candidates, 3).map((c) => c.receive[0].player_id)).toEqual([
+      "receive-0",
+      "receive-1",
+      "receive-2",
+    ]);
+  });
+
+  it("returns partial evaluated packages when the valuation budget is exhausted", async () => {
+    const calls: OpportunityPackageValuationInput[] = [];
+    const evaluatePackage = async (
+      input: OpportunityPackageValuationInput
+    ): Promise<OpportunityPackageValuation> => {
+      calls.push(input);
+      return fairValuation(input);
+    };
+    const budget = createShopEvaluationBudget({ maxEvaluations: 2 });
+    const ctx = packageContext(evaluatePackage, budget);
+    const candidates = Array.from({ length: 5 }, (_, index) =>
+      candidate(`budget-${index}`, 100 - index)
+    );
+
+    const evaluatedPackages = await evaluateShopPackageCandidates(ctx, candidates, 5);
+
+    expect(evaluatedPackages).toHaveLength(2);
+    expect(calls).toHaveLength(2);
+    expect(budget.partialResults).toBe(true);
+    expect([...budget.warnings][0]).toContain("valuation cap");
+  });
+
+  it("preserves empty state when no evaluated candidate survives quality filters", async () => {
+    const evaluatePackage = async (
+      input: OpportunityPackageValuationInput
+    ): Promise<OpportunityPackageValuation> => ({
+      ...fairValuation(input),
+      fairness: "lopsided",
+    });
+    const ctx = packageContext(evaluatePackage, createShopEvaluationBudget({ maxEvaluations: 10 }));
+    const candidates = [candidate("lopsided-receive", 100)];
+
+    const evaluatedPackages = await evaluateShopPackageCandidates(ctx, candidates, 3);
+
+    expect(evaluatedPackages).toEqual([]);
+  });
 });
+
+function fairValuation(input: OpportunityPackageValuationInput): OpportunityPackageValuation {
+  return {
+    sendAssets: input.send.map((asset) => evaluated(asset, 7_000)),
+    receiveAssets: input.receive.map((asset) => evaluated(asset, 6_500)),
+    sendEdge: 70,
+    receiveEdge: 65,
+    deltaEdge: -5,
+    sendBaseMarketValue: 6_500,
+    receiveBaseMarketValue: 6_000,
+    sendLeagueMarketValue: 6_750,
+    receiveLeagueMarketValue: 6_250,
+    sendContextTradeValue: 7_000,
+    receiveContextTradeValue: 6_500,
+    delta: -500,
+    fairness: "fair",
+    packagePenaltySend: 0,
+    packagePenaltyReceive: 0,
+    percentGap: 7.1,
+    warnings: [],
+    valuationExplanations: ["Shared valuation helper output."],
+  };
+}
+
+function packageContext(
+  evaluatePackage: (input: OpportunityPackageValuationInput) => Promise<OpportunityPackageValuation>,
+  evaluationBudget = createShopEvaluationBudget({ maxEvaluations: 10 })
+): PackageContext {
+  const playerAsset = coreAsset({ player_id: "shop-player", full_name: "Shop Player", position: "QB", edge_score: 80 });
+  return {
+    leagueId: "league-1",
+    mode: "sf",
+    userRoster: {} as never,
+    opp: {} as never,
+    playerAsset,
+    leagueMedians: { QB: 60, RB: 60, WR: 60, TE: 60 },
+    ambition: 2,
+    userPicks: [],
+    oppPicks: [],
+    valueType: "dynasty",
+    valuationCache: new Map(),
+    evaluationBudget,
+    evaluatePackage,
+  };
+}
+
+function candidate(playerId: string, cheapScore: number): ShopPackageCandidate {
+  return {
+    path: "even_swap",
+    path_label: "Even Swap",
+    send: [shopPlayerAssetToTradePackageAsset(coreAsset({ player_id: "send-player", full_name: "Send Player", position: "QB", edge_score: 80 }))],
+    receive: [shopPlayerAssetToTradePackageAsset(coreAsset({ player_id: playerId, full_name: playerId, position: "WR", edge_score: 70 }))],
+    why_you_do_it: "Test package.",
+    why_they_accept: "Test fit.",
+    cheap_score: cheapScore,
+    score_filter: "not_lopsided",
+  };
+}

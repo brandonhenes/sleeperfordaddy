@@ -777,6 +777,20 @@ export interface ShopPlayerResult {
   position: string;
   edge_score: number;
   leagues_owned: number;
+  partial_results?: boolean;
+  warnings?: string[];
+  evaluation_stats?: {
+    leagues_scanned: number;
+    leagues_with_player: number;
+    leagues_completed: number;
+    opponents_considered: number;
+    opponents_evaluated: number;
+    candidates_generated: number;
+    candidates_evaluated: number;
+    valuation_cache_hits: number;
+    evaluation_cap: number;
+    timed_out: boolean;
+  };
   opportunities: ShopOpportunity[];
 }
 
