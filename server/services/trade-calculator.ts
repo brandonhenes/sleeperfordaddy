@@ -28,6 +28,7 @@ import {
   applyLeagueMarketAdjustment,
   buildLeagueMarketContext,
   loadLeagueMarketContext,
+  loadSleeperProjectionProfiles,
 } from "./league-market-adjustment.js";
 import { calculateKtcTradeContext, calculateTradeContext } from "./trade-context-value.js";
 import { getAgeCurveStatus } from "./age-curves.js";
@@ -854,7 +855,20 @@ export async function evaluateTrade(
   });
   const allPlayerIds = [...new Set([...evalA, ...evalB].map((a) => a.player_id).filter((id): id is string => !!id))];
   const shouldApplyLeagueAdjustment = valuationProfile !== "ktc";
-  const usageMap = shouldApplyLeagueAdjustment && leagueContext ? await loadPlayerUsageStats(allPlayerIds) : new Map();
+  const shouldUseKtcLeagueProjection = valuationProfile === "ktc_league" && shouldApplyLeagueAdjustment && leagueContext;
+  let ktcLeagueProjectionWarning: string | null = null;
+  const [usageMap, projectionMap] = await Promise.all([
+    shouldApplyLeagueAdjustment && !shouldUseKtcLeagueProjection
+      ? loadPlayerUsageStats(allPlayerIds)
+      : Promise.resolve(new Map()),
+    shouldUseKtcLeagueProjection
+      ? loadSleeperProjectionProfiles(allPlayerIds, leagueContext).catch((error: unknown) => {
+          const detail = error instanceof Error ? error.message : "unknown error";
+          ktcLeagueProjectionWarning = `Sleeper projection data was unavailable (${detail}); KTC League used league structure only.`;
+          return new Map();
+        })
+      : Promise.resolve(new Map()),
+  ]);
   const ppgMap = shouldApplyLeagueAdjustment && leagueContext && valueType === "redraft"
     ? await computeLeaguePPG(allPlayerIds, leagueContext.scoring)
     : new Map<string, { ppg: number }>();
@@ -864,19 +878,22 @@ export async function evaluateTrade(
       continue;
     }
     const usage = asset.player_id ? usageMap.get(asset.player_id) ?? null : null;
+    const projection = asset.player_id ? projectionMap.get(asset.player_id) ?? null : null;
     const adjustment = applyLeagueMarketAdjustment({
       baseMarketValue: asset.base_market_value ?? 0,
       edgeScore: asset.edge_score,
       position: asset.position,
       usage,
+      projection,
       context: leagueContext,
+      model: valuationProfile === "ktc_league" ? "ktc_league" : "composite",
     });
     asset.league_market_value = adjustment.leagueMarketValue;
     asset.scoring_multiplier = adjustment.scoringMultiplier;
     asset.lineup_scarcity_multiplier = adjustment.lineupScarcityMultiplier;
     asset.scoring_delta_ppg = adjustment.scoringDeltaPpg;
     asset.league_adjusted_score = adjustment.leagueAdjustedScore;
-    asset.ppg = asset.player_id ? ppgMap.get(asset.player_id)?.ppg ?? null : null;
+    asset.ppg = projection?.projectedLeaguePpg ?? (asset.player_id ? ppgMap.get(asset.player_id)?.ppg ?? null : null);
     asset.adjustment_reasons = [
       ...(asset.adjustment_reasons ?? []),
       ...adjustment.reasons.map((reason) => ({
@@ -896,7 +913,11 @@ export async function evaluateTrade(
   const leagueValuesB = evalB.map((a) => a.league_market_value ?? a.base_market_value ?? 0);
   const tvResult = valuationProfile === "composite"
     ? calculateTradeContext(leagueValuesA, leagueValuesB)
-    : calculateKtcTradeContext(leagueValuesA, leagueValuesB);
+    : calculateKtcTradeContext(
+        leagueValuesA,
+        leagueValuesB,
+        valuationProfile === "ktc_league" ? { adjustmentMode: "league" } : undefined
+      );
 
   for (let i = 0; i < evalA.length; i++) {
     const contextValue = tvResult.sideA.contextValues[i] ?? leagueValuesA[i] ?? 0;
@@ -965,6 +986,14 @@ export async function evaluateTrade(
               severity: "warning" as const,
               side: null,
               message: `League settings were not found for ${leagueId}; selected format fallback was used.`,
+            }]
+          : []),
+        ...(ktcLeagueProjectionWarning
+          ? [{
+              type: "league_settings" as const,
+              severity: "warning" as const,
+              side: null,
+              message: ktcLeagueProjectionWarning,
             }]
           : []),
       ]

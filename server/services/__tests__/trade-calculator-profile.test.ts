@@ -147,6 +147,54 @@ describe("Trade Calculator valuation profiles", () => {
     expect(ktc.fairness).toBe("fair");
   });
 
+  it("moderates one-anchor package premiums in KTC League mode", () => {
+    const rawKtc = calculateKtcTradeContext([5_097, 5_227, 3_415], [8_933]);
+    const league = calculateKtcTradeContext(
+      [5_097, 5_227, 3_415],
+      [8_933],
+      { adjustmentMode: "league" }
+    );
+
+    expect(rawKtc.fairness).toBe("fair");
+    expect(league.valueAdjustmentSide).toBe("sideB");
+    expect(league.valueAdjustment).toBeLessThan(rawKtc.valueAdjustment * 0.3);
+    expect(league.fairness).toBe("lopsided");
+    expect(league.winner).toBe("sideA");
+    expect(league.explanations.join(" ")).toContain("KTC League moderated");
+  });
+
+  it("does not treat near-peer superstar consolidation as fair in KTC League mode", () => {
+    const hurtsBreeceSecondForCaleb = calculateKtcTradeContext(
+      [9_943, 5_227, 3_415],
+      [12_913],
+      { adjustmentMode: "league" }
+    );
+    const lamarTaylorSecondForMaye = calculateKtcTradeContext(
+      [12_427, 4_645, 3_415],
+      [14_815],
+      { adjustmentMode: "league" }
+    );
+
+    expect(hurtsBreeceSecondForCaleb.fairness).toBe("lopsided");
+    expect(hurtsBreeceSecondForCaleb.winner).toBe("sideA");
+    expect(lamarTaylorSecondForMaye.fairness).toBe("lopsided");
+    expect(lamarTaylorSecondForMaye.winner).toBe("sideA");
+  });
+
+  it("still credits true elite-anchor packages in KTC League mode", () => {
+    const rawKtc = calculateKtcTradeContext([12_913, 7_055], [16_057]);
+    const league = calculateKtcTradeContext(
+      [12_913, 7_055],
+      [16_057],
+      { adjustmentMode: "league" }
+    );
+
+    expect(league.valueAdjustmentSide).toBe("sideB");
+    expect(league.valueAdjustment).toBeGreaterThan(0);
+    expect(league.valueAdjustment).toBeLessThan(rawKtc.valueAdjustment);
+    expect(league.fairness).toBe("fair");
+  });
+
   it("keeps the composite context curve separate from the KTC package curve", () => {
     const valuesA = [9_999];
     const valuesB = [7_500, 5_616];

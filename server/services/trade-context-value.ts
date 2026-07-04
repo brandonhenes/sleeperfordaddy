@@ -56,9 +56,17 @@ export interface TradeContextResult {
 
 type KtcAdjustmentSide = "sideA" | "sideB" | "none";
 
+export interface KtcTradeContextOptions {
+  adjustmentMode?: "ktc" | "league";
+}
+
 function roundTo(value: number, decimals = 1): number {
   const factor = 10 ** decimals;
   return Math.round(value * factor) / factor;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
 }
 
 function sum(values: number[]): number {
@@ -220,6 +228,54 @@ function ktcAdjustmentContributions(
     contributions[index] = ktcProcessValue(value, bestInTrade, maxOverall, nerfIndex);
   }
   return contributions;
+}
+
+function ktcLeaguePackageAdjustmentMultiplier(
+  sideAValues: number[],
+  sideBValues: number[],
+  adjustmentSide: KtcAdjustmentSide
+): number {
+  if (adjustmentSide === "none") return 1;
+
+  const favoredValues = adjustmentSide === "sideA" ? sideAValues : sideBValues;
+  const opposingValues = adjustmentSide === "sideA" ? sideBValues : sideAValues;
+
+  if (favoredValues.length !== 1 || opposingValues.length < 2) {
+    return 1;
+  }
+
+  const anchor = Math.max(...favoredValues, 0);
+  const bestOpposingPiece = Math.max(...opposingValues, 0);
+  if (anchor <= 0 || bestOpposingPiece <= 0) {
+    return 1;
+  }
+
+  const anchorRatio = anchor / bestOpposingPiece;
+  let multiplier = 1;
+
+  if (anchor >= 15_500) {
+    multiplier = 0.9;
+  } else if (anchor >= 13_500) {
+    multiplier = 0.65;
+  } else if (anchor >= 11_500) {
+    multiplier = 0.45;
+  } else {
+    multiplier = 0.25;
+  }
+
+  if (anchorRatio < 1.15) {
+    multiplier *= 0.35;
+  } else if (anchorRatio < 1.3) {
+    multiplier *= 0.45;
+  } else if (anchorRatio > 1.7) {
+    multiplier *= 1.1;
+  }
+
+  if (opposingValues.length >= 3) {
+    multiplier *= 0.85;
+  }
+
+  return roundTo(clamp(multiplier, 0.15, 0.95), 3);
 }
 
 function assetAdjustmentContributions(
@@ -535,7 +591,8 @@ export function calculateTradeContext(
 
 export function calculateKtcTradeContext(
   sideAValues: number[],
-  sideBValues: number[]
+  sideBValues: number[],
+  options: KtcTradeContextOptions = {}
 ): TradeContextResult {
   const baseA = roundTo(sum(sideAValues), 1);
   const baseB = roundTo(sum(sideBValues), 1);
@@ -698,7 +755,10 @@ export function calculateKtcTradeContext(
   }
 
   const adjustmentSide = adjustmentState.side;
-  const visibleAdjustment = roundTo(adjustmentState.value, 1);
+  const packageAdjustmentMultiplier = options.adjustmentMode === "league"
+    ? ktcLeaguePackageAdjustmentMultiplier(sideAValues, sideBValues, adjustmentSide)
+    : 1;
+  const visibleAdjustment = roundTo(adjustmentState.value * packageAdjustmentMultiplier, 1);
   const finalA = roundTo(baseA + (adjustmentSide === "sideA" ? visibleAdjustment : 0), 1);
   const finalB = roundTo(baseB + (adjustmentSide === "sideB" ? visibleAdjustment : 0), 1);
   const delta = roundTo(finalA - finalB, 1);
@@ -727,7 +787,7 @@ export function calculateKtcTradeContext(
       ? `Best asset is on ${best.side === "sideA" ? "Side A" : "Side B"} at ${Math.round(best.value)} KTC value.`
       : "Best asset strength is even across both trade sides.",
     adjustmentSide !== "none" && visibleAdjustment !== 0
-      ? `KTC-style package adjustment favors ${adjustmentSide === "sideA" ? "Side A" : "Side B"} by ${visibleAdjustment.toFixed(1)}${adjustmentState.display ? "." : " (below KTC's visible adjustment threshold)."}`
+      ? `KTC-style package adjustment favors ${adjustmentSide === "sideA" ? "Side A" : "Side B"} by ${visibleAdjustment.toFixed(1)}${adjustmentState.display ? "." : " (below KTC's visible adjustment threshold)."}${packageAdjustmentMultiplier !== 1 ? ` KTC League moderated the raw package premium by x${packageAdjustmentMultiplier.toFixed(2)} because the anchor/package gap was not large enough for full consolidation value.` : ""}`
       : "No KTC-style package adjustment was needed after comparing asset concentration.",
   ];
   if (warning) explanations.push(warning);
