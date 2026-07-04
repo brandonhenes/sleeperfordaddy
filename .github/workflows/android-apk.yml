@@ -1,0 +1,92 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/android-apk.yml"
+      - "android/**"
+      - "capacitor.config.ts"
+      - "client/**"
+      - "server/**"
+      - "shared/**"
+      - "package.json"
+      - "package-lock.json"
+      - "tsconfig*.json"
+      - "vite.config.ts"
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    name: Build downloadable APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android build packages
+        run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build web app
+        run: npm run build
+
+      - name: Sync Capacitor Android project
+        run: npx cap sync android
+
+      - name: Build debug APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Prepare APK artifact
+        run: |
+          mkdir -p release
+          cp android/app/build/outputs/apk/debug/app-debug.apk release/the-edge.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: the-edge-apk
+          path: release/the-edge.apk
+
+      - name: Remove previous release asset
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release delete-asset the-edge-android-latest the-edge.apk -y || true
+
+      - name: Publish APK release
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: the-edge-android-latest
+          name: The Edge Android APK
+          body: Download the APK on Android and install it. You may need to allow installs from your browser.
+          files: release/the-edge.apk
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
