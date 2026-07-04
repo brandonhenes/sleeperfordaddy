@@ -56,6 +56,74 @@ type SyncScope = "full" | "latest";
 let playersLastSynced = 0;
 const PLAYER_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
 
+async function syncPlayerDatabaseIfNeeded(
+  jobId: string,
+  options: { force?: boolean; detail?: string } = {}
+) {
+  if (!options.force && Date.now() - playersLastSynced <= PLAYER_CACHE_TTL) {
+    return;
+  }
+
+  await updateSyncJob(jobId, {
+    step: "syncing_players",
+    detail: options.detail ?? "Updating player database...",
+  });
+
+  try {
+    const playersData = await getAllPlayers();
+    const playersList = Object.entries(playersData)
+      .filter(([, p]) => p && typeof p === "object")
+      .map(([playerId, p]) => {
+        const raw = p as unknown as Record<string, unknown>;
+        return {
+          player_id: playerId,
+          full_name: p.full_name ?? p.first_name + " " + p.last_name,
+          first_name: p.first_name,
+          last_name: p.last_name,
+          position: p.position,
+          team: p.team,
+          status: p.status ?? null,
+          age: p.age ?? null,
+          years_exp: null,
+          injury_status: (typeof raw.injury_status === "string" ? raw.injury_status : null),
+          injury_body_part: (typeof raw.injury_body_part === "string" ? raw.injury_body_part : null),
+          injury_start_date: (typeof raw.injury_start_date === "string" ? raw.injury_start_date : null),
+          injury_notes: (typeof raw.injury_notes === "string" ? raw.injury_notes : null),
+        };
+      });
+    await bulkUpsertPlayers(playersList);
+    playersLastSynced = Date.now();
+    console.log(`[sync] Synced ${playersList.length} players`);
+
+    try {
+      await seedInjuryBaselines();
+    } catch (err) {
+      console.error("[sync] Error seeding injury baselines:", err);
+    }
+    try {
+      await syncNflverseStats();
+    } catch (err) {
+      console.error("[sync] Error syncing nflverse stats:", err);
+    }
+  } catch (err) {
+    console.error("[sync] Error syncing players:", err);
+  }
+}
+
+async function countMissingRosterPlayers(leagueIds: string[]): Promise<number> {
+  if (leagueIds.length === 0) return 0;
+  const leagueFrags = leagueIds.map((id) => sql`${id}`);
+  const inClause = sql.join(leagueFrags, sql`, `);
+  const rows = await db.execute(sql`
+    SELECT COUNT(DISTINCT rp.player_id)::int AS missing
+    FROM roster_players rp
+    LEFT JOIN players_master pm ON pm.player_id = rp.player_id
+    WHERE rp.league_id IN (${inClause})
+      AND pm.player_id IS NULL
+  `);
+  return Number((rows as unknown as Array<{ missing: number | string }>)[0]?.missing ?? 0);
+}
+
 /**
  * Check if a sync is needed (stale > 10 min or never synced).
  * Returns the latest sync job if one exists.
@@ -241,7 +309,26 @@ async function runSync(
     }
   );
 
+  const processedLeagueIds = uniqueLeagues.map((league) => league.league_id);
+
   if (scope === "latest" || leagueId) {
+    const missingPlayers = await countMissingRosterPlayers(processedLeagueIds).catch((err) => {
+      console.error("[sync] Error checking missing roster players:", err);
+      return 0;
+    });
+    await syncPlayerDatabaseIfNeeded(jobId, {
+      force: missingPlayers > 0,
+      detail: missingPlayers > 0
+        ? `Updating player database for ${missingPlayers} new roster players...`
+        : "Updating player database...",
+    });
+
+    try {
+      await syncLeagueDraftResults(username, processedLeagueIds);
+    } catch (err) {
+      console.error("[sync] Error syncing league draft results:", err);
+    }
+
     await bustAllCaches({ username, userId: sleeperUser.user_id });
 
     await updateSyncJob(jobId, {
@@ -260,54 +347,7 @@ async function runSync(
   }
 
   // Step 5: Sync player data (daily cache)
-  if (Date.now() - playersLastSynced > PLAYER_CACHE_TTL) {
-    await updateSyncJob(jobId, {
-      step: "syncing_players",
-      detail: "Updating player database...",
-    });
-
-    try {
-      const playersData = await getAllPlayers();
-      const playersList = Object.entries(playersData)
-        .filter(([, p]) => p && typeof p === "object")
-        .map(([playerId, p]) => {
-          const raw = p as unknown as Record<string, unknown>;
-          return {
-            player_id: playerId,
-            full_name: p.full_name ?? p.first_name + " " + p.last_name,
-            first_name: p.first_name,
-            last_name: p.last_name,
-            position: p.position,
-            team: p.team,
-            status: p.status ?? null,
-            age: p.age ?? null,
-            years_exp: null,
-            injury_status: (typeof raw.injury_status === "string" ? raw.injury_status : null),
-            injury_body_part: (typeof raw.injury_body_part === "string" ? raw.injury_body_part : null),
-            injury_start_date: (typeof raw.injury_start_date === "string" ? raw.injury_start_date : null),
-            injury_notes: (typeof raw.injury_notes === "string" ? raw.injury_notes : null),
-          };
-        });
-      await bulkUpsertPlayers(playersList);
-      playersLastSynced = Date.now();
-      console.log(`[sync] Synced ${playersList.length} players`);
-
-      // Seed injury recovery baselines (idempotent upsert)
-      try {
-        await seedInjuryBaselines();
-      } catch (err) {
-        console.error("[sync] Error seeding injury baselines:", err);
-      }
-      try {
-        await syncNflverseStats();
-      } catch (err) {
-        console.error("[sync] Error syncing nflverse stats:", err);
-      }
-    } catch (err) {
-      console.error("[sync] Error syncing players:", err);
-      // Non-fatal, continue
-    }
-  }
+  await syncPlayerDatabaseIfNeeded(jobId);
 
   // Step 6: Capture player value snapshots (for injury buying windows)
   await updateSyncJob(jobId, {

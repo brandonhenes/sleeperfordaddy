@@ -5,8 +5,16 @@ import { getPowerRankings } from "./power-rankings.js";
 
 export async function syncLeagueDraftResults(
   username: string,
+  leagueIds?: string[],
 ): Promise<{ drafts: number; picks: number }> {
-  const allLeagues = await getPowerRankings(username);
+  if (!(await hasDraftResultsTable())) {
+    console.warn("[draft-results] league_draft_results table is unavailable; skipping draft result sync.");
+    return { drafts: 0, picks: 0 };
+  }
+
+  const allLeagues = leagueIds
+    ? leagueIds.map((league_id) => ({ league_id }))
+    : await getPowerRankings(username);
   let totalDrafts = 0;
   let totalPicks = 0;
 
@@ -71,6 +79,17 @@ export async function syncLeagueDraftResults(
 
   console.log(`[draft-results] Synced ${totalDrafts} drafts with ${totalPicks} picks`);
   return { drafts: totalDrafts, picks: totalPicks };
+}
+
+async function hasDraftResultsTable(): Promise<boolean> {
+  try {
+    const rows = await db.execute(sql`
+      SELECT to_regclass('public.league_draft_results')::text AS table_name
+    `);
+    return (rows as unknown as Array<{ table_name: string | null }>)[0]?.table_name != null;
+  } catch {
+    return false;
+  }
 }
 
 export interface LeagueADP {

@@ -11,7 +11,7 @@ import {
   type SourceWeights,
 } from "./edge-score.js";
 import {
-  getLeagueDraftPicks, getRookieDraftOrder, estimatePickTiers, scoreDraftPicks,
+  buildDraftPickInventory, getLeagueDraftPicks, getRookieDraftOrder, estimatePickTiers, scoreDraftPicks,
   type ScoredPick, type DraftPick, type TieredPick,
 } from "./draft-picks.js";
 import { optimizeLineup, type OptimizedLineup } from "./lineup-optimizer.js";
@@ -552,38 +552,56 @@ function scoreTieredPicksFromLookups(
 function buildDraftPicksFromDB(
   totalRosters: number,
   draftRounds: number,
-  tradedPicks: { season: string; round: number; roster_id: number; owner_id: number }[]
+  tradedPicks: { season: string; round: number; roster_id: number; owner_id: number; previous_owner_id?: number }[],
+  completedDraftSeasons: Set<string> = new Set()
 ): DraftPick[] {
-  const rounds = Math.min(draftRounds, 4);
-  const currentYear = new Date().getFullYear();
-  const seasons = [currentYear, currentYear + 1, currentYear + 2];
+  return buildDraftPickInventory(
+    totalRosters,
+    draftRounds,
+    tradedPicks.map((pick) => ({
+      season: pick.season,
+      round: pick.round,
+      roster_id: pick.roster_id,
+      owner_id: pick.owner_id,
+      previous_owner_id: pick.previous_owner_id ?? pick.roster_id,
+    })),
+    { completedDraftSeasons }
+  );
+}
 
-  const picks = new Map<string, DraftPick>();
-  for (const season of seasons) {
-    for (let round = 1; round <= rounds; round++) {
-      for (let rid = 1; rid <= totalRosters; rid++) {
-        picks.set(`${season}|${round}|${rid}`, {
-          season: String(season),
-          round,
-          roster_id: rid,
-          original_owner_id: rid,
-          pick_slot: null,
-        });
-      }
+async function loadCompletedDraftSeasonsByLeague(
+  leagueIds: string[]
+): Promise<Map<string, Set<string>>> {
+  const result = new Map<string, Set<string>>();
+  if (leagueIds.length === 0) return result;
+
+  const leagueIdFrags = leagueIds.map((id) => sql`${id}`);
+  const inClause = sql.join(leagueIdFrags, sql`, `);
+
+  try {
+    const tableCheck = await db.execute(sql`
+      SELECT to_regclass('public.league_draft_results')::text AS table_name
+    `);
+    const exists = (tableCheck as unknown as Array<{ table_name: string | null }>)[0]?.table_name != null;
+    if (!exists) return result;
+
+    const rows = await db.execute(sql`
+      SELECT league_id, season
+      FROM league_draft_results
+      WHERE league_id IN (${inClause})
+      GROUP BY league_id, season
+    `);
+
+    for (const row of rows as unknown as Array<{ league_id: string; season: string }>) {
+      const seasons = result.get(row.league_id) ?? new Set<string>();
+      seasons.add(String(row.season));
+      result.set(row.league_id, seasons);
     }
+  } catch {
+    return result;
   }
 
-  for (const t of tradedPicks) {
-    const season = parseInt(t.season, 10);
-    if (season < currentYear || season > currentYear + 2) continue;
-    const key = `${t.season}|${t.round}|${t.roster_id}`;
-    const pick = picks.get(key);
-    if (pick) {
-      pick.roster_id = t.owner_id;
-    }
-  }
-
-  return [...picks.values()];
+  return result;
 }
 
 async function getPowerRankingsDbOnly(
@@ -617,7 +635,7 @@ async function getPowerRankingsDbOnly(
   const idFrags = leagues.map((l) => sql`${l.league_id}`);
   const inClause = sql.join(idFrags, sql`, `);
 
-  const [rosterPlayerRows, ridRows, nmRows, tradedPickRows, draftOrderRows] = await Promise.all([
+  const [rosterPlayerRows, ridRows, nmRows, tradedPickRows, draftOrderRows, completedDraftSeasonsByLeague] = await Promise.all([
     db.execute(sql`
       SELECT rp.league_id, rp.owner_id, rp.player_id, pm.full_name, pm.position, pm.age
       FROM roster_players rp
@@ -628,6 +646,7 @@ async function getPowerRankingsDbOnly(
     db.execute(sql`SELECT league_id, user_id, display_name, team_name FROM league_users WHERE league_id IN (${inClause})`),
     db.execute(sql`SELECT league_id, season, round, roster_id, owner_id FROM league_traded_picks WHERE league_id IN (${inClause})`),
     db.execute(sql`SELECT league_id, season, roster_id, draft_position FROM league_draft_orders WHERE league_id IN (${inClause})`),
+    loadCompletedDraftSeasonsByLeague(leagueIds),
   ]);
 
   type RR = { league_id: string; owner_id: string; player_id: string; full_name: string; position: string; age: number | null; team: string | null; status: string | null; external_flags_fa: boolean };
@@ -684,7 +703,8 @@ async function getPowerRankingsDbOnly(
     const picks = buildDraftPicksFromDB(
       totalRosters,
       draftRounds,
-      tradedPicksByLeague.get(lid) ?? []
+      tradedPicksByLeague.get(lid) ?? [],
+      completedDraftSeasonsByLeague.get(lid) ?? new Set()
     );
     const playerIds = [
       ...new Set(owners.flatMap(([, ps]) => ps.map((p) => p.player_id))),

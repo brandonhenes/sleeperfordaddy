@@ -6,7 +6,7 @@ import { sql } from "drizzle-orm";
 
 // ─── Types ───
 
-interface SleeperTradedPick {
+export interface SleeperTradedPick {
   season: string;
   round: number;
   roster_id: number;        // original draft slot owner
@@ -53,22 +53,26 @@ const ROUND_NAMES: Record<number, string> = {
 
 const MAX_ROUNDS = 4;
 
+export interface DraftPickInventoryOptions {
+  currentYear?: number;
+  completedDraftSeasons?: Set<string>;
+}
+
 // ─── Build Item 1: Build Complete Draft Pick Inventory ───
 
-export async function getLeagueDraftPicks(
-  leagueId: string,
+export function buildDraftPickInventory(
   totalRosters: number,
-  draftRounds: number
-): Promise<DraftPick[]> {
-  const raw = await jget<SleeperTradedPick[]>(
-    `/league/${leagueId}/traded_picks`
-  );
-
+  draftRounds: number,
+  tradedPicks: SleeperTradedPick[] = [],
+  options: DraftPickInventoryOptions = {}
+): DraftPick[] {
   const rounds = Math.min(draftRounds, MAX_ROUNDS);
-  const currentYear = new Date().getFullYear();
-  const seasons = [currentYear, currentYear + 1, currentYear + 2];
+  const currentYear = options.currentYear ?? new Date().getFullYear();
+  const completedDraftSeasons = options.completedDraftSeasons ?? new Set<string>();
+  const seasons = [currentYear, currentYear + 1, currentYear + 2]
+    .filter((season) => !completedDraftSeasons.has(String(season)));
 
-  // Default: every roster owns their own pick for each round/season
+  // Completed draft seasons are omitted because those picks have become players.
   const picks = new Map<string, DraftPick>();
   for (const season of seasons) {
     for (let round = 1; round <= rounds; round++) {
@@ -84,20 +88,51 @@ export async function getLeagueDraftPicks(
     }
   }
 
-  // Apply trades: transfer ownership
-  if (raw) {
-    for (const t of raw) {
-      const season = parseInt(t.season, 10);
-      if (season < currentYear || season > currentYear + 2) continue;
-      const key = `${t.season}|${t.round}|${t.roster_id}`;
-      const pick = picks.get(key);
-      if (pick) {
-        pick.roster_id = t.owner_id; // current owner
-      }
+  for (const t of tradedPicks) {
+    const season = parseInt(t.season, 10);
+    if (season < currentYear || season > currentYear + 2) continue;
+    if (completedDraftSeasons.has(String(season))) continue;
+    const key = `${t.season}|${t.round}|${t.roster_id}`;
+    const pick = picks.get(key);
+    if (pick) {
+      pick.roster_id = t.owner_id; // current owner
     }
   }
 
   return [...picks.values()];
+}
+
+export async function getLeagueDraftPicks(
+  leagueId: string,
+  totalRosters: number,
+  draftRounds: number
+): Promise<DraftPick[]> {
+  const [raw, completedDraftSeasons] = await Promise.all([
+    jget<SleeperTradedPick[]>(`/league/${leagueId}/traded_picks`),
+    getCompletedRookieDraftSeasons(leagueId),
+  ]);
+
+  return buildDraftPickInventory(totalRosters, draftRounds, raw ?? [], {
+    completedDraftSeasons,
+  });
+}
+
+async function getCompletedRookieDraftSeasons(
+  leagueId: string
+): Promise<Set<string>> {
+  try {
+    const drafts = await getLeagueDrafts(leagueId);
+    const seasons = new Set<string>();
+    for (const draft of drafts) {
+      const rounds = Number(draft.settings?.rounds ?? 99);
+      if (draft.status !== "complete") continue;
+      if (!Number.isFinite(rounds) || rounds > 8) continue;
+      seasons.add(draft.season);
+    }
+    return seasons;
+  } catch {
+    return new Set<string>();
+  }
 }
 
 // ─── Build Item 1b: Fetch Rookie Draft Order ───
