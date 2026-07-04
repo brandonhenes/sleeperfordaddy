@@ -5,7 +5,7 @@ import { parseClassStrengths } from "../lib/parse-class-strengths.js";
 import { buildLeagueBehaviors, type OpponentContext } from "../services/manager-behavior.js";
 import { getPowerRankings } from "../services/power-rankings.js";
 import { validateTradeAssets } from "../services/trade-asset-validation.js";
-import type { TradeAssetInput } from "../../shared/types.js";
+import type { TradeAssetInput, TradeValuationProfile } from "../../shared/types.js";
 
 const router = Router();
 
@@ -25,11 +25,13 @@ router.get("/api/trade/assets", async (req, res) => {
 /** POST /api/trade/evaluate */
 router.post("/api/trade/evaluate", async (req, res) => {
   try {
-    const { sideA, sideB, mode, leagueId } = req.body as {
+    const { sideA, sideB, mode, leagueId, valuationMode, includeComparison } = req.body as {
       sideA: TradeAssetInput[];
       sideB: TradeAssetInput[];
       mode?: "sf" | "1qb";
       leagueId?: string;
+      valuationMode?: TradeValuationProfile;
+      includeComparison?: boolean;
     };
     if (!sideA?.length || !sideB?.length) {
       return res.status(400).json({
@@ -40,6 +42,12 @@ router.post("/api/trade/evaluate", async (req, res) => {
     const weights = parseWeights(req);
     const classStrengths = parseClassStrengths(req);
     const valueType = req.query.redraft === "true" ? "redraft" as const : "dynasty" as const;
+    const queryValuationMode = req.query.valuationMode;
+    const requestedValuationMode =
+      valuationMode ??
+      (queryValuationMode === "ktc" || queryValuationMode === "ktc_league" || queryValuationMode === "composite"
+        ? queryValuationMode
+        : undefined);
     const data = await evaluateTrade(
       sideA,
       sideB,
@@ -47,7 +55,11 @@ router.post("/api/trade/evaluate", async (req, res) => {
       valueType,
       weights,
       leagueId,
-      classStrengths
+      classStrengths,
+      {
+        valuationProfile: requestedValuationMode,
+        includeComparison: includeComparison === true || req.query.includeComparison === "true",
+      }
     );
     res.json(data);
   } catch (err) {

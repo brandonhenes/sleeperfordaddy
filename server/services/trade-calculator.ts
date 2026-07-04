@@ -6,6 +6,9 @@ import type {
   TradeEvaluation,
   TradeHealthWarning,
   TradeValuationAdjustmentReason,
+  TradeValuationComparison,
+  TradeValuationProfile,
+  TradeValuationProfileSummary,
   TradeValuationWarning,
 } from "../../shared/types.js";
 import type { SourceWeights } from "./edge-score.js";
@@ -15,7 +18,12 @@ import {
   type GlobalScaleParams,
 } from "./composite-values.js";
 import { computeEdgeScores } from "./edge-score.js";
-import { calculateMarketValueFromSources } from "./market-value.js";
+import {
+  calculateMarketValueFromSources,
+  edgeEquivalentFromMarketValue,
+  marketValueFromEdge,
+  MAX_MARKET_VALUE,
+} from "./market-value.js";
 import {
   applyLeagueMarketAdjustment,
   buildLeagueMarketContext,
@@ -182,7 +190,7 @@ function interpolatePickValue(
   return { ktcValue, dpValue, label };
 }
 
-type RawEval = {
+export type RawEval = {
   asset_id: string | null;
   asset_key: string;
   asset_name: string;
@@ -197,6 +205,99 @@ type RawEval = {
   pick_breakdown?: EvaluatedAsset["pick_breakdown"];
   fallback_warnings?: string[];
 };
+
+export interface EvaluateTradeOptions {
+  valuationProfile?: TradeValuationProfile;
+  includeComparison?: boolean;
+}
+
+const DEFAULT_VALUATION_PROFILE: TradeValuationProfile = "composite";
+const TRADE_FAIR_PERCENT_GAP = 8;
+const TRADE_SLIGHT_EDGE_PERCENT_GAP = 18;
+
+function normalizeValuationProfile(value: unknown): TradeValuationProfile {
+  if (value === "ktc" || value === "ktc_league" || value === "composite") {
+    return value;
+  }
+  return DEFAULT_VALUATION_PROFILE;
+}
+
+function clampMarketValue(value: number): number {
+  return Math.max(0, Math.min(MAX_MARKET_VALUE, Math.round(value)));
+}
+
+function fairnessFromGap(percentGap: number): TradeEvaluation["fairness"] {
+  if (percentGap <= TRADE_FAIR_PERCENT_GAP) return "fair";
+  if (percentGap <= TRADE_SLIGHT_EDGE_PERCENT_GAP) return "slight_edge";
+  return "lopsided";
+}
+
+function summaryFromTotals(
+  profile: TradeValuationProfileSummary["profile"],
+  sideA: number,
+  sideB: number,
+  valueAdjustment = 0
+): TradeValuationProfileSummary {
+  const roundedA = Math.round(sideA * 10) / 10;
+  const roundedB = Math.round(sideB * 10) / 10;
+  const delta = Math.round((roundedA - roundedB) * 10) / 10;
+  const maxTotal = Math.max(roundedA, roundedB, 1);
+  const percentGap = Math.round((Math.abs(delta) / maxTotal) * 1000) / 10;
+  const fairness = fairnessFromGap(percentGap);
+  const winner: TradeEvaluation["winner"] =
+    fairness === "fair" ? "even" : delta > 0 ? "sideA" : "sideB";
+
+  return {
+    profile,
+    sideA_total: roundedA,
+    sideB_total: roundedB,
+    delta,
+    fairness,
+    winner,
+    percent_gap: percentGap,
+    value_adjustment: Math.round(valueAdjustment * 10) / 10,
+  };
+}
+
+function ktcMarketValue(raw: RawEval): number {
+  return clampMarketValue(raw.ktc_value ?? 0);
+}
+
+type TradeContextCalculation = ReturnType<typeof calculateTradeContext>;
+
+export function buildValuationComparison(params: {
+  profile: TradeValuationProfile;
+  evalA: EvaluatedAsset[];
+  evalB: EvaluatedAsset[];
+  rawKtcValuesA: number[];
+  rawKtcValuesB: number[];
+  context: TradeContextCalculation;
+}): TradeValuationComparison {
+  const baseA = params.evalA.reduce((sum, asset) => sum + (asset.base_market_value ?? 0), 0);
+  const baseB = params.evalB.reduce((sum, asset) => sum + (asset.base_market_value ?? 0), 0);
+  const leagueA = params.evalA.reduce((sum, asset) => sum + (asset.league_market_value ?? asset.base_market_value ?? 0), 0);
+  const leagueB = params.evalB.reduce((sum, asset) => sum + (asset.league_market_value ?? asset.base_market_value ?? 0), 0);
+  const rawKtcA = params.rawKtcValuesA.reduce((sum, value) => sum + value, 0);
+  const rawKtcB = params.rawKtcValuesB.reduce((sum, value) => sum + value, 0);
+
+  return {
+    current: summaryFromTotals(
+      params.profile,
+      params.context.sideA.finalTotal,
+      params.context.sideB.finalTotal,
+      params.context.valueAdjustment
+    ),
+    raw_ktc: summaryFromTotals("raw_ktc", rawKtcA, rawKtcB, 0),
+    league_adjustment: {
+      sideA_delta: Math.round((leagueA - baseA) * 10) / 10,
+      sideB_delta: Math.round((leagueB - baseB) * 10) / 10,
+    },
+    package_context_adjustment: {
+      sideA_delta: Math.round((params.context.sideA.finalTotal - leagueA) * 10) / 10,
+      sideB_delta: Math.round((params.context.sideB.finalTotal - leagueB) * 10) / 10,
+    },
+  };
+}
 
 export interface TradeHealthAssetInput {
   player_id?: string | null;
@@ -606,6 +707,55 @@ function toEvaluatedAsset(
   };
 }
 
+export function toKtcEvaluatedAsset(raw: RawEval): EvaluatedAsset {
+  const marketValue = ktcMarketValue(raw);
+  const edgeScore = marketValue > 0 ? edgeEquivalentFromMarketValue(marketValue) : 0;
+  const fallbackWarnings = [...(raw.fallback_warnings ?? [])];
+  if (raw.ktc_value == null || raw.ktc_value <= 0) {
+    fallbackWarnings.push(`${raw.asset_name ?? raw.label} has no usable KeepTradeCut value for this format.`);
+  }
+  const adjustmentReasons: TradeValuationAdjustmentReason[] = [{
+    stage: "base_market_value",
+    label: "KTC base value",
+    reason: "KTC valuation mode used only the KeepTradeCut market value for this asset.",
+    amount: marketValue,
+  }];
+
+  return {
+    asset_id: raw.asset_id,
+    asset_key: raw.asset_key,
+    asset_name: raw.asset_name,
+    asset_type: raw.asset_type,
+    player_id: raw.player_id,
+    position: raw.position,
+    label: raw.label,
+    edge_score: edgeScore,
+    base_market_value: marketValue,
+    league_market_value: marketValue,
+    context_trade_value: marketValue,
+    market_value_source: "raw_sources",
+    source_market_values: {
+      fc: null,
+      ktc: raw.ktc_value ?? null,
+      dp: null,
+      edge_fallback: marketValueFromEdge(edgeScore),
+    },
+    adjustment_reasons: adjustmentReasons,
+    fallback_warnings: fallbackWarnings,
+    trade_power: marketValue,
+    fc_score: null,
+    ktc_score: edgeScore > 0 ? edgeScore : null,
+    dp_score: null,
+    league_adjusted_score: null,
+    scoring_delta_ppg: null,
+    scoring_multiplier: null,
+    lineup_scarcity_multiplier: null,
+    ppg: null,
+    source_agreement: raw.ktc_value != null && raw.ktc_value > 0 ? "high" : "low",
+    pick_breakdown: raw.pick_breakdown ?? null,
+  };
+}
+
 function valuationWarningsForAsset(
   asset: EvaluatedAsset,
   side: "sideA" | "sideB"
@@ -651,8 +801,10 @@ export async function evaluateTrade(
   valueType: ValueType = "dynasty",
   weights?: SourceWeights,
   leagueId?: string,
-  classStrengths?: ClassStrengthMap
+  classStrengths?: ClassStrengthMap,
+  options: EvaluateTradeOptions = {}
 ): Promise<TradeEvaluation> {
+  const valuationProfile = normalizeValuationProfile(options.valuationProfile);
   const validationWarnings = validateTradeAssets(sideA, sideB);
   const [rawA, rawB, globalScale] = await Promise.all([
     evaluateAssets(sideA, mode, valueType, leagueId, classStrengths, weights),
@@ -661,6 +813,8 @@ export async function evaluateTrade(
   ]);
 
   const allRaw = [...rawA, ...rawB];
+  const rawKtcValuesA = rawA.map(ktcMarketValue);
+  const rawKtcValuesB = rawB.map(ktcMarketValue);
   const inputs = allRaw.map((a, i) => ({
     sleeper_id: String(i),
     fc_value: a.fc_value,
@@ -671,20 +825,24 @@ export async function evaluateTrade(
   const edgeMap = computeEdgeScores(inputs, globalScale, weights);
 
   const evalA: EvaluatedAsset[] = rawA.map((a, i) =>
-    toEvaluatedAsset(
-      a,
-      edgeMap.get(String(i)) ?? { score: 0, fc_score: null, ktc_score: null, dp_score: null },
-      globalScale,
-      weights
-    )
+    valuationProfile === "composite"
+      ? toEvaluatedAsset(
+          a,
+          edgeMap.get(String(i)) ?? { score: 0, fc_score: null, ktc_score: null, dp_score: null },
+          globalScale,
+          weights
+        )
+      : toKtcEvaluatedAsset(a)
   );
   const evalB: EvaluatedAsset[] = rawB.map((a, i) =>
-    toEvaluatedAsset(
-      a,
-      edgeMap.get(String(rawA.length + i)) ?? { score: 0, fc_score: null, ktc_score: null, dp_score: null },
-      globalScale,
-      weights
-    )
+    valuationProfile === "composite"
+      ? toEvaluatedAsset(
+          a,
+          edgeMap.get(String(rawA.length + i)) ?? { score: 0, fc_score: null, ktc_score: null, dp_score: null },
+          globalScale,
+          weights
+        )
+      : toKtcEvaluatedAsset(a)
   );
 
   const loadedLeagueContext = leagueId ? await loadLeagueMarketContext(leagueId, mode) : null;
@@ -695,12 +853,16 @@ export async function evaluateTrade(
     fallbackMode: mode,
   });
   const allPlayerIds = [...new Set([...evalA, ...evalB].map((a) => a.player_id).filter((id): id is string => !!id))];
-  const usageMap = leagueContext ? await loadPlayerUsageStats(allPlayerIds) : new Map();
-  const ppgMap = leagueContext && valueType === "redraft"
+  const shouldApplyLeagueAdjustment = valuationProfile !== "ktc";
+  const usageMap = shouldApplyLeagueAdjustment && leagueContext ? await loadPlayerUsageStats(allPlayerIds) : new Map();
+  const ppgMap = shouldApplyLeagueAdjustment && leagueContext && valueType === "redraft"
     ? await computeLeaguePPG(allPlayerIds, leagueContext.scoring)
     : new Map<string, { ppg: number }>();
 
   for (const asset of [...evalA, ...evalB]) {
+    if (!shouldApplyLeagueAdjustment) {
+      continue;
+    }
     const usage = asset.player_id ? usageMap.get(asset.player_id) ?? null : null;
     const adjustment = applyLeagueMarketAdjustment({
       baseMarketValue: asset.base_market_value ?? 0,
@@ -787,22 +949,24 @@ export async function evaluateTrade(
     healthScoreMap
   );
   const healthCheck = tradeHealthCheck(evalA, evalB, tradeHealth, tvResult.fairness);
-  const leagueWarnings: TradeValuationWarning[] = [
-    ...leagueContext.warnings.map((message) => ({
-      type: "league_settings" as const,
-      severity: "info" as const,
-      side: null,
-      message,
-    })),
-    ...(leagueId && !loadedLeagueContext
-      ? [{
+  const leagueWarnings: TradeValuationWarning[] = shouldApplyLeagueAdjustment
+    ? [
+        ...leagueContext.warnings.map((message) => ({
           type: "league_settings" as const,
-          severity: "warning" as const,
+          severity: "info" as const,
           side: null,
-          message: `League settings were not found for ${leagueId}; selected format fallback was used.`,
-        }]
-      : []),
-  ];
+          message,
+        })),
+        ...(leagueId && !loadedLeagueContext
+          ? [{
+              type: "league_settings" as const,
+              severity: "warning" as const,
+              side: null,
+              message: `League settings were not found for ${leagueId}; selected format fallback was used.`,
+            }]
+          : []),
+      ]
+    : [];
   const assetWarnings = [
     ...evalA.flatMap((asset) => valuationWarningsForAsset(asset, "sideA")),
     ...evalB.flatMap((asset) => valuationWarningsForAsset(asset, "sideB")),
@@ -815,8 +979,14 @@ export async function evaluateTrade(
   const missingDataWarnings = warnings.filter((warning) => warning.type === "missing_data");
   const duplicateAssetWarnings = warnings.filter((warning) => warning.type === "duplicate_asset");
   const emptySideWarnings = warnings.filter((warning) => warning.type === "empty_side");
+  const profileExplanation =
+    valuationProfile === "ktc"
+      ? "KTC valuation profile: base_market_value uses only raw KeepTradeCut values; league scoring adjustments are disabled; context_trade_value applies the package/context layer."
+      : valuationProfile === "ktc_league"
+        ? "KTC League valuation profile: base_market_value uses raw KeepTradeCut values, then league_market_value applies this league's scoring and scarcity context before package/context adjustment."
+        : "Trade Calculator pipeline: base_market_value -> league_market_value -> context_trade_value.";
   const valuationExplanations = [
-    "Trade Calculator pipeline: base_market_value -> league_market_value -> context_trade_value.",
+    profileExplanation,
     ...tvResult.explanations,
   ];
 
@@ -864,8 +1034,19 @@ export async function evaluateTrade(
       edgeEquivalent: tvResult.neededToEven.edgeEquivalent,
       label: tvResult.neededToEven.label,
     },
-    scoring_context_label: leagueContext.label || null,
+    scoring_context_label: shouldApplyLeagueAdjustment ? leagueContext.label || null : null,
     healthCheck,
+    valuation_profile: valuationProfile,
+    valuation_comparison: options.includeComparison
+      ? buildValuationComparison({
+          profile: valuationProfile,
+          evalA,
+          evalB,
+          rawKtcValuesA,
+          rawKtcValuesB,
+          context: tvResult,
+        })
+      : undefined,
     valuation_explanations: valuationExplanations,
     warnings,
     missing_data_warnings: missingDataWarnings,

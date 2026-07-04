@@ -19,6 +19,7 @@ import type {
   TradeAssetInput,
   TradeEvaluation,
   TradeHealthWarning,
+  TradeValuationProfile,
   TradeValuationWarning,
 } from "../../../shared/types";
 
@@ -69,6 +70,15 @@ const POSITIONS = ["QB", "RB", "WR", "TE"] as const;
 const YEAR = new Date().getFullYear();
 const PICK_YEARS = [String(YEAR), String(YEAR + 1), String(YEAR + 2)];
 const GENERIC_PICK_SLOTS = Array.from({ length: 12 }, (_, index) => index + 1);
+const VALUATION_PROFILE_OPTIONS: Array<{
+  value: TradeValuationProfile;
+  label: string;
+  desc: string;
+}> = [
+  { value: "composite", label: "Composite", desc: "Current FC/KTC/DP league-aware model" },
+  { value: "ktc", label: "KTC", desc: "Raw KTC values plus package context" },
+  { value: "ktc_league", label: "KTC League", desc: "KTC values with this league's scoring context" },
+];
 
 function assetKey(a: TradeAssetInput): string {
   if (a.type === "player") {
@@ -451,6 +461,33 @@ function EvalBar({
       <div style={{ marginTop: 8, background: "rgba(96,165,250,0.10)", border: "1px solid rgba(96,165,250,0.22)", borderRadius: 8, padding: "9px 10px", color: "#bfdbfe", fontSize: 12, lineHeight: 1.45 }}>
         {neededToEvenLabel}
       </div>
+      {result.valuation_comparison && (
+        <details style={{ marginTop: 8 }}>
+          <summary style={{ cursor: "pointer", color: "var(--text-muted)", fontSize: 11, fontWeight: 800 }}>
+            Valuation comparison
+          </summary>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 8, marginTop: 8 }}>
+            <EvalMetric
+              label="Current"
+              value={`${formatTradeValue(result.valuation_comparison.current.sideA_total)} / ${formatTradeValue(result.valuation_comparison.current.sideB_total)}`}
+            />
+            <EvalMetric
+              label="Raw KTC"
+              value={`${formatTradeValue(result.valuation_comparison.raw_ktc.sideA_total)} / ${formatTradeValue(result.valuation_comparison.raw_ktc.sideB_total)}`}
+            />
+            <EvalMetric
+              label="League Δ"
+              value={`${formatSignedTradeValue(result.valuation_comparison.league_adjustment.sideA_delta)} / ${formatSignedTradeValue(result.valuation_comparison.league_adjustment.sideB_delta)}`}
+              color="var(--blue)"
+            />
+            <EvalMetric
+              label="Context Δ"
+              value={`${formatSignedTradeValue(result.valuation_comparison.package_context_adjustment.sideA_delta)} / ${formatSignedTradeValue(result.valuation_comparison.package_context_adjustment.sideB_delta)}`}
+              color="var(--purple)"
+            />
+          </div>
+        </details>
+      )}
       {result.consolidation_warning && (
         <div style={{ marginTop: 8, background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.28)", borderRadius: 8, padding: "9px 10px" }}>
           <div style={{ color: "#fbbf24", fontSize: 10, fontWeight: 800, letterSpacing: 0.4, textTransform: "uppercase", marginBottom: 4 }}>Consolidation</div>
@@ -879,6 +916,7 @@ function RosterGrid({
 
 export default function TradeCalculator() {
   const [showRedraft, setShowRedraft] = useState(false);
+  const [valuationMode, setValuationMode] = useState<TradeValuationProfile>("composite");
   const [selectedLeague, setSelectedLeague] = useState("");
   const [selectedOpponent, setSelectedOpponent] = useState<number | null>(null);
   const [sendAssets, setSendAssets] = useState<TradeAssetInput[]>([]);
@@ -971,10 +1009,12 @@ export default function TradeCalculator() {
         mode,
         leagueId: selectedLeague || undefined,
         redraft: showRedraft,
+        valuationMode,
+        includeComparison: true,
       });
       }, 400);
       return () => clearTimeout(timer);
-  }, [sendAssets, receiveAssets, selectedLeague, selectedLeagueData?.mode, showRedraft]);
+  }, [sendAssets, receiveAssets, selectedLeague, selectedLeagueData?.mode, showRedraft, valuationMode]);
 
   const result = evalMutation.data;
   const userCoreAssetMap = useMemo(() => new Map((userRoster?.core_assets ?? []).map((asset) => [asset.player_id, asset])), [userRoster]);
@@ -1094,24 +1134,48 @@ export default function TradeCalculator() {
       <div style={{ padding: "28px 0 8px" }}>
         <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>Trade Calculator</h1>
         <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 4 }}>Click your roster and your opponent roster. Evaluation and acceptance update live.</p>
-        <button
-          type="button"
-          onClick={() => setShowRedraft((current) => !current)}
-          style={{
-            marginTop: 10,
-            borderRadius: 999,
-            padding: "7px 12px",
-            border: `1px solid ${showRedraft ? "#60a5fa" : "var(--border)"}`,
-            background: showRedraft ? "rgba(96,165,250,0.14)" : "transparent",
-            color: showRedraft ? "#93c5fd" : "var(--text-muted)",
-            fontSize: 12,
-            fontWeight: 700,
-            cursor: "pointer",
-            fontFamily: "inherit",
-          }}
-        >
-          {showRedraft ? "Redraft On" : "Redraft Off"}
-        </button>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 10 }}>
+          <button
+            type="button"
+            onClick={() => setShowRedraft((current) => !current)}
+            style={{
+              borderRadius: 999,
+              padding: "7px 12px",
+              border: `1px solid ${showRedraft ? "#60a5fa" : "var(--border)"}`,
+              background: showRedraft ? "rgba(96,165,250,0.14)" : "transparent",
+              color: showRedraft ? "#93c5fd" : "var(--text-muted)",
+              fontSize: 12,
+              fontWeight: 700,
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            {showRedraft ? "Redraft On" : "Redraft Off"}
+          </button>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {VALUATION_PROFILE_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => setValuationMode(option.value)}
+                title={option.desc}
+                style={{
+                  borderRadius: 999,
+                  padding: "7px 12px",
+                  border: `1px solid ${valuationMode === option.value ? "var(--amber)" : "var(--border)"}`,
+                  background: valuationMode === option.value ? "rgba(245,158,11,0.12)" : "transparent",
+                  color: valuationMode === option.value ? "var(--amber)" : "var(--text-muted)",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                }}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </div>
         <FreshnessBar leagueId={selectedLeague || undefined} />
       </div>
 

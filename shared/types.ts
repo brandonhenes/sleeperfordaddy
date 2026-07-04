@@ -278,6 +278,32 @@ export interface TradeValuationWarning {
   side?: "sideA" | "sideB" | "both" | null;
 }
 
+export type TradeValuationProfile = "composite" | "ktc" | "ktc_league";
+
+export interface TradeValuationProfileSummary {
+  profile: TradeValuationProfile | "raw_ktc";
+  sideA_total: number;
+  sideB_total: number;
+  delta: number;
+  fairness: "fair" | "slight_edge" | "lopsided";
+  winner: "sideA" | "sideB" | "even";
+  percent_gap: number;
+  value_adjustment: number;
+}
+
+export interface TradeValuationComparison {
+  current: TradeValuationProfileSummary;
+  raw_ktc: TradeValuationProfileSummary;
+  league_adjustment: {
+    sideA_delta: number;
+    sideB_delta: number;
+  };
+  package_context_adjustment: {
+    sideA_delta: number;
+    sideB_delta: number;
+  };
+}
+
 export interface TradeEvaluation {
   sideA: {
     assets: EvaluatedAsset[];
@@ -324,6 +350,8 @@ export interface TradeEvaluation {
   };
   scoring_context_label: string | null;
   healthCheck: TradeHealthWarning[];
+  valuation_profile?: TradeValuationProfile;
+  valuation_comparison?: TradeValuationComparison;
   valuation_explanations?: string[];
   warnings?: TradeValuationWarning[];
   missing_data_warnings?: TradeValuationWarning[];
