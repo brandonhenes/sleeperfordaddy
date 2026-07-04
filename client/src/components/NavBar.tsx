@@ -23,6 +23,14 @@ const NAV_ITEMS = [
   { path: "settings", label: "Settings", icon: "⚙️" },
 ];
 
+const MOBILE_DOCK_ITEMS = [
+  { path: "dashboard", label: "Home", icon: "⚡" },
+  { path: "power", label: "Power", icon: "📋" },
+  { path: "portfolio", label: "Portfolio", icon: "📊" },
+  { path: "trade-calculator", label: "Calc", icon: "⚖️" },
+  { path: "trade-finder", label: "Trades", icon: "🔍" },
+];
+
 const sevColor: Record<string, string> = {
   high: "#ef4444",
   medium: "#eab308",
@@ -98,6 +106,7 @@ function NotificationBell({ username }: { username: string }) {
             right: 0,
             marginTop: 8,
             width: 340,
+            maxWidth: "calc(100vw - 24px)",
             maxHeight: 420,
             overflowY: "auto",
             background: "var(--dark)",
@@ -193,7 +202,9 @@ export default function NavBar({ username, avatarId }: NavBarProps) {
         style={{
           background: "var(--dark)",
           borderBottom: "1px solid var(--border)",
-          padding: isMobile ? "0 16px" : "0 24px",
+          padding: isMobile
+            ? "0 max(12px, env(safe-area-inset-right)) 0 max(12px, env(safe-area-inset-left))"
+            : "0 24px",
           display: "flex",
           alignItems: "center",
           position: "sticky",
@@ -380,6 +391,61 @@ export default function NavBar({ username, avatarId }: NavBarProps) {
             })}
           </div>
         </div>
+      )}
+
+      {isMobile && (
+        <nav
+          aria-label="Primary mobile navigation"
+          style={{
+            position: "fixed",
+            left: 0,
+            right: 0,
+            bottom: 0,
+            zIndex: 120,
+            display: "grid",
+            gridTemplateColumns: `repeat(${MOBILE_DOCK_ITEMS.length}, minmax(0, 1fr))`,
+            gap: 2,
+            padding: "7px max(8px, env(safe-area-inset-right)) calc(7px + env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left))",
+            background: "rgba(10, 15, 26, 0.96)",
+            borderTop: "1px solid var(--border)",
+            boxShadow: "0 -10px 30px rgba(0,0,0,0.35)",
+            backdropFilter: "blur(12px)",
+          }}
+        >
+          {MOBILE_DOCK_ITEMS.map((item) => {
+            const active = isActive(item.path);
+            return (
+              <Link key={`dock-${item.path}`} href={navHref(item.path)}>
+                <button
+                  type="button"
+                  style={{
+                    width: "100%",
+                    minHeight: 50,
+                    border: "none",
+                    borderRadius: 10,
+                    background: active ? "rgba(245,158,11,0.14)" : "transparent",
+                    color: active ? "var(--amber)" : "var(--text-muted)",
+                    display: "grid",
+                    placeItems: "center",
+                    gap: 2,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    fontSize: 10,
+                    fontWeight: 800,
+                    letterSpacing: 0,
+                    padding: "5px 2px",
+                  }}
+                  aria-current={active ? "page" : undefined}
+                >
+                  <span style={{ fontSize: 17, lineHeight: 1 }}>{item.icon}</span>
+                  <span style={{ lineHeight: 1.1, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {item.label}
+                  </span>
+                </button>
+              </Link>
+            );
+          })}
+        </nav>
       )}
     </>
   );

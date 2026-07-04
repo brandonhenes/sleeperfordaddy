@@ -31,6 +31,40 @@ body {
   background: var(--dark);
   color: var(--text);
   margin: 0;
+  min-width: 0;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  touch-action: manipulation;
+}
+
+html {
+  background: var(--dark-base);
+  overflow-x: hidden;
+}
+
+button,
+a,
+select,
+input {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.app-shell-content {
+  width: 100%;
+  max-width: 1100px;
+  box-sizing: border-box;
+  margin: 0 auto;
+  padding: 0 clamp(16px, 5vw, 24px) 48px;
+}
+
+@media (max-width: 767px) {
+  .app-shell-content {
+    padding-left: max(12px, env(safe-area-inset-left));
+    padding-right: max(12px, env(safe-area-inset-right));
+    padding-bottom: calc(88px + env(safe-area-inset-bottom));
+  }
 }
 
 /* Monospace numbers */

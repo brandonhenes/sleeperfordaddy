@@ -591,7 +591,7 @@ function AcceptanceBadge({
           {acceptance.label} ({Math.round(acceptance.probability)}%)
         </span>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
         <div>
           <div style={{ fontSize: 10, fontWeight: 800, color: "var(--green)", marginBottom: 4 }}>ACCEPT SIGNALS</div>
           {acceptance.accept_reasons.length === 0 && <div style={{ fontSize: 12, color: "var(--text-muted)" }}>No strong acceptance signals yet.</div>}
@@ -1237,7 +1237,7 @@ export default function TradeCalculator() {
         <FreshnessBar leagueId={selectedLeague || undefined} />
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+      <div style={{ display: "grid", gridTemplateColumns: isCompactLeagueLayout ? "1fr" : "1fr 1fr", gap: 10 }}>
         <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 12px" }}>
           <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6, fontWeight: 700 }}>LEAGUE</div>
           <select value={selectedLeague} onChange={(e) => setSelectedLeague(e.target.value)} style={{ width: "100%", background: "var(--dark-base)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text)", padding: "8px 10px", fontFamily: "inherit", fontSize: 13 }}>

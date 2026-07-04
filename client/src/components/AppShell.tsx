@@ -31,7 +31,7 @@ export default function AppShell({ children }: AppShellProps) {
       }}
     >
       <NavBar username={username} />
-      <div style={{ width: "100%", maxWidth: 1100, boxSizing: "border-box", margin: "0 auto", padding: "0 clamp(16px, 5vw, 24px) 48px" }}>
+      <div className="app-shell-content">
         {children}
       </div>
     </div>
