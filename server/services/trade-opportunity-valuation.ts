@@ -3,6 +3,7 @@ import type {
   TradeAssetInput,
   TradeEvaluation,
   TradePackageAsset,
+  TradeValuationProfile,
   TradeValuationWarning,
 } from "../../shared/types.js";
 import type { ValueType } from "./composite-values.js";
@@ -16,6 +17,7 @@ export interface OpportunityPackageValuationInput {
   leagueId: string;
   mode: "sf" | "1qb";
   valueType?: ValueType;
+  valuationProfile?: TradeValuationProfile;
   classStrengths?: ClassStrengthMap;
   weights?: SourceWeights;
 }
@@ -58,6 +60,8 @@ function roundTo(value: number, decimals = 1): number {
   const factor = 10 ** decimals;
   return Math.round(value * factor) / factor;
 }
+
+const DEFAULT_OPPORTUNITY_VALUATION_PROFILE: TradeValuationProfile = "ktc_league";
 
 export function tradePackageAssetToTradeInput(asset: TradePackageAsset): TradeAssetInput | null {
   if (asset.asset_type === "player") {
@@ -110,6 +114,7 @@ function mergeEvaluatedAsset(original: TradePackageAsset, evaluated: EvaluatedAs
     scoring_multiplier: evaluated.scoring_multiplier,
     lineup_scarcity_multiplier: evaluated.lineup_scarcity_multiplier,
     ppg: evaluated.ppg,
+    league_rating: evaluated.league_rating,
     adjustment_reasons: evaluated.adjustment_reasons,
     fallback_warnings: evaluated.fallback_warnings,
     source_agreement: evaluated.source_agreement,
@@ -192,7 +197,10 @@ export async function evaluateOpportunityPackage(
     input.valueType ?? "dynasty",
     input.weights,
     input.leagueId,
-    input.classStrengths
+    input.classStrengths,
+    {
+      valuationProfile: input.valuationProfile ?? DEFAULT_OPPORTUNITY_VALUATION_PROFILE,
+    }
   );
   const scored = packageScoreFromTradeEvaluation(input.send, input.receive, evaluation);
 

@@ -408,6 +408,45 @@ export interface RookieADP {
   updatedAt: string | null;
 }
 
+export type LeaguePlayerRatingGrade =
+  | "A+"
+  | "A"
+  | "A-"
+  | "B+"
+  | "B"
+  | "B-"
+  | "C+"
+  | "C"
+  | "C-"
+  | "D";
+
+export type LeaguePlayerRatingDirection = "boost" | "neutral" | "drag";
+
+export interface LeaguePlayerRatingComponent {
+  score: number;
+  grade: LeaguePlayerRatingGrade;
+  direction: LeaguePlayerRatingDirection;
+  reason: string;
+}
+
+export interface LeaguePlayerRating {
+  rating: number;
+  grade: LeaguePlayerRatingGrade;
+  raw_market_value: number;
+  league_market_value: number;
+  context_trade_value?: number | null;
+  league_value_delta: number;
+  league_value_delta_pct: number;
+  scoring_fit: LeaguePlayerRatingComponent;
+  lineup_scarcity: LeaguePlayerRatingComponent;
+  projection_value: LeaguePlayerRatingComponent;
+  age_window: LeaguePlayerRatingComponent;
+  liquidity: LeaguePlayerRatingComponent;
+  risk: LeaguePlayerRatingComponent;
+  tags: string[];
+  summary: string;
+}
+
 export interface EvaluatedAsset {
   asset_id?: string | null;
   asset_key?: string;
@@ -436,6 +475,7 @@ export interface EvaluatedAsset {
   scoring_multiplier?: number | null;
   lineup_scarcity_multiplier?: number | null;
   ppg?: number | null;
+  league_rating?: LeaguePlayerRating | null;
   adjustment_reasons?: TradeValuationAdjustmentReason[];
   fallback_warnings?: string[];
   source_agreement: "high" | "medium" | "low";
@@ -572,6 +612,7 @@ export interface TradePackageAsset {
   scoring_multiplier?: number | null;
   lineup_scarcity_multiplier?: number | null;
   ppg?: number | null;
+  league_rating?: LeaguePlayerRating | null;
   adjustment_reasons?: TradeValuationAdjustmentReason[];
   fallback_warnings?: string[];
   source_agreement: "high" | "medium" | "low";
@@ -759,6 +800,19 @@ export interface AcquisitionOffer {
   send_total: number;
   receive_total: number;
   delta: number;
+  send_edge?: number;
+  receive_edge?: number;
+  delta_edge?: number;
+  send_base_market_value?: number;
+  receive_base_market_value?: number;
+  send_league_market_value?: number;
+  receive_league_market_value?: number;
+  send_context_trade_value?: number;
+  receive_context_trade_value?: number;
+  valuation_edge?: number;
+  valuation_percent_gap?: number;
+  valuation_warnings?: TradeValuationWarning[];
+  valuation_explanations?: string[];
   fairness: "fair" | "slight_edge" | "lopsided";
   sweetener_hint: string | null;
 

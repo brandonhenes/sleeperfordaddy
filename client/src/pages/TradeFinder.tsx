@@ -55,6 +55,11 @@ function fairnessLabel(fairness: string): string {
   return "LOPSIDED";
 }
 
+function formatTradeValue(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(value)) return "—";
+  return Math.round(value).toLocaleString();
+}
+
 function opportunityLabel(type: TradePackage["opportunity_type"]): string | null {
   if (!type) return null;
   const labels: Record<NonNullable<TradePackage["opportunity_type"]>, string> = {
@@ -202,10 +207,18 @@ function TradeHealthList({ warnings }: { warnings: TradeHealthWarning[] }) {
   );
 }
 
+function leagueRatingColor(score: number): string {
+  if (score >= 85) return "var(--green)";
+  if (score >= 70) return "var(--amber)";
+  if (score >= 55) return "var(--text-muted)";
+  return "var(--red)";
+}
+
 function AssetRow({ asset }: { asset: TradePackageAsset }) {
   const adjustedDiff =
     asset.league_adjusted_score != null ? asset.league_adjusted_score - asset.edge_score : 0;
   const pickBreakdown = asset.pick_breakdown ?? null;
+  const rating = asset.league_rating ?? null;
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: "1px solid var(--border)", fontSize: 13, flexWrap: "wrap" }}>
       <span
@@ -249,6 +262,27 @@ function AssetRow({ asset }: { asset: TradePackageAsset }) {
         >
           {adjustedDiff > 0 ? "+" : ""}
           {adjustedDiff.toFixed(1)} in this league
+        </span>
+      )}
+      {rating && (
+        <span
+          style={{
+            fontSize: 10,
+            color: leagueRatingColor(rating.rating),
+            fontWeight: 700,
+            width: "100%",
+            paddingLeft: 36,
+          }}
+        >
+          LR {rating.rating} {rating.grade}
+          {rating.league_value_delta_pct !== 0 && (
+            <>
+              {" "}
+              ({rating.league_value_delta_pct > 0 ? "+" : ""}
+              {rating.league_value_delta_pct.toFixed(1)}%)
+            </>
+          )}
+          {rating.tags.length > 0 ? ` | ${rating.tags.slice(0, 2).join(", ")}` : ""}
         </span>
       )}
     </div>
@@ -537,27 +571,36 @@ function AcquisitionCard({ opportunity }: { opportunity: AcquisitionOpportunity 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
                 <div>
                   <div style={{ fontSize: 11, fontWeight: 700, color: "#ef4444", letterSpacing: 0.5, marginBottom: 6, borderBottom: "2px solid #ef4444", paddingBottom: 4 }}>
-                    YOU SEND ({offer.send_total.toFixed(1)})
+                    YOU SEND (TV {formatTradeValue(offer.send_total)})
                   </div>
                   {offer.you_send.map((a, i) => (
                     <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 0", borderBottom: "1px solid var(--border)", fontSize: 12 }}>
                       <span style={{ background: "var(--amber)", color: "#000", fontSize: 10, fontWeight: 700, borderRadius: 3, padding: "1px 5px", minWidth: 24, textAlign: "center" }}>{Math.round(a.edge_score)}</span>
                       {a.asset_type === "pick" && <span style={{ color: "#06b6d4", fontWeight: 700, fontSize: 9 }}>PICK</span>}
                       <span style={{ flex: 1, fontWeight: 500 }}>{a.label}</span>
+                      <span style={{ color: "var(--text-muted)", fontSize: 10 }}>TV {formatTradeValue(a.context_trade_value ?? a.trade_power)}</span>
                     </div>
                   ))}
                 </div>
                 <div>
                   <div style={{ fontSize: 11, fontWeight: 700, color: "#22c55e", letterSpacing: 0.5, marginBottom: 6, borderBottom: "2px solid #22c55e", paddingBottom: 4 }}>
-                    YOU GET ({offer.receive_total.toFixed(1)})
+                    YOU GET (TV {formatTradeValue(offer.receive_total)})
                   </div>
                   {offer.you_receive.map((a, i) => (
                     <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 0", borderBottom: "1px solid var(--border)", fontSize: 12 }}>
                       <span style={{ background: "var(--green)", color: "#000", fontSize: 10, fontWeight: 700, borderRadius: 3, padding: "1px 5px", minWidth: 24, textAlign: "center" }}>{Math.round(a.edge_score)}</span>
                       <span style={{ flex: 1, fontWeight: 500 }}>{a.label}</span>
+                      <span style={{ color: "var(--text-muted)", fontSize: 10 }}>TV {formatTradeValue(a.context_trade_value ?? a.trade_power)}</span>
                     </div>
                   ))}
                 </div>
+              </div>
+
+              <div style={{ textAlign: "center", fontSize: 12, fontWeight: 700, marginTop: 12, padding: "8px 0", color: offer.delta >= 0 ? "var(--green)" : "var(--red)" }}>
+                KTC League: {offer.delta >= 0 ? "you get value" : "you overpay"} by TV {formatTradeValue(Math.abs(offer.delta))}
+                <span style={{ color: "var(--text-muted)", fontSize: 11, fontWeight: 500, marginLeft: 6 }}>
+                  ({fairnessLabel(offer.fairness)})
+                </span>
               </div>
 
               <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 12 }}>

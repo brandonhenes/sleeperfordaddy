@@ -3,6 +3,7 @@ import type { EvaluatedAsset } from "../../../shared/types.js";
 import { DEFAULT_SOURCE_WEIGHTS } from "../edge-score.js";
 import { calculateKtcTradeContext, calculateTradeContext } from "../trade-context-value.js";
 import {
+  buildLeaguePlayerRating,
   buildValuationComparison,
   toKtcEvaluatedAsset,
   type RawEval,
@@ -100,6 +101,52 @@ describe("Trade Calculator valuation profiles", () => {
     expect(missingKtc.source_market_values?.fc).toBeNull();
     expect(missingKtc.source_market_values?.dp).toBeNull();
     expect(missingKtc.fallback_warnings?.join(" ")).toContain("no usable KeepTradeCut value");
+  });
+
+  it("leaves raw KTC assets without league-specific ratings until league adjustment runs", () => {
+    const ktcAsset = toKtcEvaluatedAsset(rawAsset());
+
+    expect(ktcAsset.league_rating).toBeUndefined();
+  });
+
+  it("builds explainable league-specific player ratings from scoring and projection inputs", () => {
+    const asset = evaluated("Brock Bowers", 8_151, 11_682, 11_684);
+    asset.player_id = "11604";
+    asset.position = "TE";
+    asset.scoring_multiplier = 1.22;
+    asset.lineup_scarcity_multiplier = 1.14;
+    asset.scoring_delta_ppg = 5.8;
+    asset.ppg = 20.1;
+
+    const rating = buildLeaguePlayerRating(asset, {
+      projectedLeaguePpg: 20.1,
+      projectedKtcBaselinePpg: 13.8,
+      projectedLeaguePoints: 870,
+      projectedKtcBaselinePoints: 590,
+      recentLeaguePpg: 16.5,
+      recentKtcBaselinePpg: 12.2,
+      trajectoryLabel: "ascending",
+      trajectoryScore: 0.38,
+      trajectoryMultiplier: 1.046,
+      projectionYears: 3,
+      projectedGames: 46,
+      availabilityRate: 0.9,
+      longevityMultiplier: 0.97,
+      source: "test projections",
+    });
+
+    expect(rating).not.toBeNull();
+    expect(rating?.rating).toBeGreaterThanOrEqual(95);
+    expect(rating?.league_value_delta_pct).toBeCloseTo(43.3, 1);
+    expect(rating?.scoring_fit.direction).toBe("boost");
+    expect(rating?.lineup_scarcity.direction).toBe("boost");
+    expect(rating?.age_window.reason).toContain("ascending");
+    expect(rating?.tags).toEqual(expect.arrayContaining([
+      "League Anchor",
+      "Scoring Winner",
+      "Hard To Replace",
+      "Underpriced Here",
+    ]));
   });
 
   it("breaks a trade into current, raw KTC, league, and package context components", () => {

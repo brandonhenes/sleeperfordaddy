@@ -75,9 +75,9 @@ const VALUATION_PROFILE_OPTIONS: Array<{
   label: string;
   desc: string;
 }> = [
+  { value: "ktc_league", label: "KTC League", desc: "KTC values with this league's scoring context" },
   { value: "composite", label: "Composite", desc: "Current FC/KTC/DP league-aware model" },
   { value: "ktc", label: "KTC", desc: "Raw KTC values plus package context" },
-  { value: "ktc_league", label: "KTC League", desc: "KTC values with this league's scoring context" },
 ];
 
 function assetKey(a: TradeAssetInput): string {
@@ -290,6 +290,63 @@ function ValuationWarningPanel({ warnings }: { warnings: TradeValuationWarning[]
   );
 }
 
+function ratingTone(score: number): string {
+  if (score >= 85) return "var(--green)";
+  if (score >= 70) return "var(--amber)";
+  if (score >= 55) return "var(--text-muted)";
+  return "var(--red)";
+}
+
+function LeagueRatingPanel({ rating }: { rating: EvaluatedAsset["league_rating"] }) {
+  if (!rating) return null;
+  const components: Array<{
+    label: string;
+    component: NonNullable<EvaluatedAsset["league_rating"]>["scoring_fit"];
+  }> = [
+    { label: "Scoring", component: rating.scoring_fit },
+    { label: "Scarcity", component: rating.lineup_scarcity },
+    { label: "Projection", component: rating.projection_value },
+    { label: "Age", component: rating.age_window },
+    { label: "Liquidity", component: rating.liquidity },
+    { label: "Risk", component: rating.risk },
+  ];
+
+  return (
+    <div style={{ display: "grid", gap: 7, border: "1px solid rgba(96,165,250,0.22)", background: "rgba(30,64,175,0.10)", borderRadius: 8, padding: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 800, textTransform: "uppercase" }}>
+          League Rating
+        </span>
+        <span style={{ color: ratingTone(rating.rating), fontSize: 15, fontWeight: 900 }}>
+          {rating.rating} {rating.grade}
+        </span>
+        <span style={{ color: rating.league_value_delta >= 0 ? "var(--green)" : "var(--red)", fontSize: 10, fontWeight: 800 }}>
+          {rating.league_value_delta >= 0 ? "+" : ""}
+          {rating.league_value_delta_pct.toFixed(1)}%
+        </span>
+      </div>
+      {rating.tags.length > 0 && (
+        <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+          {rating.tags.slice(0, 4).map((tag) => (
+            <span key={tag} style={{ border: "1px solid var(--border)", borderRadius: 5, padding: "1px 5px", color: "var(--text)", fontSize: 9, fontWeight: 800 }}>
+              {tag}
+            </span>
+          ))}
+        </div>
+      )}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(82px, 1fr))", gap: 5 }}>
+        {components.map(({ label, component }) => (
+          <div key={label} title={component.reason} style={{ border: "1px solid var(--border)", borderRadius: 6, padding: "5px 6px", background: "rgba(255,255,255,0.03)" }}>
+            <div style={{ color: "var(--text-muted)", fontSize: 9, fontWeight: 800 }}>{label}</div>
+            <div style={{ color: ratingTone(component.score), fontSize: 12, fontWeight: 900 }}>{component.grade}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{ color: "var(--text-dim)", fontSize: 10, lineHeight: 1.4 }}>{rating.summary}</div>
+    </div>
+  );
+}
+
 function AssetValuationDetails({ asset }: { asset: EvaluatedAsset }) {
   const sources = asset.source_market_values;
   const reasons = asset.adjustment_reasons ?? [];
@@ -306,6 +363,7 @@ function AssetValuationDetails({ asset }: { asset: EvaluatedAsset }) {
           <EvalMetric label="League" value={formatTradeValue(asset.league_market_value)} />
           <EvalMetric label="Trade" value={formatTradeValue(asset.context_trade_value ?? asset.trade_power)} />
         </div>
+        <LeagueRatingPanel rating={asset.league_rating} />
         {sources && (
           <div style={{ fontSize: 10, color: "var(--text-muted)", lineHeight: 1.5, overflowWrap: "anywhere" }}>
             Sources: FC {formatTradeValue(sources.fc)} | KTC {formatTradeValue(sources.ktc)} | DP {formatTradeValue(sources.dp)} | Edge fallback {formatTradeValue(sources.edge_fallback)}
@@ -916,7 +974,7 @@ function RosterGrid({
 
 export default function TradeCalculator() {
   const [showRedraft, setShowRedraft] = useState(false);
-  const [valuationMode, setValuationMode] = useState<TradeValuationProfile>("composite");
+  const [valuationMode, setValuationMode] = useState<TradeValuationProfile>("ktc_league");
   const [selectedLeague, setSelectedLeague] = useState("");
   const [selectedOpponent, setSelectedOpponent] = useState<number | null>(null);
   const [sendAssets, setSendAssets] = useState<TradeAssetInput[]>([]);

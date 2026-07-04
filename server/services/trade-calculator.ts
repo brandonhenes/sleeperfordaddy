@@ -2,6 +2,9 @@ import { db } from "../db/connection.js";
 import { sql } from "drizzle-orm";
 import type {
   EvaluatedAsset,
+  LeaguePlayerRating,
+  LeaguePlayerRatingComponent,
+  LeaguePlayerRatingGrade,
   TradeAssetInput,
   TradeEvaluation,
   TradeHealthWarning,
@@ -29,6 +32,7 @@ import {
   buildLeagueMarketContext,
   loadLeagueMarketContext,
   loadSleeperProjectionProfiles,
+  type LeagueProjectionProfile,
 } from "./league-market-adjustment.js";
 import { calculateKtcTradeContext, calculateTradeContext } from "./trade-context-value.js";
 import { getAgeCurveStatus } from "./age-curves.js";
@@ -212,7 +216,7 @@ export interface EvaluateTradeOptions {
   includeComparison?: boolean;
 }
 
-const DEFAULT_VALUATION_PROFILE: TradeValuationProfile = "composite";
+const DEFAULT_VALUATION_PROFILE: TradeValuationProfile = "ktc_league";
 const TRADE_FAIR_PERCENT_GAP = 8;
 const TRADE_SLIGHT_EDGE_PERCENT_GAP = 18;
 
@@ -225,6 +229,15 @@ function normalizeValuationProfile(value: unknown): TradeValuationProfile {
 
 function clampMarketValue(value: number): number {
   return Math.max(0, Math.min(MAX_MARKET_VALUE, Math.round(value)));
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function roundTo(value: number, decimals = 1): number {
+  const factor = 10 ** decimals;
+  return Math.round(value * factor) / factor;
 }
 
 function fairnessFromGap(percentGap: number): TradeEvaluation["fairness"] {
@@ -757,6 +770,168 @@ export function toKtcEvaluatedAsset(raw: RawEval): EvaluatedAsset {
   };
 }
 
+function gradeFromScore(score: number): LeaguePlayerRatingGrade {
+  if (score >= 97) return "A+";
+  if (score >= 92) return "A";
+  if (score >= 88) return "A-";
+  if (score >= 84) return "B+";
+  if (score >= 78) return "B";
+  if (score >= 72) return "B-";
+  if (score >= 66) return "C+";
+  if (score >= 60) return "C";
+  if (score >= 52) return "C-";
+  return "D";
+}
+
+function directionFromScore(score: number): LeaguePlayerRatingComponent["direction"] {
+  if (score >= 70) return "boost";
+  if (score <= 46) return "drag";
+  return "neutral";
+}
+
+function ratingComponent(score: number, reason: string): LeaguePlayerRatingComponent {
+  const rounded = Math.round(clamp(score, 0, 100));
+  return {
+    score: rounded,
+    grade: gradeFromScore(rounded),
+    direction: directionFromScore(rounded),
+    reason,
+  };
+}
+
+function scoreFromMultiplier(multiplier: number | null | undefined, scale: number): number {
+  if (multiplier == null || !Number.isFinite(multiplier)) return 58;
+  return clamp(58 + (multiplier - 1) * scale, 20, 100);
+}
+
+function signedPct(value: number): string {
+  return `${value >= 0 ? "+" : ""}${roundTo(value, 1)}%`;
+}
+
+export function buildLeaguePlayerRating(
+  asset: EvaluatedAsset,
+  projection: LeagueProjectionProfile | null = null
+): LeaguePlayerRating | null {
+  if (asset.asset_type === "pick" || !asset.player_id) return null;
+
+  const rawValue = Math.max(0, Math.round(asset.base_market_value ?? 0));
+  const leagueValue = Math.max(0, Math.round(asset.league_market_value ?? rawValue));
+  const contextValue = asset.context_trade_value ?? asset.trade_power ?? leagueValue;
+  const delta = leagueValue - rawValue;
+  const deltaPct = rawValue > 0 ? (delta / rawValue) * 100 : 0;
+
+  const scoringMultiplier = asset.scoring_multiplier ?? 1;
+  const scoringScore = scoreFromMultiplier(scoringMultiplier, 185);
+  const scoringDelta = asset.scoring_delta_ppg;
+  const scoringFit = ratingComponent(
+    scoringScore,
+    scoringDelta != null
+      ? `${asset.position ?? "Player"} scoring fit is ${signedPct((scoringMultiplier - 1) * 100)} with ${scoringDelta >= 0 ? "+" : ""}${roundTo(scoringDelta, 1)} projected PPG versus the KTC baseline.`
+      : `${asset.position ?? "Player"} scoring fit is ${signedPct((scoringMultiplier - 1) * 100)} versus the base market profile.`
+  );
+
+  const scarcityMultiplier = asset.lineup_scarcity_multiplier ?? 1;
+  const lineupScarcity = ratingComponent(
+    scoreFromMultiplier(scarcityMultiplier, 230),
+    `${asset.position ?? "Player"} lineup scarcity is ${signedPct((scarcityMultiplier - 1) * 100)} from this league's starting slots and flex eligibility.`
+  );
+
+  const valueRating = edgeEquivalentFromMarketValue(leagueValue);
+  const projectedPpg = projection?.projectedLeaguePpg ?? asset.ppg ?? null;
+  const projectionScore = projection
+    ? clamp(valueRating + (projection.projectedLeaguePpg - projection.projectedKtcBaselinePpg) * 1.4 + (projection.availabilityRate - 0.85) * 24, 20, 100)
+    : clamp(valueRating - 5, 25, 95);
+  const projectionValue = ratingComponent(
+    projectionScore,
+    projection
+      ? `${roundTo(projection.projectedLeaguePpg, 1)} projected league PPG over a ${projection.projectionYears}-year window; ${roundTo(projection.projectedKtcBaselinePpg, 1)} PPG in the KTC baseline.`
+      : projectedPpg != null
+        ? `${roundTo(projectedPpg, 1)} league PPG is available, but no forward projection profile was attached.`
+        : "No forward projection profile was attached; projection value is neutral."
+  );
+
+  const trajectoryScore = projection?.trajectoryScore ?? 0;
+  const ageWindow = ratingComponent(
+    projection
+      ? clamp(74 + trajectoryScore * 38, 25, 100)
+      : 62,
+    projection
+      ? `Age window is ${projection.trajectoryLabel}; trajectory score ${trajectoryScore >= 0 ? "+" : ""}${roundTo(trajectoryScore, 2)} over the 2-3 year window.`
+      : "Age window is neutral because no forward trajectory profile was attached."
+  );
+
+  const liquidityBase = edgeEquivalentFromMarketValue(rawValue);
+  const agreementBoost = asset.source_agreement === "high" ? 4 : asset.source_agreement === "medium" ? 0 : -6;
+  const liquidity = ratingComponent(
+    clamp(liquidityBase + agreementBoost, 20, 100),
+    `Liquidity starts from raw market value ${rawValue.toLocaleString()} with ${asset.source_agreement} source agreement.`
+  );
+
+  const riskScore = projection
+    ? clamp(80 + (projection.availabilityRate - 0.85) * 34 + trajectoryScore * 12, 20, 100)
+    : asset.source_agreement === "low"
+      ? 55
+      : 68;
+  const risk = ratingComponent(
+    riskScore,
+    projection
+      ? `Projected availability is ${Math.round(projection.availabilityRate * 100)}% with ${projection.trajectoryLabel} value trajectory.`
+      : "Risk is neutral because projection availability was unavailable."
+  );
+
+  const componentAverage =
+    scoringFit.score * 0.17 +
+    lineupScarcity.score * 0.15 +
+    projectionValue.score * 0.23 +
+    ageWindow.score * 0.13 +
+    liquidity.score * 0.20 +
+    risk.score * 0.12;
+  const rating = Math.round(clamp(valueRating * 0.68 + componentAverage * 0.32, 0, 99));
+
+  const tags: string[] = [];
+  if (rating >= 96 || leagueValue >= 10_000) tags.push("League Anchor");
+  if (scoringFit.score >= 75) tags.push("Scoring Winner");
+  if (scoringFit.score <= 45) tags.push("Scoring Drag");
+  if (lineupScarcity.score >= 74) tags.push("Hard To Replace");
+  if (projectionValue.score >= 88) tags.push("Projection Edge");
+  if (ageWindow.score >= 84) tags.push("Ascending Window");
+  if (ageWindow.score <= 50) tags.push("Declining Window");
+  if (liquidity.score >= 88) tags.push("Liquid Asset");
+  if (risk.score <= 55) tags.push("Risk Flag");
+  if (deltaPct >= 12) tags.push("Underpriced Here");
+  if (deltaPct <= -10) tags.push("Overpriced Here");
+
+  const strongest = [
+    { label: "scoring", component: scoringFit },
+    { label: "scarcity", component: lineupScarcity },
+    { label: "projection", component: projectionValue },
+    { label: "age", component: ageWindow },
+    { label: "liquidity", component: liquidity },
+  ]
+    .sort((a, b) => b.component.score - a.component.score)
+    .slice(0, 2)
+    .map(({ label, component }) => `${label} ${component.grade}`)
+    .join(", ");
+
+  return {
+    rating,
+    grade: gradeFromScore(rating),
+    raw_market_value: rawValue,
+    league_market_value: leagueValue,
+    context_trade_value: contextValue,
+    league_value_delta: delta,
+    league_value_delta_pct: roundTo(deltaPct, 1),
+    scoring_fit: scoringFit,
+    lineup_scarcity: lineupScarcity,
+    projection_value: projectionValue,
+    age_window: ageWindow,
+    liquidity,
+    risk,
+    tags,
+    summary: `${gradeFromScore(rating)} league rating; ${signedPct(deltaPct)} vs raw market. Strongest signals: ${strongest}.`,
+  };
+}
+
 function valuationWarningsForAsset(
   asset: EvaluatedAsset,
   side: "sideA" | "sideB"
@@ -950,6 +1125,13 @@ export async function evaluateTrade(
         amount: contextValue,
       },
     ];
+  }
+
+  if (shouldApplyLeagueAdjustment) {
+    for (const asset of [...evalA, ...evalB]) {
+      const projection = asset.player_id ? projectionMap.get(asset.player_id) ?? null : null;
+      asset.league_rating = buildLeaguePlayerRating(asset, projection);
+    }
   }
 
   const totalEdgeA = Math.round(evalA.reduce((s, a) => s + a.edge_score, 0) * 10) / 10;

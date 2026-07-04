@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { EvaluatedAsset, TradeEvaluation, TradePackageAsset } from "../../../shared/types.js";
 
 const evaluateTradeMock = vi.hoisted(() => vi.fn());
@@ -8,6 +8,10 @@ vi.mock("../trade-calculator.js", () => ({
 }));
 
 import { evaluateOpportunityPackage } from "../trade-opportunity-valuation.js";
+
+beforeEach(() => {
+  evaluateTradeMock.mockReset();
+});
 
 function evaluated(label: string, value: number): EvaluatedAsset {
   return {
@@ -108,7 +112,7 @@ function evaluation(): TradeEvaluation {
 }
 
 describe("shared opportunity valuation defaults", () => {
-  it("does not pass a valuation profile override into Shop or Find Trades valuation", async () => {
+  it("uses KTC League as the default Shop and Find Trades valuation profile", async () => {
     evaluateTradeMock.mockResolvedValueOnce(evaluation());
 
     await evaluateOpportunityPackage({
@@ -121,9 +125,27 @@ describe("shared opportunity valuation defaults", () => {
 
     expect(evaluateTradeMock).toHaveBeenCalledTimes(1);
     const call = evaluateTradeMock.mock.calls[0];
-    expect(call).toHaveLength(7);
+    expect(call).toHaveLength(8);
     expect(call[2]).toBe("sf");
     expect(call[3]).toBe("dynasty");
     expect(call[5]).toBe("league-1");
+    expect(call[7]).toMatchObject({ valuationProfile: "ktc_league" });
+  });
+
+  it("allows callers to explicitly override the trade valuation profile", async () => {
+    evaluateTradeMock.mockResolvedValueOnce(evaluation());
+
+    await evaluateOpportunityPackage({
+      send: [tradeAsset("Send Player", "send-player")],
+      receive: [tradeAsset("Receive Player", "receive-player")],
+      leagueId: "league-1",
+      mode: "sf",
+      valueType: "dynasty",
+      valuationProfile: "composite",
+    });
+
+    expect(evaluateTradeMock).toHaveBeenCalledTimes(1);
+    const call = evaluateTradeMock.mock.calls[0];
+    expect(call[7]).toMatchObject({ valuationProfile: "composite" });
   });
 });

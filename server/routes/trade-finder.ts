@@ -29,7 +29,8 @@ router.get("/api/trade/acquire/:username/:playerId", async (req, res) => {
     if (!username || !playerId) {
       return res.status(400).json({ message: "username and playerId are required" });
     }
-    const data = await findAcquisitionPackages(username, decodeURIComponent(playerId));
+    const classStrengths = parseClassStrengths(req);
+    const data = await findAcquisitionPackages(username, decodeURIComponent(playerId), classStrengths);
     res.json(data);
   } catch (err) {
     console.error("[acquisition-finder] Error:", err);

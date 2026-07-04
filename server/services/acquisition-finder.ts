@@ -16,9 +16,11 @@ import type {
   OpponentPerspective,
   TradePackageAsset,
   TradeComp,
+  TradeValuationWarning,
 } from "../../shared/types.js";
-import { getDynastyLeagueIdsForUserLatestSeason } from "./dynasty-leagues.js";
 import { resolvePlayer } from "./player-resolver.js";
+import { evaluateOpportunityPackage } from "./trade-opportunity-valuation.js";
+import type { ClassStrengthMap } from "./pick-values.js";
 
 // ─── Constants ───
 
@@ -41,6 +43,7 @@ const ARCHETYPE_WANTS: Record<string, string> = {
 
 function assetFromPlayer(a: CoreAsset): TradePackageAsset {
   return {
+    player_id: a.player_id,
     asset_type: "player",
     label: a.full_name,
     position: a.position,
@@ -51,6 +54,7 @@ function assetFromPlayer(a: CoreAsset): TradePackageAsset {
     dp_score: a.dp_score,
     league_adjusted_score: null,
     scoring_delta_ppg: null,
+    ppg: a.ppg,
     source_agreement: a.source_agreement,
   };
 }
@@ -58,6 +62,11 @@ function assetFromPlayer(a: CoreAsset): TradePackageAsset {
 function assetFromPick(p: ScoredPick): TradePackageAsset {
   return {
     asset_type: "pick",
+    pick_season: p.season,
+    pick_round: p.round,
+    pick_tier: p.tier,
+    pick_slot: p.pick_slot,
+    pick_original_owner_id: p.original_owner_id,
     label: p.label,
     position: null,
     edge_score: p.edge_score,
@@ -84,6 +93,90 @@ function fairness(delta: number): "fair" | "slight_edge" | "lopsided" {
   if (abs <= 5) return "fair";
   if (abs <= 15) return "slight_edge";
   return "lopsided";
+}
+
+function valueSweetenerHint(offer: AcquisitionOffer): string | null {
+  if (offer.delta >= 1_500) {
+    return "KTC League says you are light; add a meaningful player or pick to make this realistic.";
+  }
+  if (offer.delta >= 600) {
+    return "KTC League says you may need a smaller sweetener to close the gap.";
+  }
+  if (offer.delta <= -1_500) {
+    return "KTC League says this is a real overpay; try lowering one piece before sending it.";
+  }
+  return offer.sweetener_hint;
+}
+
+export async function valueAcquisitionOfferWithKtcLeague(
+  offer: AcquisitionOffer,
+  leagueId: string,
+  mode: "sf" | "1qb",
+  classStrengths?: ClassStrengthMap,
+  evaluatePackage = evaluateOpportunityPackage
+): Promise<AcquisitionOffer> {
+  try {
+    const valuation = await evaluatePackage({
+      send: offer.you_send,
+      receive: offer.you_receive,
+      leagueId,
+      mode,
+      valueType: "dynasty",
+      classStrengths,
+    });
+    const valued: AcquisitionOffer = {
+      ...offer,
+      you_send: valuation.sendAssets,
+      you_receive: valuation.receiveAssets,
+      send_total: valuation.sendContextTradeValue,
+      receive_total: valuation.receiveContextTradeValue,
+      delta: valuation.delta,
+      fairness: valuation.fairness,
+      send_edge: valuation.sendEdge,
+      receive_edge: valuation.receiveEdge,
+      delta_edge: valuation.deltaEdge,
+      send_base_market_value: valuation.sendBaseMarketValue,
+      receive_base_market_value: valuation.receiveBaseMarketValue,
+      send_league_market_value: valuation.sendLeagueMarketValue,
+      receive_league_market_value: valuation.receiveLeagueMarketValue,
+      send_context_trade_value: valuation.sendContextTradeValue,
+      receive_context_trade_value: valuation.receiveContextTradeValue,
+      valuation_edge: valuation.delta,
+      valuation_percent_gap: valuation.percentGap,
+      valuation_warnings: valuation.warnings,
+      valuation_explanations: valuation.valuationExplanations,
+    };
+    return {
+      ...valued,
+      sweetener_hint: valueSweetenerHint(valued),
+    };
+  } catch (err) {
+    const warning: TradeValuationWarning = {
+      type: "missing_data",
+      severity: "warning",
+      side: null,
+      message: "KTC League valuation could not finish for this package; showing the generated starting point.",
+    };
+    return {
+      ...offer,
+      valuation_warnings: [...(offer.valuation_warnings ?? []), warning],
+      valuation_explanations: [
+        ...(offer.valuation_explanations ?? []),
+        err instanceof Error ? `KTC League valuation failed: ${err.message}` : "KTC League valuation failed.",
+      ],
+    };
+  }
+}
+
+async function valueAcquisitionOffersForLeague(
+  offers: AcquisitionOffer[],
+  leagueId: string,
+  mode: "sf" | "1qb",
+  classStrengths?: ClassStrengthMap
+): Promise<AcquisitionOffer[]> {
+  return Promise.all(
+    offers.map((offer) => valueAcquisitionOfferWithKtcLeague(offer, leagueId, mode, classStrengths))
+  );
 }
 
 // ─── Acquisition Difficulty Scoring ───
@@ -664,7 +757,8 @@ async function getTradeHistory(
 
 export async function findAcquisitionPackages(
   username: string,
-  playerId: string
+  playerId: string,
+  classStrengths?: ClassStrengthMap
 ): Promise<AcquisitionResult> {
   const lookup = decodeURIComponent(playerId).trim();
   const pm = await resolvePlayer(lookup);
@@ -715,9 +809,15 @@ export async function findAcquisitionPackages(
     // Score difficulty
     const difficulty = scoreDifficulty(targetAsset, ownerRoster, league.mode);
 
-    // Generate packages
-    const packages = generateAcquisitionOffers(
+    // Generate packages first, then value them through the shared KTC League trade pipeline.
+    const generatedPackages = generateAcquisitionOffers(
       userRoster, ownerRoster, targetAsset, difficulty
+    );
+    const packages = await valueAcquisitionOffersForLeague(
+      generatedPackages,
+      league.league_id,
+      league.mode,
+      classStrengths
     );
 
     // Get trade comps for this league
