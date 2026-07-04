@@ -9,7 +9,14 @@ export default defineConfig({
     VitePWA({
       registerType: "autoUpdate",
       injectRegister: "script-defer",
-      includeAssets: ["favicon.svg", "pwa-192.png", "pwa-512.png", "apple-touch-icon.png"],
+      includeAssets: [
+        "favicon.svg",
+        "pwa-192.png",
+        "pwa-512.png",
+        "apple-touch-icon.png",
+        "apple-touch-icon-180.png",
+        "apple-touch-icon-precomposed.png",
+      ],
       manifest: {
         id: "/",
         name: "The Edge",
@@ -24,7 +31,7 @@ export default defineConfig({
         icons: [
           { src: "/pwa-192.png", sizes: "192x192", type: "image/png" },
           { src: "/pwa-512.png", sizes: "512x512", type: "image/png" },
-          { src: "/pwa-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
+          { src: "/pwa-512.png", sizes: "512x512", type: "image/png", purpose: "any maskable" },
         ],
         shortcuts: [
           {
