@@ -54,6 +54,8 @@ export interface TradeContextResult {
   explanations: string[];
 }
 
+type KtcAdjustmentSide = "sideA" | "sideB" | "none";
+
 function roundTo(value: number, decimals = 1): number {
   const factor = 10 ** decimals;
   return Math.round(value * factor) / factor;
@@ -102,6 +104,122 @@ export function rawAdjustmentForAsset(
   const globalStudFactor = 0.20 * Math.pow(globalShare, 2.4);
   const tradeDominanceFactor = 0.22 * Math.pow(tradeShare, 2.8);
   return value * (base + globalStudFactor + tradeDominanceFactor);
+}
+
+function ktcProcessValue(
+  value: number,
+  bestInTrade: number,
+  maxOverall: number,
+  nerfIndex: number
+): number {
+  let adjustment = (
+    0.05 * Math.pow(value / maxOverall, 1.3) +
+    0.05 * Math.pow(value / (1.05 * bestInTrade), 6) +
+    0.1
+  ) * value;
+  if (nerfIndex > 0) {
+    adjustment *= Math.max(0.6, 1 - 0.15 * nerfIndex);
+  }
+  if (adjustment < 0) {
+    adjustment /= 4;
+  }
+  return adjustment;
+}
+
+function reverseKtcAdjustment(
+  targetAdjustment: number,
+  bestInTrade: number,
+  maxOverall: number,
+  nerfIndex: number
+): number {
+  if (targetAdjustment <= 0) return 0;
+
+  const bestAdjustment = ktcProcessValue(bestInTrade, bestInTrade, maxOverall, -1);
+  let searchMax = bestInTrade;
+  if (bestAdjustment < targetAdjustment) {
+    searchMax = Math.max((targetAdjustment / bestAdjustment) * bestInTrade * 0.8, bestInTrade);
+  }
+
+  let candidate = searchMax / 2;
+  let delta = 1;
+  let iterations = 0;
+  let bestDelta = 1;
+  let bestCandidate = -1;
+  let previousCandidate = -1;
+
+  for (; delta > 0.025 && iterations <= 10; iterations++) {
+    const currentAdjustment = ktcProcessValue(candidate, searchMax, maxOverall, nerfIndex);
+    delta = Math.abs(currentAdjustment - targetAdjustment) / targetAdjustment;
+    delta = Math.min(delta, 1);
+
+    if (delta > 0.025) {
+      previousCandidate = candidate;
+      const step = delta * candidate * 0.75;
+      candidate += currentAdjustment <= targetAdjustment ? step : -step;
+    }
+
+    if (delta < bestDelta) {
+      bestDelta = delta;
+      bestCandidate = previousCandidate;
+      if (bestCandidate > bestInTrade) {
+        searchMax = bestCandidate;
+      }
+    }
+
+    if (iterations === 10 && delta > 0.05) {
+      let fallbackIterations = 0;
+      for (candidate = Math.max(1, bestCandidate); delta > 0.025 && fallbackIterations <= 10; fallbackIterations++) {
+        const currentAdjustment = ktcProcessValue(candidate, searchMax, maxOverall, nerfIndex);
+        delta = Math.abs(currentAdjustment - targetAdjustment) / targetAdjustment;
+        delta = Math.min(delta, 1);
+
+        if (delta > 0.025) {
+          previousCandidate = candidate;
+          const step = delta * candidate * 0.25;
+          candidate += currentAdjustment <= targetAdjustment ? step : -step;
+        }
+
+        if (delta < bestDelta) {
+          bestDelta = delta;
+          bestCandidate = previousCandidate;
+          if (bestCandidate > bestInTrade) {
+            searchMax = bestCandidate;
+          }
+        }
+      }
+      candidate = bestCandidate;
+    }
+  }
+
+  return Math.round(candidate);
+}
+
+function ktcCheckEquality(sideA: number, sideB: number, variance: number): boolean {
+  const a = Math.max(0, sideA);
+  const b = Math.max(0, sideB);
+  const total = a + b;
+  if (total <= 0) return true;
+  const percentGap = Math.min(100, (Math.abs(a - b) / total) * 100);
+  return !(Math.round(percentGap * 10) / 10 > variance);
+}
+
+function ktcAdjustmentContributions(
+  values: number[],
+  bestInTrade: number,
+  maxOverall: number
+): number[] {
+  const indexed = values.map((value, index) => ({ value, index }));
+  indexed.sort((a, b) => b.value - a.value);
+
+  const contributions = values.map(() => 0);
+  let nerfIndex = -1;
+  for (const { value, index } of indexed) {
+    if (value < 0.5 * bestInTrade) {
+      nerfIndex++;
+    }
+    contributions[index] = ktcProcessValue(value, bestInTrade, maxOverall, nerfIndex);
+  }
+  return contributions;
 }
 
 function assetAdjustmentContributions(
@@ -413,6 +531,246 @@ export function calculateTradeContext(
   sideBValues: number[]
 ): TradeContextResult {
   return calculateTradeContextCore(sideAValues, sideBValues, true);
+}
+
+export function calculateKtcTradeContext(
+  sideAValues: number[],
+  sideBValues: number[]
+): TradeContextResult {
+  const baseA = roundTo(sum(sideAValues), 1);
+  const baseB = roundTo(sum(sideBValues), 1);
+  const best = bestAssetSide(sideAValues, sideBValues);
+  const bestInTrade = Math.max(best.value, 1);
+  const maxOverall = MAX_MARKET_VALUE + 80;
+  const defaultVariance = 5;
+
+  const contributionsA = ktcAdjustmentContributions(sideAValues, bestInTrade, maxOverall);
+  const contributionsB = ktcAdjustmentContributions(sideBValues, bestInTrade, maxOverall);
+  const rawAdjA = sum(contributionsA);
+  const rawAdjB = sum(contributionsB);
+  const rawAdjDiff = Math.floor(Math.abs(rawAdjA - rawAdjB));
+  const halfBestAdjustment = ktcProcessValue(0.5 * bestInTrade, bestInTrade, maxOverall, -1);
+
+  let nerfCount = 0;
+  let startedNerf = false;
+  const weakerContributions = rawAdjA > rawAdjB
+    ? [...contributionsB].sort((a, b) => b - a)
+    : [...contributionsA].sort((a, b) => b - a);
+  if (rawAdjDiff < halfBestAdjustment) {
+    for (let i = 0; i < weakerContributions.length; i++) {
+      if (weakerContributions[i] < rawAdjDiff && !startedNerf) {
+        nerfCount = i + 1;
+        startedNerf = true;
+      }
+    }
+  }
+
+  const rawAdjRateA = baseA > 0 ? rawAdjA / baseA : 0;
+  const rawAdjRateB = baseB > 0 ? rawAdjB / baseB : 0;
+  const valuesAreClose = ktcCheckEquality(baseA, baseB, defaultVariance);
+  const adjustmentsAreClose = ktcCheckEquality(rawAdjA, rawAdjB, defaultVariance);
+
+  const adjustmentState: {
+    side: KtcAdjustmentSide;
+    value: number;
+    display: boolean;
+  } = {
+    side: "none",
+    value: 0,
+    display: true,
+  };
+
+  const applyAdjustment = (
+    side: KtcAdjustmentSide,
+    amount: number,
+    display = true
+  ) => {
+    adjustmentState.side = side;
+    adjustmentState.value = amount;
+    adjustmentState.display = display;
+  };
+
+  const reverseDefault = () => reverseKtcAdjustment(rawAdjDiff, bestInTrade, maxOverall, nerfCount);
+  const reverseRawDifference = () => reverseKtcAdjustment(
+    Math.abs(rawAdjA - rawAdjB),
+    bestInTrade,
+    MAX_MARKET_VALUE + 99,
+    nerfCount
+  );
+
+  if (valuesAreClose && adjustmentsAreClose) {
+    if (rawAdjA > rawAdjB) {
+      const equivalent = reverseDefault();
+      const amount = baseB + equivalent - baseA;
+      if (amount > 0) {
+        applyAdjustment("sideA", amount);
+      } else {
+        applyAdjustment("sideB", -amount, false);
+      }
+    } else if (rawAdjB > rawAdjA) {
+      const equivalent = reverseDefault();
+      const amount = baseA + equivalent - baseB;
+      if (amount > 0) {
+        applyAdjustment("sideB", amount);
+      } else {
+        applyAdjustment("sideA", -amount, false);
+      }
+    }
+  } else if (rawAdjRateA > rawAdjRateB) {
+    if (rawAdjA > rawAdjB) {
+      const equivalent = reverseDefault();
+      const amount = baseB + equivalent - baseA;
+      if (amount > 0) {
+        applyAdjustment("sideA", amount);
+      } else {
+        applyAdjustment("sideB", Math.abs(amount), false);
+      }
+    } else {
+      const losingSide = baseA < baseB ? "sideA" : baseB < baseA ? "sideB" : "none";
+      const equivalent = reverseRawDifference();
+      if (equivalent > 0 && losingSide !== "none") {
+        if (losingSide === "sideB") {
+          const amount = equivalent - (baseA - baseB);
+          if (amount > 0) {
+            applyAdjustment("sideB", amount);
+          } else {
+            applyAdjustment("sideB", amount, false);
+          }
+        } else {
+          const amount = equivalent - (baseB - baseA);
+          if (amount > 0) {
+            if (amount > MAX_MARKET_VALUE) {
+              applyAdjustment("sideA", 0, false);
+            } else {
+              applyAdjustment("sideB", amount);
+            }
+          } else {
+            applyAdjustment("sideA", -amount);
+          }
+        }
+      } else {
+        adjustmentState.display = false;
+      }
+    }
+  } else {
+    if (rawAdjB > rawAdjA) {
+      const equivalent = reverseDefault();
+      const amount = baseA + equivalent - baseB;
+      if (amount > 0) {
+        applyAdjustment("sideB", amount);
+      } else {
+        applyAdjustment("sideA", Math.abs(amount), false);
+      }
+    } else {
+      const losingSide = baseA < baseB ? "sideA" : baseB < baseA ? "sideB" : "none";
+      const equivalent = reverseRawDifference();
+      if (equivalent > 0 && losingSide !== "none") {
+        if (losingSide === "sideA") {
+          const amount = equivalent - (baseB - baseA);
+          if (amount > 0) {
+            applyAdjustment("sideA", amount);
+          } else {
+            applyAdjustment("sideA", amount, false);
+          }
+        } else {
+          const amount = equivalent - (baseA - baseB);
+          if (amount > 0) {
+            if (amount > MAX_MARKET_VALUE) {
+              applyAdjustment("sideB", 0, false);
+            } else {
+              applyAdjustment("sideA", amount);
+            }
+          } else {
+            applyAdjustment("sideB", -amount);
+          }
+        }
+      } else {
+        adjustmentState.display = false;
+      }
+    }
+  }
+
+  if (adjustmentState.value !== 0 && Math.abs(adjustmentState.value / Math.max(baseA + baseB, 1)) < 0.033) {
+    adjustmentState.display = false;
+  }
+  if (adjustmentState.value === 0) {
+    adjustmentState.display = false;
+  }
+
+  const adjustmentSide = adjustmentState.side;
+  const visibleAdjustment = roundTo(adjustmentState.value, 1);
+  const finalA = roundTo(baseA + (adjustmentSide === "sideA" ? visibleAdjustment : 0), 1);
+  const finalB = roundTo(baseB + (adjustmentSide === "sideB" ? visibleAdjustment : 0), 1);
+  const delta = roundTo(finalA - finalB, 1);
+  const maxTotal = Math.max(finalA, finalB);
+  const percentGap = roundTo(maxTotal > 0 ? (Math.abs(delta) / maxTotal) * 100 : 0, 1);
+  const fairness = fairnessFromPercentGap(percentGap);
+  const winner: TradeSide = fairness === "fair" ? "even" : delta > 0 ? "sideA" : "sideB";
+
+  const contextValuesA = allocateVisibleAdjustment(
+    sideAValues,
+    bestInTrade,
+    adjustmentSide === "sideA" ? visibleAdjustment : 0
+  );
+  const contextValuesB = allocateVisibleAdjustment(
+    sideBValues,
+    bestInTrade,
+    adjustmentSide === "sideB" ? visibleAdjustment : 0
+  );
+
+  const sideAPackagePenaltyPct = packagePenaltyPct(sideAValues);
+  const sideBPackagePenaltyPct = packagePenaltyPct(sideBValues);
+  const warning = consolidationWarning(sideAValues, sideBValues, best);
+  const neededToEven = findNeededToEven(sideAValues, sideBValues, winner, Math.abs(delta), percentGap);
+  const explanations = [
+    best.side !== "even"
+      ? `Best asset is on ${best.side === "sideA" ? "Side A" : "Side B"} at ${Math.round(best.value)} KTC value.`
+      : "Best asset strength is even across both trade sides.",
+    adjustmentSide !== "none" && visibleAdjustment !== 0
+      ? `KTC-style package adjustment favors ${adjustmentSide === "sideA" ? "Side A" : "Side B"} by ${visibleAdjustment.toFixed(1)}${adjustmentState.display ? "." : " (below KTC's visible adjustment threshold)."}`
+      : "No KTC-style package adjustment was needed after comparing asset concentration.",
+  ];
+  if (warning) explanations.push(warning);
+
+  return {
+    sideA: {
+      baseTotal: baseA,
+      adjustment: adjustmentSide === "sideA" ? visibleAdjustment : 0,
+      finalTotal: finalA,
+      contextValues: contextValuesA,
+      packagePenaltyPct: sideAPackagePenaltyPct,
+      adjustmentExplanation: sideAdjustmentExplanation(
+        "Side A",
+        sideAValues.length,
+        adjustmentSide === "sideA" ? visibleAdjustment : 0,
+        sideAPackagePenaltyPct
+      ),
+    },
+    sideB: {
+      baseTotal: baseB,
+      adjustment: adjustmentSide === "sideB" ? visibleAdjustment : 0,
+      finalTotal: finalB,
+      contextValues: contextValuesB,
+      packagePenaltyPct: sideBPackagePenaltyPct,
+      adjustmentExplanation: sideAdjustmentExplanation(
+        "Side B",
+        sideBValues.length,
+        adjustmentSide === "sideB" ? visibleAdjustment : 0,
+        sideBPackagePenaltyPct
+      ),
+    },
+    delta,
+    winner,
+    fairness,
+    valueAdjustmentSide: visibleAdjustment === 0 ? "none" : adjustmentSide,
+    valueAdjustment: visibleAdjustment,
+    percentGap,
+    bestAssetSide: best.side,
+    bestAssetMarketValue: Math.round(best.value),
+    consolidationWarning: warning,
+    neededToEven,
+    explanations,
+  };
 }
 
 export function marketValueForLegacyEdge(edge: number): number {

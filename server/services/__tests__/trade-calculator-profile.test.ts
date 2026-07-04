@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { EvaluatedAsset } from "../../../shared/types.js";
 import { DEFAULT_SOURCE_WEIGHTS } from "../edge-score.js";
-import { calculateTradeContext } from "../trade-context-value.js";
+import { calculateKtcTradeContext, calculateTradeContext } from "../trade-context-value.js";
 import {
   buildValuationComparison,
   toKtcEvaluatedAsset,
@@ -133,5 +133,28 @@ describe("Trade Calculator valuation profiles", () => {
     expect(comparison.package_context_adjustment.sideA_delta).toBeGreaterThanOrEqual(0);
     expect(comparison.package_context_adjustment.sideB_delta).toBeGreaterThanOrEqual(0);
     expect(comparison.current.profile).toBe("composite");
+  });
+
+  it("uses the KTC-style package adjustment curve for KTC totals", () => {
+    const ktc = calculateKtcTradeContext([9_999], [7_500, 5_616]);
+
+    expect(ktc.sideA.baseTotal).toBe(9_999);
+    expect(ktc.sideB.baseTotal).toBe(13_116);
+    expect(ktc.valueAdjustmentSide).toBe("sideA");
+    expect(ktc.valueAdjustment).toBe(4_233);
+    expect(ktc.sideA.finalTotal).toBe(14_232);
+    expect(ktc.sideB.finalTotal).toBe(13_116);
+    expect(ktc.fairness).toBe("fair");
+  });
+
+  it("keeps the composite context curve separate from the KTC package curve", () => {
+    const valuesA = [9_999];
+    const valuesB = [7_500, 5_616];
+
+    const composite = calculateTradeContext(valuesA, valuesB);
+    const ktc = calculateKtcTradeContext(valuesA, valuesB);
+
+    expect(composite.sideA.finalTotal).not.toBe(ktc.sideA.finalTotal);
+    expect(composite.valueAdjustment).toBeLessThan(ktc.valueAdjustment);
   });
 });

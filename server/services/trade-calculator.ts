@@ -29,7 +29,7 @@ import {
   buildLeagueMarketContext,
   loadLeagueMarketContext,
 } from "./league-market-adjustment.js";
-import { calculateTradeContext } from "./trade-context-value.js";
+import { calculateKtcTradeContext, calculateTradeContext } from "./trade-context-value.js";
 import { getAgeCurveStatus } from "./age-curves.js";
 import { computeLeaguePPG } from "./league-ppg.js";
 import type { ValueType } from "./composite-values.js";
@@ -894,7 +894,9 @@ export async function evaluateTrade(
 
   const leagueValuesA = evalA.map((a) => a.league_market_value ?? a.base_market_value ?? 0);
   const leagueValuesB = evalB.map((a) => a.league_market_value ?? a.base_market_value ?? 0);
-  const tvResult = calculateTradeContext(leagueValuesA, leagueValuesB);
+  const tvResult = valuationProfile === "composite"
+    ? calculateTradeContext(leagueValuesA, leagueValuesB)
+    : calculateKtcTradeContext(leagueValuesA, leagueValuesB);
 
   for (let i = 0; i < evalA.length; i++) {
     const contextValue = tvResult.sideA.contextValues[i] ?? leagueValuesA[i] ?? 0;
