@@ -816,7 +816,9 @@ export async function shopPlayer(
   valueType: ValueType = "dynasty",
   weights?: SourceWeights
 ): Promise<ShopPlayerResult | null> {
-  const allLeagues = await getPowerRankings(username, valueType, weights);
+  const allLeagues = await getPowerRankings(username, valueType, weights, undefined, {
+    forceDbOnly: true,
+  });
   if (allLeagues.length === 0) return null;
 
   const leaguesWithPlayer: Array<{

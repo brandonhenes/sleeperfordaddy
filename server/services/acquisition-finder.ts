@@ -841,7 +841,9 @@ export async function findAcquisitionPackages(
   if (!pm) return { target: { player_id: "", player_name: playerId, position: "", team: null, age: null, edge_score: 0 }, opportunities: [], summary: `Player not found.` };
 
   // 2. Get all power rankings
-  const allLeagues = await getPowerRankings(username, "dynasty", weights);
+  const allLeagues = await getPowerRankings(username, "dynasty", weights, undefined, {
+    forceDbOnly: true,
+  });
   if (allLeagues.length === 0) {
     return {
       target: { player_id: pm.player_id, player_name: pm.full_name, position: pm.position, team: pm.team, age: pm.age, edge_score: 0 },

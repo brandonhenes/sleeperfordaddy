@@ -1,5 +1,6 @@
 import type {
   CoreAsset,
+  LeaguePowerRanking,
   TradeBoardLine,
   RosterRanking,
   ScoredPick,
@@ -80,6 +81,8 @@ let activeTradeFinderValuations = 0;
 const tradeFinderValuationQueue: Array<() => void> = [];
 const tradeFinderResultCache = new Map<string, { data: TradeSuggestion[]; expires: number }>();
 const tradeFinderInFlight = new Map<string, Promise<TradeSuggestion[]>>();
+const tradeBoardResultCache = new Map<string, { data: TradeBoardLine[]; expires: number }>();
+const tradeBoardInFlight = new Map<string, Promise<TradeBoardLine[]>>();
 
 async function withTradeFinderValuationSlot<T>(work: () => Promise<T>): Promise<T> {
   if (activeTradeFinderValuations >= TRADE_FINDER_MAX_CONCURRENT_VALUATIONS) {
@@ -145,6 +148,49 @@ function setCachedTradeFinderResult(
     const oldestKey = tradeFinderResultCache.keys().next().value;
     if (!oldestKey) break;
     tradeFinderResultCache.delete(oldestKey);
+  }
+}
+
+function tradeBoardResultCacheKey(
+  username: string,
+  leagueIds: string[],
+  classStrengths?: ClassStrengthMap,
+  weights?: SourceWeights
+): string {
+  return [
+    username.toLowerCase(),
+    leagueIds.join(","),
+    sourceWeightsKey(weights),
+    classStrengthsKey(classStrengths),
+  ].join("|");
+}
+
+function getCachedTradeBoardResult(key: string): TradeBoardLine[] | null {
+  const hit = tradeBoardResultCache.get(key);
+  if (!hit) return null;
+  if (hit.expires <= Date.now()) {
+    tradeBoardResultCache.delete(key);
+    return null;
+  }
+  tradeBoardResultCache.delete(key);
+  tradeBoardResultCache.set(key, hit);
+  return hit.data;
+}
+
+function setCachedTradeBoardResult(key: string, data: TradeBoardLine[]) {
+  tradeBoardResultCache.set(key, {
+    data,
+    expires: Date.now() + TRADE_FINDER_BOARD_RESULT_TTL_MS,
+  });
+
+  const now = Date.now();
+  for (const [cacheKey, value] of tradeBoardResultCache.entries()) {
+    if (value.expires <= now) tradeBoardResultCache.delete(cacheKey);
+  }
+  while (tradeBoardResultCache.size > TRADE_FINDER_RESULT_CACHE_MAX_ENTRIES) {
+    const oldestKey = tradeBoardResultCache.keys().next().value;
+    if (!oldestKey) break;
+    tradeBoardResultCache.delete(oldestKey);
   }
 }
 
@@ -1919,36 +1965,229 @@ export async function findTradeBoardLines(
   const uniqueLeagueIds = [...new Set(leagueIds.filter(Boolean))].slice(0, 4);
   if (uniqueLeagueIds.length === 0) return [];
 
-  const leagueIdFrags = uniqueLeagueIds.map((id) => sql`${id}`);
-  const leagueInClause = sql.join(leagueIdFrags, sql`, `);
-  const leagueRows = await db.execute(sql`
-    SELECT league_id, name
-    FROM leagues
-    WHERE league_id IN (${leagueInClause})
-  `);
-  const leagueNames = new Map(
-    (leagueRows as unknown as Array<{ league_id: string; name: string | null }>)
-      .map((row) => [row.league_id, row.name ?? row.league_id])
-  );
+  const cacheKey = tradeBoardResultCacheKey(username, uniqueLeagueIds, classStrengths, weights);
+  const cached = getCachedTradeBoardResult(cacheKey);
+  if (cached) return cached;
 
-  const lines = await Promise.all(
-    uniqueLeagueIds.map(async (leagueId) => {
-      const suggestions = await findTrades(username, leagueId, classStrengths, weights, {
+  const inFlight = tradeBoardInFlight.get(cacheKey);
+  if (inFlight) return inFlight;
+
+  const work = (async () => {
+    const order = new Map(uniqueLeagueIds.map((leagueId, index) => [leagueId, index]));
+    const leagues = await getPowerRankings(username, "dynasty", weights, undefined, {
+      leagueIds: uniqueLeagueIds,
+      forceDbOnly: true,
+    });
+    const boardOptions: TradeFinderRuntimeOptions = {
         cacheNamespace: "board",
         maxOpponents: 1,
         maxEvaluationsPerOpponent: 8,
         maxPackagesPerPartner: 2,
         resultTtlMs: TRADE_FINDER_BOARD_RESULT_TTL_MS,
-      });
+    };
+    const lines = await Promise.all(
+      leagues.map(async (league) => {
+        const suggestions = await buildTradeSuggestionsForLeague(
+          league,
+          classStrengths,
+          weights,
+          boardOptions
+        );
       return bestTradeBoardLine(
-        leagueId,
-        leagueNames.get(leagueId) ?? leagueId,
+        league.league_id,
+        league.league_name,
         suggestions
       );
-    })
-  );
+      })
+    );
 
-  return lines.filter((line): line is TradeBoardLine => line != null);
+    return lines
+      .filter((line): line is TradeBoardLine => line != null)
+      .sort((a, b) => (order.get(a.league_id) ?? 99) - (order.get(b.league_id) ?? 99));
+  })()
+    .then((data) => {
+      setCachedTradeBoardResult(cacheKey, data);
+      return data;
+    })
+    .finally(() => {
+      tradeBoardInFlight.delete(cacheKey);
+    });
+
+  tradeBoardInFlight.set(cacheKey, work);
+  return work;
+}
+
+async function buildTradeSuggestionsForLeague(
+  league: LeaguePowerRanking,
+  classStrengths?: ClassStrengthMap,
+  weights?: SourceWeights,
+  options: TradeFinderRuntimeOptions = {}
+): Promise<TradeSuggestion[]> {
+  const leagueId = league.league_id;
+  if (league.rosters.length < 2) return [];
+
+  const leagueRow = await db.execute(sql`
+    SELECT scoring_settings FROM leagues WHERE league_id = ${leagueId} LIMIT 1
+  `);
+  const leagueScoring = parseLeagueScoring(
+    (leagueRow as unknown as { scoring_settings: Record<string, unknown> | null }[])[0]?.scoring_settings ?? null
+  );
+  const hasCustomScoring = isNonStandardScoring(leagueScoring);
+  let usageMap: UsageStats = new Map();
+  if (hasCustomScoring) {
+    const allPlayerIds = league.rosters.flatMap((r) => r.core_assets.map((a) => a.player_id));
+    usageMap = await loadPlayerUsageStats([...new Set(allPlayerIds)]);
+  }
+
+  const mode = league.mode;
+  const medians = computeLeagueMedians(league.rosters);
+  const enrichedPickMap = new Map<number, EnrichedPick[]>();
+  for (const roster of league.rosters) {
+    const picks = await Promise.all(
+      (roster.draft_picks ?? []).map((pick) =>
+        enrichScoredPick(pick, {
+          leagueSize: league.rosters.length,
+          format: league.mode,
+          classStrengths,
+        })
+      )
+    );
+    enrichedPickMap.set(roster.roster_id, picks);
+  }
+
+  const profiles = league.rosters.map((r) =>
+    buildProfile(r, medians, enrichedPickMap.get(r.roster_id) ?? [])
+  );
+  const behaviors = await buildLeagueBehaviors(leagueId);
+  for (const profile of profiles) {
+    profile.behavior = behaviors.get(profile.roster.roster_id);
+  }
+
+  const userProfile = profiles.find((p) => p.roster.is_user);
+  if (!userProfile) return [];
+
+  const opponents = profiles.filter((p) => !p.roster.is_user);
+
+  const ranked = opponents
+    .map((opp) => {
+      const { score, reason } = scoreCompatibility(userProfile, opp);
+      return { opp, score, reason };
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, options.maxOpponents ?? TRADE_FINDER_MAX_OPPONENTS);
+
+  const packageScoreCache = new Map<string, Promise<PackageScore>>();
+  const scoreTradeFinderPackageCached: TradeFinderPackageScorer = (
+    send,
+    receive,
+    packageLeagueId,
+    packageMode,
+    packageClassStrengths
+  ) => {
+    const cacheKey = packageEvaluationCacheKey(
+      send,
+      receive,
+      packageLeagueId,
+      packageMode,
+      packageClassStrengths,
+      weights
+    );
+    const cached = packageScoreCache.get(cacheKey);
+    if (cached) return cached;
+    const work = withTradeFinderValuationSlot(() =>
+      scoreTradeFinderPackage(
+        send,
+        receive,
+        packageLeagueId,
+        packageMode,
+        packageClassStrengths,
+        weights
+      )
+    );
+    packageScoreCache.set(cacheKey, work);
+    return work;
+  };
+
+  const suggestions = (await Promise.all(ranked.map(async ({ opp, score, reason }): Promise<TradeSuggestion | null> => {
+    const basePackages = await generateTradeFinderPackages(
+      userProfile,
+      opp,
+      mode,
+      leagueId,
+      leagueScoring,
+      usageMap,
+      hasCustomScoring,
+      classStrengths,
+      scoreTradeFinderPackageCached,
+      options
+    );
+    if (basePackages.length === 0) return null;
+    const packageHealthScores = new Map<string, number>();
+    for (const pkg of basePackages) {
+      for (const asset of [...pkg.you_send, ...pkg.you_receive]) {
+        if (asset.asset_type === "player" && asset.player_id) {
+          packageHealthScores.set(asset.player_id, asset.edge_score);
+        }
+      }
+    }
+    const tradeHealthData = await loadTradeHealthPlayerInfo(
+      [...packageHealthScores.keys()],
+      packageHealthScores
+    );
+    const qualityContext: TradeFinderQualityContext = {
+      userNeeds: userProfile.needs,
+      opponentNeeds: opp.needs,
+      userArchetype: userProfile.roster.archetype,
+      opponentArchetype: opp.roster.archetype,
+      mode,
+      managerSignals: [
+        ...(opp.behavior?.bias_flags ?? []),
+        opp.behavior?.preferred_structure ?? "",
+      ].filter(Boolean),
+    };
+    const evaluatedPackages = applyAcceptanceAndBehavior(basePackages, userProfile, opp)
+      .map((pkg) => ({
+        ...pkg,
+        acceptance_reason:
+          pkg.acceptance?.accept_reasons[0] ??
+          pkg.acceptance?.reject_reasons[0] ??
+          pkg.acceptance_reason,
+      }))
+      .map((pkg) => ({
+        ...pkg,
+        healthCheck: tradeHealthCheck(
+          pkg.you_send,
+          pkg.you_receive,
+          tradeHealthData,
+          pkg.fairness
+        ),
+      }))
+      .filter((pkg) => !pkg.healthCheck.some((warning) => warning.type === "block"))
+      .map((pkg) => annotateTradeFinderPackage(pkg, qualityContext))
+      .filter(shouldSurfaceTradeFinderPackage);
+    const packages = dedupeAndRankTradeFinderPackages(
+      evaluatedPackages,
+      options.maxPackagesPerPartner ?? TRADE_FINDER_MAX_PACKAGES_PER_PARTNER
+    );
+    if (packages.length === 0) return null;
+
+    return {
+      partner: {
+        roster_id: opp.roster.roster_id,
+        display_name: opp.roster.display_name,
+        archetype: opp.roster.archetype,
+        compatibility_score: score,
+        compatibility_reason: reason,
+        bias_flags: opp.behavior?.bias_flags ?? [],
+        preferred_structure: opp.behavior?.preferred_structure ?? "mixed",
+        total_trades: opp.behavior?.total_trades ?? 0,
+        recent_trades: opp.behavior?.recent_trades ?? 0,
+      },
+      packages,
+    };
+  }))).filter((suggestion): suggestion is TradeSuggestion => suggestion != null);
+
+  return applyDisplayedTradeDiversity(suggestions);
 }
 
 async function findTradesUncached(

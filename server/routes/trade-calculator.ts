@@ -75,7 +75,9 @@ router.get("/api/trade/opponent-context/:username/:leagueId", async (req, res) =
     if (!username || !leagueId) return res.status(400).json({ message: "username and leagueId required" });
 
     const valueType = req.query.redraft === "true" ? "redraft" as const : "dynasty" as const;
-    const allLeagues = await getPowerRankings(username, valueType);
+    const allLeagues = await getPowerRankings(username, valueType, undefined, undefined, {
+      forceDbOnly: true,
+    });
     const league = allLeagues.find((l) => l.league_id === leagueId);
     if (!league) return res.status(404).json({ message: "League not found" });
 
