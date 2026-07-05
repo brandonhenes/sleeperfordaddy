@@ -3,12 +3,11 @@ import { useQuery } from "@tanstack/react-query";
 import AppShell from "../components/AppShell";
 import EdgeScoreBadge from "../components/EdgeScoreBadge";
 import FreshnessBar from "../components/FreshnessBar";
-import { PickBadge, PositionBadge } from "../components/ui";
+import { PickBadge } from "../components/ui";
 import { useEvaluateTrade } from "../hooks/use-trade-calculator";
 import {
   usePowerRankings,
   type CoreAsset,
-  type RosterRanking,
   type ScoredPick,
 } from "../hooks/use-power-rankings";
 import { useCurrentUsername } from "../hooks/use-current-user";
@@ -29,54 +28,18 @@ import type {
   TradeValuationProfile,
   TradeValuationWarning,
 } from "@shared/types";
+import RosterGrid from "./trade-calculator/RosterGrid";
+import VacuumSearchColumn from "./trade-calculator/VacuumSearchColumn";
+import { PICK_YEARS, pickDisplay, pickSlotLabel, pickToAsset } from "./trade-calculator/picks";
+import type {
+  AcceptanceAssetView,
+  OpponentContext,
+  OpponentContextResponse,
+  PickTier,
+  SearchAsset,
+  Side,
+} from "./trade-calculator/types";
 
-type Side = "send" | "receive";
-type PickTier = "early" | "mid" | "late";
-type PickSelection = PickTier | `slot:${number}`;
-
-interface SearchAsset {
-  type: "player";
-  player_id: string;
-  label: string;
-  position: string;
-  team: string | null;
-}
-
-interface AcceptanceAssetView extends EvaluatedAsset {
-  age?: number | null;
-  age_curve_zone?: string | null;
-}
-
-interface OpponentBehavior {
-  total_trades: number;
-  recent_trades: number;
-  preferred_structure: string;
-  is_active: boolean;
-  last_trade_days_ago: number | null;
-  bias_flags: string[];
-  top_acquired_positions: string[];
-}
-
-interface OpponentContext {
-  roster_id: number;
-  display_name: string;
-  team_name: string | null;
-  archetype: string;
-  needs: string[];
-  surplus: string[];
-  top_player_ids_by_pos: Record<string, string>;
-  behavior: OpponentBehavior | null;
-}
-
-interface OpponentContextResponse {
-  league_id: string;
-  opponents: OpponentContext[];
-}
-
-const POSITIONS = ["QB", "RB", "WR", "TE"] as const;
-const YEAR = new Date().getFullYear();
-const PICK_YEARS = [String(YEAR), String(YEAR + 1), String(YEAR + 2)];
-const GENERIC_PICK_SLOTS = Array.from({ length: 12 }, (_, index) => index + 1);
 const VALUATION_PROFILE_OPTIONS: Array<{
   value: TradeValuationProfile;
   label: string;
@@ -96,50 +59,6 @@ function assetKey(a: TradeAssetInput): string {
     return `k:${a.pick_season}|${a.pick_round}|${a.pick_slot}${ownerKey}`;
   }
   return `k:${a.pick_season}|${a.pick_round}|${a.pick_tier ?? "mid"}${ownerKey}`;
-}
-
-function pickToAsset(pick: ScoredPick): TradeAssetInput {
-  return {
-    type: "pick",
-    pick_season: pick.season,
-    pick_round: pick.round,
-    pick_tier: pick.tier,
-    pick_slot: pick.pick_slot ?? null,
-    pick_label: pickDisplay(pick),
-    pick_original_owner_id: pick.original_owner_id,
-  };
-}
-
-function pickKey(pick: ScoredPick): string {
-  if (pick.pick_slot != null) {
-    return `k:${pick.season}|${pick.round}|${pick.pick_slot}|${pick.original_owner_id}`;
-  }
-  return `k:${pick.season}|${pick.round}|${pick.tier}|${pick.original_owner_id}`;
-}
-
-function pickDisplay(pick: ScoredPick): string {
-  if (pick.pick_slot != null) {
-    return `${pick.season} ${pick.round}.${String(pick.pick_slot).padStart(2, "0")}`;
-  }
-  return pick.label;
-}
-
-function pickSelectionValue(tier: PickTier, slot: number | null): PickSelection {
-  return slot != null ? `slot:${slot}` : tier;
-}
-
-function tierFromGenericSlot(slot: number): PickTier {
-  if (slot <= 4) return "early";
-  if (slot <= 8) return "mid";
-  return "late";
-}
-
-function isPickTier(value: PickSelection): value is PickTier {
-  return value === "early" || value === "mid" || value === "late";
-}
-
-function pickSlotLabel(round: number, slot: number): string {
-  return `${round}.${String(slot).padStart(2, "0")}`;
 }
 
 function fairnessColor(f: TradeEvaluation["fairness"]): string {
@@ -662,279 +581,6 @@ function TradePanel({
           {side.adjustment_explanation}
         </div>
       )}
-    </div>
-  );
-}
-
-function PlayerRow({
-  player,
-  isStarter,
-  isUsed,
-  onClick,
-}: {
-  player: CoreAsset;
-  isStarter: boolean;
-  isUsed: boolean;
-  onClick: () => void;
-}) {
-  const [isHovered, setIsHovered] = useState(false);
-  const background = isUsed
-    ? "rgba(148,163,184,0.14)"
-    : isHovered
-      ? "rgba(245,158,11,0.08)"
-      : "transparent";
-
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
-      style={{
-        width: "100%",
-        border: "none",
-        borderTop: "1px solid var(--border)",
-        background,
-        color: "var(--text)",
-        display: "flex",
-        gap: 8,
-        alignItems: "center",
-        padding: "7px 12px",
-        textAlign: "left",
-        cursor: "pointer",
-        fontFamily: "inherit",
-        opacity: isUsed ? 0.65 : 1,
-        transition: "background 0.1s ease",
-      }}
-    >
-      <span style={{ fontSize: 9, width: 38, color: isStarter ? "var(--green)" : "var(--text-muted)", fontWeight: 700 }}>
-        {isStarter ? "START" : "BENCH"}
-      </span>
-      <span style={{ flex: 1, fontSize: 12, fontWeight: 500 }}>{player.full_name}</span>
-      {player.age != null && <span style={{ color: "var(--text-muted)", fontSize: 10 }}>Age {player.age}</span>}
-      <EdgeScoreBadge score={Math.round(player.edge_score)} size="sm" />
-      {isUsed && <span style={{ color: "var(--amber)", fontSize: 9, fontWeight: 700 }}>REMOVE</span>}
-    </button>
-  );
-}
-
-function PositionGroup({
-  position,
-  players,
-  starterIds,
-  usedPlayerIds,
-  onPlayerClick,
-}: {
-  position: string;
-  players: CoreAsset[];
-  starterIds: Set<string>;
-  usedPlayerIds: Set<string>;
-  onPlayerClick: (player: CoreAsset) => void;
-}) {
-  const [showBench, setShowBench] = useState(false);
-  const starters = players.filter((player) => starterIds.has(player.player_id));
-  const bench = players.filter((player) => !starterIds.has(player.player_id));
-
-  return (
-    <div>
-      <div style={{ background: "var(--dark-base)", fontSize: 11, fontWeight: 800, padding: "8px 12px" }}>
-        <PositionBadge position={position} />
-      </div>
-      {starters.map((player) => (
-        <PlayerRow
-          key={player.player_id}
-          player={player}
-          isStarter
-          isUsed={usedPlayerIds.has(player.player_id)}
-          onClick={() => onPlayerClick(player)}
-        />
-      ))}
-      {bench.length > 0 && (
-        <button
-          type="button"
-          onClick={() => setShowBench((current) => !current)}
-          style={{
-            width: "100%",
-            border: "none",
-            borderTop: "1px solid var(--border)",
-            background: "transparent",
-            color: "var(--text-muted)",
-            padding: "6px 12px",
-            textAlign: "center",
-            cursor: "pointer",
-            fontFamily: "inherit",
-            fontSize: 10,
-            fontWeight: 700,
-          }}
-        >
-          {showBench ? "Hide" : "Show"} {bench.length} bench
-        </button>
-      )}
-      {showBench && bench.map((player) => (
-        <PlayerRow
-          key={player.player_id}
-          player={player}
-          isStarter={false}
-          isUsed={usedPlayerIds.has(player.player_id)}
-          onClick={() => onPlayerClick(player)}
-        />
-      ))}
-    </div>
-  );
-}
-
-function VacuumSearchColumn({
-  title,
-  color,
-  search,
-  onSearchChange,
-  results,
-  isLoading,
-  onAddPlayer,
-  pickSeason,
-  onPickSeasonChange,
-  pickRound,
-  onPickRoundChange,
-  pickTier,
-  onPickTierChange,
-  pickSlot,
-  onPickSlotChange,
-  onAddPick,
-  addPickLabel,
-}: {
-  title: string;
-  color: string;
-  search: string;
-  onSearchChange: (value: string) => void;
-  results: SearchAsset[];
-  isLoading: boolean;
-  onAddPlayer: (player: SearchAsset) => void;
-  pickSeason: string;
-  onPickSeasonChange: (value: string) => void;
-  pickRound: number;
-  onPickRoundChange: (value: number) => void;
-  pickTier: PickTier;
-  onPickTierChange: (value: PickTier) => void;
-  pickSlot: number | null;
-  onPickSlotChange: (value: number | null) => void;
-  onAddPick: () => void;
-  addPickLabel: string;
-}) {
-  const pickSelection = pickSelectionValue(pickTier, pickSlot);
-  function handlePickSelection(value: PickSelection) {
-    if (value.startsWith("slot:")) {
-      const slot = Number(value.slice("slot:".length));
-      onPickSlotChange(slot);
-      onPickTierChange(tierFromGenericSlot(slot));
-      return;
-    }
-    onPickSlotChange(null);
-    if (isPickTier(value)) onPickTierChange(value);
-  }
-
-  return (
-    <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: 12 }}>
-      <div style={{ color, fontSize: 12, fontWeight: 800, marginBottom: 10 }}>{title}</div>
-      <input
-        value={search}
-        onChange={(event) => onSearchChange(event.target.value)}
-        placeholder="Search for player..."
-        style={{ width: "100%", boxSizing: "border-box", background: "var(--dark-base)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text)", padding: "9px 12px", fontFamily: "inherit", fontSize: 13 }}
-      />
-      <div style={{ marginTop: 8, display: "grid", gap: 4, maxHeight: 320, overflowY: "auto" }}>
-        {isLoading && <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Searching...</div>}
-        {!isLoading && search.trim().length >= 2 && !results.length && <div style={{ fontSize: 12, color: "var(--text-muted)" }}>No results.</div>}
-        {results.map((player) => (
-          <button
-            key={player.player_id}
-            type="button"
-            onClick={() => onAddPlayer(player)}
-            style={{ width: "100%", border: "1px solid var(--border)", borderRadius: 8, background: "transparent", color: "var(--text)", display: "flex", gap: 8, alignItems: "center", padding: "7px 10px", textAlign: "left", cursor: "pointer", fontFamily: "inherit" }}
-          >
-            <PositionBadge position={player.position} />
-            <span style={{ flex: 1, fontSize: 12 }}>{player.label}</span>
-            <span style={{ fontSize: 10, color: "var(--text-muted)" }}>+ {addPickLabel === "Send Pick" ? "SEND" : "GET"}</span>
-          </button>
-        ))}
-      </div>
-      <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-        <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 700 }}>Add Pick:</span>
-        <select value={pickSeason} onChange={(event) => onPickSeasonChange(event.target.value)} style={{ background: "var(--dark-base)", border: "1px solid var(--border)", borderRadius: 7, color: "var(--text)", padding: "6px 8px", fontSize: 12, fontFamily: "inherit" }}>{PICK_YEARS.map((year) => <option key={year} value={year}>{year}</option>)}</select>
-        <select value={pickRound} onChange={(event) => onPickRoundChange(Number(event.target.value))} style={{ background: "var(--dark-base)", border: "1px solid var(--border)", borderRadius: 7, color: "var(--text)", padding: "6px 8px", fontSize: 12, fontFamily: "inherit" }}>{[1, 2, 3, 4].map((round) => <option key={round} value={round}>Round {round}</option>)}</select>
-        <select value={pickSelection} onChange={(event) => handlePickSelection(event.target.value as PickSelection)} style={{ background: "var(--dark-base)", border: "1px solid var(--border)", borderRadius: 7, color: "var(--text)", padding: "6px 8px", fontSize: 12, fontFamily: "inherit" }}>
-          <option value="early">Early</option>
-          <option value="mid">Mid</option>
-          <option value="late">Late</option>
-          {GENERIC_PICK_SLOTS.map((slot) => (
-            <option key={slot} value={`slot:${slot}`}>
-              {pickSlotLabel(pickRound, slot)}
-            </option>
-          ))}
-        </select>
-        <button type="button" onClick={onAddPick} style={{ background: color, border: "none", borderRadius: 7, color: "#fff", padding: "6px 10px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>+ {addPickLabel}</button>
-      </div>
-    </div>
-  );
-}
-
-function RosterGrid({
-  roster,
-  usedPlayerIds,
-  usedPickKeys,
-  onPlayerClick,
-  onPickClick,
-}: {
-  roster: RosterRanking | null;
-  usedPlayerIds: Set<string>;
-  usedPickKeys: Set<string>;
-  onPlayerClick: (p: CoreAsset) => void;
-  onPickClick: (p: ScoredPick) => void;
-}) {
-  if (!roster) return <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: 14, color: "var(--text-muted)", fontSize: 12 }}>Select opponent to load roster.</div>;
-
-  const starterIds = new Set((roster.lineup?.starters ?? []).map((p) => p.player_id));
-  const picks = [...(roster.draft_picks ?? [])]
-    .filter((pick) => pick.edge_score > 0)
-    .sort((a, b) => b.edge_score - a.edge_score);
-
-  return (
-    <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
-      {POSITIONS.map((pos) => {
-        const players = roster.core_assets
-          .filter((p) => p.position === pos)
-          .sort((a, b) => {
-            const as = starterIds.has(a.player_id) ? 1 : 0;
-            const bs = starterIds.has(b.player_id) ? 1 : 0;
-            if (as !== bs) return bs - as;
-            return b.edge_score - a.edge_score;
-          });
-        if (!players.length) return null;
-        return (
-          <PositionGroup
-            key={`${roster.roster_id}-${pos}`}
-            position={pos}
-            players={players}
-            starterIds={starterIds}
-            usedPlayerIds={usedPlayerIds}
-            onPlayerClick={onPlayerClick}
-          />
-        );
-      })}
-      <div>
-        <div style={{ background: "var(--dark-base)", color: "#06b6d4", fontSize: 11, fontWeight: 800, padding: "8px 12px" }}>PICKS</div>
-        {!picks.length && <div style={{ padding: "8px 12px", color: "var(--text-muted)", fontSize: 12 }}>No picks available.</div>}
-        {picks.map((pick) => {
-          const used = usedPickKeys.has(pickKey(pick));
-          return (
-            <button type="button" key={pickKey(pick)} onClick={() => onPickClick(pick)} style={{ width: "100%", border: "none", borderTop: "1px solid var(--border)", background: used ? "rgba(148,163,184,0.14)" : "transparent", color: "var(--text)", display: "flex", gap: 8, alignItems: "center", padding: "7px 12px", textAlign: "left", cursor: "pointer", fontFamily: "inherit", opacity: used ? 0.65 : 1 }}>
-              <span style={{ fontSize: 9, width: 28, color: "#06b6d4", fontWeight: 700 }}>PICK</span>
-              <span style={{ flex: 1, fontSize: 12 }}>{pickDisplay(pick)}</span>
-              <EdgeScoreBadge score={Math.round(pick.edge_score)} size="sm" />
-              {used && <span style={{ color: "var(--amber)", fontSize: 9, fontWeight: 700 }}>REMOVE</span>}
-            </button>
-          );
-        })}
-      </div>
     </div>
   );
 }
