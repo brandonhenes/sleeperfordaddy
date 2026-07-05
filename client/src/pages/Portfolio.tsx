@@ -1,8 +1,8 @@
 import { useState, useMemo } from "react";
-import { useParams } from "wouter";
 import AppShell from "../components/AppShell";
 import FreshnessBar from "../components/FreshnessBar";
 import ExposureTable from "../components/ExposureTable";
+import SyncGate from "../components/SyncGate";
 import {
   Card,
   ErrorState,
@@ -15,6 +15,7 @@ import {
   type SegmentedControlItem,
 } from "../components/ui";
 import EdgeScoreBadge from "../components/EdgeScoreBadge";
+import { useCurrentUsername } from "../hooks/use-current-user";
 import { usePortfolio } from "../hooks/use-portfolio";
 
 type SortKey = "exposure" | "edge" | "name" | "portfolio_value" | "disagreement";
@@ -39,7 +40,18 @@ const SORT_OPTIONS: SegmentedControlItem<SortKey>[] = [
 ];
 
 export default function Portfolio() {
-  const { username } = useParams<{ username: string }>();
+  const { username } = useCurrentUsername();
+
+  return (
+    <AppShell>
+      <SyncGate username={username}>
+        <PortfolioReady username={username} />
+      </SyncGate>
+    </AppShell>
+  );
+}
+
+function PortfolioReady({ username }: { username: string }) {
   const { data, isLoading, error } = usePortfolio(username);
   const [sortBy, setSortBy] = useState<SortKey>("exposure");
   const [posFilter, setPosFilter] = useState<PosFilter>("ALL");
@@ -75,33 +87,33 @@ export default function Portfolio() {
 
   if (isLoading) {
     return (
-      <AppShell>
+      <>
         <PageHeader
           title="My Portfolio"
           subtitle="Loading player exposure across your leagues."
           actions={<FreshnessBar />}
         />
         <LoadingSkeleton label="Loading portfolio" rows={6} />
-      </AppShell>
+      </>
     );
   }
 
   if (error || !data) {
     return (
-      <AppShell>
+      <>
         <PageHeader title="My Portfolio" actions={<FreshnessBar />} />
         <ErrorState
           title="Could not load portfolio"
           message={error ? (error as Error).message : "No portfolio data found. Try syncing first."}
         />
-      </AppShell>
+      </>
     );
   }
 
   const { stats } = data;
 
   return (
-    <AppShell>
+    <>
       <PageHeader
         title="My Portfolio"
         subtitle={`${stats.total_players} players across ${stats.total_leagues} leagues`}
@@ -399,6 +411,6 @@ export default function Portfolio() {
       </div>
 
       <ExposureTable players={filtered} />
-    </AppShell>
+    </>
   );
 }
