@@ -51,6 +51,9 @@ const syncLocks = new Map<string, boolean>();
 const MIN_SYNC_INTERVAL = 30_000; // 30 second cooldown
 const lastSyncStart = new Map<string, number>();
 type SyncScope = "full" | "latest";
+type ProcessLeagueOptions = {
+  includeHistoricalWork?: boolean;
+};
 
 // Player data cache timestamp
 let playersLastSynced = 0;
@@ -291,7 +294,9 @@ async function runSync(
     SLEEPER_CONCURRENCY,
     async (league) => {
       try {
-        await processLeague(league, sleeperUser.user_id);
+        await processLeague(league, sleeperUser.user_id, {
+          includeHistoricalWork: scope === "full" && !leagueId,
+        });
       } catch (err) {
         console.error(
           `[sync] Error processing league ${league.league_id}:`,
@@ -435,7 +440,11 @@ async function runSync(
 /**
  * Process a single league: store metadata, rosters, users, matchups, trades.
  */
-async function processLeague(league: SleeperLeague, userId: string) {
+async function processLeague(
+  league: SleeperLeague,
+  userId: string,
+  options: ProcessLeagueOptions = {}
+) {
   const season = parseInt(league.season, 10);
   const leagueType =
     typeof league.settings?.type === "number"
@@ -543,6 +552,10 @@ async function processLeague(league: SleeperLeague, userId: string) {
     await syncDraftOrder(league.league_id, rosterList);
   } catch (err) {
     console.error(`[sync] Error resolving draft order for ${league.league_id}:`, err);
+  }
+
+  if (options.includeHistoricalWork === false) {
+    return;
   }
 
   // Fetch and store matchups (for H2H calculation)
