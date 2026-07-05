@@ -499,7 +499,7 @@ describe("Find Trades generator quality", () => {
       }
     );
 
-    expect(calls).toBeLessThanOrEqual(10);
+    expect(calls).toBeLessThanOrEqual(18);
     expect(generated.some((pkg) => pkg.you_send.length + pkg.you_receive.length > 2)).toBe(true);
   });
 
@@ -578,7 +578,7 @@ describe("Find Trades generator quality", () => {
     expect(ranked.filter((pkg) => pkg.trade_type === "1-for-1")).toHaveLength(1);
   });
 
-  it("uses low-confidence fallback only when better results are unavailable", () => {
+  it("ranks low-confidence fallback behind better results while allowing it to fill extra slots", () => {
     const strong = annotateTradeFinderPackage(
       packageFrom([player("Send QB", "QB", 68)], [player("Receive WR", "WR", 68)]),
       { userNeeds: ["WR"], opponentNeeds: ["QB"], userArchetype: "Competitor", opponentArchetype: "Competitor" }
@@ -591,7 +591,9 @@ describe("Find Trades generator quality", () => {
     expect(annotated.addresses_my_need).toBe(false);
     expect(annotated.addresses_their_need).toBe(false);
     expect(annotated.quality_tier).toBe("low_confidence");
-    expect(dedupeAndRankTradeFinderPackages([strong, annotated], 4)).not.toContain(annotated);
+    const mixed = dedupeAndRankTradeFinderPackages([strong, annotated], 4);
+    expect(mixed[0]).toBe(strong);
+    expect(mixed).toContain(annotated);
     expect(dedupeAndRankTradeFinderPackages([annotated], 4)).toEqual([annotated]);
   });
 

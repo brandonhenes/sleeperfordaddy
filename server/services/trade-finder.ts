@@ -62,8 +62,14 @@ const MIN_EDGE_SCORE = 42;
 const ANCHOR_EDGE_SCORE = 62;
 const ELITE_EDGE_SCORE = 85;
 const MAJOR_VALUATION_EDGE = MAJOR_RECOMMENDATION_EDGE;
-const TRADE_FINDER_MAX_EVALUATIONS_PER_OPPONENT = 10;
-const TRADE_FINDER_MAX_OPPONENTS = 4;
+const TRADE_FINDER_MAX_EVALUATIONS_PER_OPPONENT = 18;
+const TRADE_FINDER_MAX_OPPONENTS = 6;
+const TRADE_FINDER_MAX_PACKAGES_PER_PARTNER = 6;
+const TRADE_FINDER_MAX_CONSOLIDATION_TEMPLATES = 4;
+const TRADE_FINDER_MAX_PLAYER_PICK_TEMPLATES = 5;
+const TRADE_FINDER_MAX_ROSTER_SPOT_TEMPLATES = 2;
+const TRADE_FINDER_MAX_TIER_DOWN_TEMPLATES = 4;
+const TRADE_FINDER_MAX_RENTAL_TEMPLATES = 3;
 
 const ARCHETYPE_WANTS: Record<string, string> = {
   "Dynasty Juggernaut": "depth maintenance",
@@ -694,7 +700,7 @@ export function dedupeAndRankTradeFinderPackages(
   );
   const betterThanLow = validPackages.filter((pkg) => pkg.quality_tier !== "low_confidence");
   const pool = betterThanLow.length > 0
-    ? betterThanLow
+    ? validPackages
     : validPackages.filter((pkg) => pkg.quality_tier === "low_confidence");
   const effectiveMaxPackages = betterThanLow.length > 0
     ? maxPackages
@@ -718,6 +724,7 @@ export function dedupeAndRankTradeFinderPackages(
       (b.receive_total - b.send_total) - (a.receive_total - a.send_total)
   );
   const selected: TradePackage[] = [];
+  const labelCounts = new Map<string, number>();
 
   for (const pkg of sorted) {
     if (selected.length >= effectiveMaxPackages) break;
@@ -725,6 +732,8 @@ export function dedupeAndRankTradeFinderPackages(
     if (seen.has(key)) continue;
     const type = pkg.opportunity_type ?? "buy_target";
     const typeCount = typeCounts.get(type) ?? 0;
+    const labelCount = labelCounts.get(pkg.label) ?? 0;
+    if (labelCount >= 1 && selected.length < effectiveMaxPackages - 1) continue;
     if (typeCount >= 2 && selected.length < effectiveMaxPackages - 1) continue;
     if (isPickOnlyTradePackage(pkg) && selected.some(isPickOnlyTradePackage)) continue;
     if (
@@ -737,6 +746,7 @@ export function dedupeAndRankTradeFinderPackages(
 
     seen.add(key);
     typeCounts.set(type, typeCount + 1);
+    labelCounts.set(pkg.label, labelCount + 1);
     selected.push(pkg);
   }
 
@@ -745,6 +755,8 @@ export function dedupeAndRankTradeFinderPackages(
       if (selected.length >= effectiveMaxPackages) break;
       const key = packageShapeKey(pkg);
       if (seen.has(key)) continue;
+      const labelCount = labelCounts.get(pkg.label) ?? 0;
+      if (labelCount >= 2) continue;
       if (
         hasMultiAssetPlayerPackage &&
         pkg.trade_type === "1-for-1" &&
@@ -753,6 +765,7 @@ export function dedupeAndRankTradeFinderPackages(
         continue;
       }
       seen.add(key);
+      labelCounts.set(pkg.label, labelCount + 1);
       selected.push(pkg);
     }
   }
@@ -1184,9 +1197,9 @@ export async function generateTradeFinderPackages(
 
   let consolidationGenerated = 0;
   for (const target of oppTargets.filter((asset) => asset.edge_score >= 68)) {
-    if (consolidationGenerated >= 6) break;
-    for (let i = 0; i < userDepth.length && consolidationGenerated < 6; i++) {
-      for (let j = i + 1; j < Math.min(userDepth.length, i + 5) && consolidationGenerated < 6; j++) {
+    if (consolidationGenerated >= TRADE_FINDER_MAX_CONSOLIDATION_TEMPLATES) break;
+    for (let i = 0; i < userDepth.length && consolidationGenerated < TRADE_FINDER_MAX_CONSOLIDATION_TEMPLATES; i++) {
+      for (let j = i + 1; j < Math.min(userDepth.length, i + 5) && consolidationGenerated < TRADE_FINDER_MAX_CONSOLIDATION_TEMPLATES; j++) {
         const first = userDepth[i];
         const second = userDepth[j];
         if (target.edge_score < Math.max(first.edge_score, second.edge_score) + 4) continue;
@@ -1212,7 +1225,7 @@ export async function generateTradeFinderPackages(
 
   let playerPickGenerated = 0;
   for (const target of oppTargets.filter((asset) => asset.edge_score >= 64)) {
-    if (playerPickGenerated >= 8) break;
+    if (playerPickGenerated >= TRADE_FINDER_MAX_PLAYER_PICK_TEMPLATES) break;
     const candidates = userDepth.filter(
       (asset) =>
         asset.player_id !== target.player_id &&
@@ -1220,7 +1233,7 @@ export async function generateTradeFinderPackages(
         asset.edge_score <= target.edge_score - 4
     );
     for (const userPlayer of candidates.slice(0, 5)) {
-      if (playerPickGenerated >= 8) break;
+      if (playerPickGenerated >= TRADE_FINDER_MAX_PLAYER_PICK_TEMPLATES) break;
       const neededPick = userPicks.find((pick) => userPlayer.edge_score + pick.edge_score >= target.edge_score * 0.9);
       if (!neededPick) continue;
       const added = await addStrategicPackage({
@@ -1244,7 +1257,7 @@ export async function generateTradeFinderPackages(
   let rosterSpotGenerated = 0;
   if (userPicks.length > 0) {
     for (const target of oppTargets.filter((asset) => asset.edge_score >= 75)) {
-      if (rosterSpotGenerated >= 4) break;
+      if (rosterSpotGenerated >= TRADE_FINDER_MAX_ROSTER_SPOT_TEMPLATES) break;
       const depthPair = userDepth
         .filter((asset) => asset.edge_score <= target.edge_score - 8)
         .slice(0, 2);
@@ -1271,7 +1284,7 @@ export async function generateTradeFinderPackages(
   if (userWantsFuture || userWindow === "Dead Zone") {
     const sellAnchors = userPlayers.filter((asset) => asset.edge_score >= 75).slice(0, 5);
     for (const outgoing of sellAnchors) {
-      if (tierDownGenerated >= 5) break;
+      if (tierDownGenerated >= TRADE_FINDER_MAX_TIER_DOWN_TEMPLATES) break;
       const anchor = oppPlayers.find(
         (asset) =>
           asset.player_id !== outgoing.player_id &&
@@ -1306,7 +1319,7 @@ export async function generateTradeFinderPackages(
           ((asset.position === "WR" || asset.position === "TE") && (asset.age ?? 0) >= 29))
     );
     for (const target of rentalTargets.slice(0, 4)) {
-      if (rentalGenerated >= 4) break;
+      if (rentalGenerated >= TRADE_FINDER_MAX_RENTAL_TEMPLATES) break;
       const depth = userDepth.find((asset) => asset.edge_score >= 45 && asset.edge_score <= target.edge_score - 6);
       const pick = userPicks[0];
       if (!depth || !pick) continue;
@@ -1731,7 +1744,10 @@ export async function generateTradeFinderPackages(
     .map((pkg) => annotateTradeFinderPackage(pkg, context))
     .filter(shouldSurfaceTradeFinderPackage);
 
-  return dedupeAndRankTradeFinderPackages(qualified, 4);
+  return dedupeAndRankTradeFinderPackages(
+    qualified,
+    TRADE_FINDER_MAX_PACKAGES_PER_PARTNER
+  );
 }
 
 // Main
@@ -1885,7 +1901,10 @@ export async function findTrades(
       .filter((pkg) => !pkg.healthCheck.some((warning) => warning.type === "block"))
       .map((pkg) => annotateTradeFinderPackage(pkg, qualityContext))
       .filter(shouldSurfaceTradeFinderPackage);
-    const packages = dedupeAndRankTradeFinderPackages(evaluatedPackages, 4);
+    const packages = dedupeAndRankTradeFinderPackages(
+      evaluatedPackages,
+      TRADE_FINDER_MAX_PACKAGES_PER_PARTNER
+    );
     if (packages.length === 0) return null;
 
     return {
