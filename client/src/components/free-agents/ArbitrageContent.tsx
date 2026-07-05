@@ -9,8 +9,9 @@ import {
   PositionBadge,
   SegmentedControl,
 } from "../ui";
-import { useFreeAgentGaps, type ArbitrageGap } from "../../hooks/use-arbitrage";
+import { useFreeAgentGaps } from "../../hooks/use-arbitrage";
 import { readStoredUsername } from "../../lib/current-user";
+import type { ArbitrageGap } from "@shared/types";
 
 type SortKey = "score" | "free" | "owned";
 

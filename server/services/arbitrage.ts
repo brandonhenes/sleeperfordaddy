@@ -1,5 +1,6 @@
 import { db } from "../db/connection.js";
 import { sql } from "drizzle-orm";
+import type { ArbitrageGap } from "../../shared/types.js";
 import { getCompositeValues } from "./composite-values.js";
 import { getDynastyLeagueIdsForUserLatestSeason } from "./dynasty-leagues.js";
 
@@ -20,20 +21,6 @@ export function clearArbitrageCache(username?: string) {
 
 // ─── Types ───
 
-export interface ArbitrageGap {
-  player_id: string;
-  full_name: string;
-  position: string;
-  team: string | null;
-  edge_score: number;
-  fc_value: number | null;
-  ktc_value: number | null;
-  dp_value: number | null;
-  owned_leagues: { league_id: string; league_name: string }[];
-  free_leagues: { league_id: string; league_name: string }[];
-  owned_count: number;
-  free_count: number;
-}
 
 // ─── Main ───
 

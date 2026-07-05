@@ -21,8 +21,8 @@ import {
 import { useCurrentUsername } from "../hooks/use-current-user";
 import {
   useMarketSignals,
-  type SignalType,
 } from "../hooks/use-market-signals";
+import type { SignalType } from "@shared/types";
 
 type Tab = "movers" | "signals" | "free-agents";
 type FreeAgentTab = "arbitrage" | "waivers";
