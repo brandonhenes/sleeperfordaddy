@@ -26,16 +26,7 @@ export default function AppShell({
 
   return (
     <CurrentUserProvider value={currentUser}>
-      <div
-        style={{
-          minHeight: "100vh",
-          background: "var(--dark-base)",
-          fontFamily:
-            "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
-          color: "var(--text)",
-          overflowX: "hidden",
-        }}
-      >
+      <div className="edge-app-shell">
         <NavBar username={currentUser.username} />
         <div className="app-shell-content">
           {content}

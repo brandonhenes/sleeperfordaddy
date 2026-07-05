@@ -51,6 +51,13 @@ input {
   -webkit-tap-highlight-color: transparent;
 }
 
+.edge-app-shell {
+  min-height: 100vh;
+  background: var(--dark-base);
+  color: var(--text);
+  overflow-x: hidden;
+}
+
 .app-shell-content {
   width: 100%;
   max-width: 1100px;

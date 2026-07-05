@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { useEnsureUser } from "../hooks/use-ensure-user";
+import { Card, ErrorState } from "./ui";
 
 export interface SyncGateProps {
   username: string;
@@ -8,12 +9,6 @@ export interface SyncGateProps {
   checkingDescription?: string;
   syncingDescription?: string;
 }
-
-const cardStyle = {
-  background: "var(--card)",
-  border: "1px solid var(--border)",
-  borderRadius: 12,
-} as const;
 
 export default function SyncGate({
   username,
@@ -26,27 +21,16 @@ export default function SyncGate({
 
   if (!username) {
     return (
-      <div style={{ ...cardStyle, padding: "48px 24px", textAlign: "center" }}>
-        <p style={{ color: "var(--text-muted)", fontSize: 13, margin: 0 }}>
-          Enter a Sleeper username to load this view.
-        </p>
-      </div>
+      <Card className="edge-state-card">
+        <p>Enter a Sleeper username to load this view.</p>
+      </Card>
     );
   }
 
   if (phase === "checking" || phase === "syncing") {
     return (
-      <div style={{ ...cardStyle, padding: "48px 24px", textAlign: "center" }}>
-        <div
-          style={{
-            fontSize: 14,
-            color: "var(--amber)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 8,
-          }}
-        >
+      <Card className="edge-state-card">
+        <div className="edge-state-kicker">
           <span className="animate-pulse">.</span>
           {phase === "checking"
             ? `Looking up ${username}...`
@@ -54,38 +38,20 @@ export default function SyncGate({
                 syncProgress ? ` (${syncProgress.done}/${syncProgress.total})` : "..."
               }`}
         </div>
-        <p style={{ color: "var(--text-muted)", fontSize: 12, marginTop: 12 }}>
+        <p>
           {phase === "syncing" ? syncingDescription : checkingLabel || checkingDescription}
         </p>
-      </div>
+      </Card>
     );
   }
 
   if (phase === "error") {
     return (
-      <div style={{ ...cardStyle, padding: "48px 24px", textAlign: "center" }}>
-        <p style={{ color: "var(--red)", fontSize: 14, margin: 0 }}>
-          {errorMsg || "Something went wrong."}
-        </p>
-        <button
-          type="button"
-          onClick={retry}
-          style={{
-            marginTop: 16,
-            background: "linear-gradient(135deg, var(--amber), var(--amber-dark))",
-            color: "var(--dark-base)",
-            border: "none",
-            borderRadius: 8,
-            padding: "10px 20px",
-            fontWeight: 700,
-            fontSize: 13,
-            cursor: "pointer",
-            fontFamily: "inherit",
-          }}
-        >
-          Try Again
-        </button>
-      </div>
+      <ErrorState
+        message={errorMsg || "Something went wrong."}
+        actionLabel="Try Again"
+        onAction={retry}
+      />
     );
   }
 

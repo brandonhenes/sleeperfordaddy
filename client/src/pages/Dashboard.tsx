@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import AppShell from "../components/AppShell";
-import { SectionHeader } from "../components/ui";
+import {
+  PageHeader,
+  SectionHeader,
+  SegmentedControl,
+  type SegmentedControlItem,
+} from "../components/ui";
 import {
   useDashboard,
 } from "../hooks/use-dashboard";
@@ -37,105 +42,10 @@ function initialLeagueScope(): DashboardLeagueScope {
   return raw === "redraft" ? "redraft" : "dynasty";
 }
 
-function ScopeToggle({
-  leagueScope,
-  onChange,
-}: {
-  leagueScope: DashboardLeagueScope;
-  onChange: (scope: DashboardLeagueScope) => void;
-}) {
-  return (
-    <div>
-      <div
-        style={{
-          fontSize: 10,
-          fontWeight: 700,
-          color: "var(--text-muted)",
-          marginBottom: 6,
-          letterSpacing: "0.06em",
-          textTransform: "uppercase",
-        }}
-      >
-        League View
-      </div>
-      <div
-        style={{
-          display: "flex",
-          border: "1px solid var(--border)",
-          borderRadius: 8,
-          overflow: "hidden",
-        }}
-      >
-        {([
-          { key: "dynasty" as const, label: "Dynasty" },
-          { key: "redraft" as const, label: "Redraft" },
-        ]).map((option) => {
-          const active = leagueScope === option.key;
-          return (
-            <button
-              key={option.key}
-              onClick={() => onChange(option.key)}
-              style={{
-                background: active ? "var(--amber)" : "var(--card)",
-                color: active ? "var(--dark-base)" : "var(--text-muted)",
-                border: "none",
-                padding: "8px 14px",
-                fontSize: 12,
-                fontWeight: 700,
-                cursor: "pointer",
-                fontFamily: "inherit",
-              }}
-            >
-              {option.label}
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function HeaderBlock({
-  title,
-  subtitle,
-  leagueScope,
-  onScopeChange,
-}: {
-  title: string;
-  subtitle?: string;
-  leagueScope: DashboardLeagueScope;
-  onScopeChange: (scope: DashboardLeagueScope) => void;
-}) {
-  return (
-    <div style={{ padding: "28px 0 8px" }}>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "flex-start",
-          gap: 12,
-          flexWrap: "wrap",
-        }}
-      >
-        <div>
-          <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>{title}</h1>
-          {subtitle && (
-            <p
-              style={{
-                color: "var(--text-muted)",
-                fontSize: 13,
-                marginTop: 4,
-              }}
-            >
-              {subtitle}
-            </p>
-          )}
-        </div>
-        <ScopeToggle leagueScope={leagueScope} onChange={onScopeChange} />
-      </div>
-    </div>
-  );
-}
+const LEAGUE_SCOPE_OPTIONS: SegmentedControlItem<DashboardLeagueScope>[] = [
+  { key: "dynasty", label: "Dynasty" },
+  { key: "redraft", label: "Redraft" },
+];
 
 export default function Dashboard() {
   const { username } = useCurrentUsername();
@@ -155,11 +65,17 @@ export default function Dashboard() {
 
   return (
     <AppShell requireSync>
-      <HeaderBlock
+      <PageHeader
         title={title}
         subtitle={subtitle}
-        leagueScope={leagueScope}
-        onScopeChange={setLeagueScope}
+        actions={
+          <SegmentedControl
+            items={LEAGUE_SCOPE_OPTIONS}
+            value={leagueScope}
+            onChange={setLeagueScope}
+            ariaLabel="League view"
+          />
+        }
       />
       <DashboardReady username={username} leagueScope={leagueScope} />
     </AppShell>

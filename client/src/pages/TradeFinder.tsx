@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import AppShell from "../components/AppShell";
 import FreshnessBar from "../components/FreshnessBar";
+import { PageHeader } from "../components/ui";
 import { useCurrentUsername } from "../hooks/use-current-user";
 import { usePowerRankings } from "../hooks/use-power-rankings";
 import { useTradeSuggestions, useShopPlayer } from "../hooks/use-trade-finder";
@@ -29,12 +30,10 @@ export default function TradeFinder() {
 
   return (
     <AppShell requireSync>
-      <div style={{ padding: "28px 0 8px" }}>
-        <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>Trade Finder</h1>
-        <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 4 }}>
-          Suggested trades and acquisition plans based on roster composition, archetypes, and draft capital
-        </p>
-      </div>
+      <PageHeader
+        title="Trade Finder"
+        subtitle="Suggested trades and acquisition plans based on roster composition, archetypes, and draft capital."
+      />
       <TradeFinderReady username={username} />
     </AppShell>
   );
