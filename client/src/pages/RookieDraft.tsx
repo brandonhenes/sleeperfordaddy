@@ -17,6 +17,7 @@ import MockDraftView from "./draft/MockDraftView";
 import MyBoardView from "./draft/MyBoardView";
 import BigBoardView from "./draft/BigBoardView";
 import PositionalProspectsView from "./draft/PositionalProspectsView";
+import CompareTray from "./draft/CompareTray";
 import {
   POS_FILTERS,
   TIER_CONFIG,
@@ -525,53 +526,12 @@ export default function RookieDraft() {
         <AnalyticsView hitRates={hitRates} rookieADP={rookieADP} />
       )}
 
-      {compareList.length >= 2 && (
-        <div style={{
-          position: "fixed", bottom: 0, left: 0, right: 0,
-          background: "var(--card)", borderTop: "2px solid var(--amber)",
-          padding: "12px 24px", display: "flex", alignItems: "center",
-          justifyContent: "center", gap: 16, zIndex: 100,
-        }}>
-          <span style={{ fontSize: 13, color: "var(--text-muted)" }}>
-            {compareList.length} selected
-          </span>
-          <div style={{ display: "flex", gap: 6 }}>
-            {compareList.map((name) => (
-              <span key={name} style={{
-                padding: "4px 10px", borderRadius: 6, fontSize: 12,
-                background: "var(--dark-base)", border: "1px solid var(--border)",
-                display: "flex", alignItems: "center", gap: 6,
-              }}>
-                {name}
-                <button onClick={() => toggleCompare(name)} style={{
-                  background: "none", border: "none", color: "var(--red)",
-                  cursor: "pointer", fontSize: 10, fontWeight: 800, padding: 0,
-                }}>{"\u2715"}</button>
-              </span>
-            ))}
-          </div>
-          <button
-            onClick={() => setViewMode("compare")}
-            style={{
-              background: "var(--amber)", color: "var(--dark-base)",
-              border: "none", borderRadius: 8, padding: "8px 20px",
-              fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
-            }}
-          >
-            Compare
-          </button>
-          <button
-            onClick={() => setCompareList([])}
-            style={{
-              background: "none", border: "1px solid var(--border)",
-              borderRadius: 8, padding: "8px 16px", fontSize: 12,
-              color: "var(--text-muted)", cursor: "pointer", fontFamily: "inherit",
-            }}
-          >
-            Clear
-          </button>
-        </div>
-      )}
+      <CompareTray
+        compareList={compareList}
+        onRemove={toggleCompare}
+        onCompare={() => setViewMode("compare")}
+        onClear={() => setCompareList([])}
+      />
     </AppShell>
   );
 }
