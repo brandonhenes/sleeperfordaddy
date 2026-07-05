@@ -46,6 +46,7 @@ import {
   loadPlayerUsageStats,
 } from "./scoring-adjustment.js";
 import { tradeAssetKey, validateTradeAssets } from "./trade-asset-validation.js";
+import { scoreAgreement } from "../lib/score-agreement.js";
 
 const ROUND_NAMES: Record<number, string> = {
   1: "1st",
@@ -60,15 +61,6 @@ export interface TradeSearchAsset {
   label: string;
   position: string;
   team: string | null;
-}
-
-function agreementFromScores(scores: Array<number | null>): "high" | "medium" | "low" {
-  const valid = scores.filter((s): s is number => s != null);
-  if (valid.length <= 1) return "high";
-  const spread = Math.max(...valid) - Math.min(...valid);
-  if (spread < 5) return "high";
-  if (spread <= 12) return "medium";
-  return "low";
 }
 
 function normalizePick(asset: TradeAssetInput): { season: string; round: number; tier: "early" | "mid" | "late" } {
@@ -716,7 +708,7 @@ function toEvaluatedAsset(
     scoring_multiplier: null,
     lineup_scarcity_multiplier: null,
     ppg: null,
-    source_agreement: agreementFromScores([edge.fc_score, edge.ktc_score, edge.dp_score]),
+    source_agreement: scoreAgreement([edge.fc_score, edge.ktc_score, edge.dp_score]),
     pick_breakdown: raw.pick_breakdown ?? null,
   };
 }
