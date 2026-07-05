@@ -1,18 +1,18 @@
 import { useState } from "react";
 import { useParams } from "wouter";
 import EdgeScoreBadge from "../EdgeScoreBadge";
-import { PlayerLink } from "../ui";
+import {
+  Card,
+  ErrorState,
+  LoadingSkeleton,
+  PlayerLink,
+  PositionBadge,
+  SegmentedControl,
+} from "../ui";
 import { useFreeAgentGaps, type ArbitrageGap } from "../../hooks/use-arbitrage";
 import { readStoredUsername } from "../../lib/current-user";
-import { posColor } from "../../lib/position-colors";
 
 type SortKey = "score" | "free" | "owned";
-
-const cardStyle = {
-  background: "var(--card)",
-  border: "1px solid var(--border)",
-  borderRadius: 10,
-} as const;
 
 function sortLabel(k: SortKey): string {
   if (k === "score") return "Edge Score";
@@ -53,21 +53,11 @@ function LeagueBadge({ league }: { league: { league_id: string; league_name: str
 
 function GapCard({ gap }: { gap: ArbitrageGap }) {
   return (
-    <div
-      style={{
-        ...cardStyle,
-        padding: "16px 20px",
-        display: "flex",
-        flexDirection: "column",
-        gap: 10,
-      }}
-    >
+    <Card style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <EdgeScoreBadge score={gap.edge_score} size="md" />
         <PlayerLink name={gap.full_name} style={{ fontSize: 15 }} />
-        <span style={{ fontSize: 12, fontWeight: 600, color: posColor(gap.position) }}>
-          {gap.position}
-        </span>
+        <PositionBadge position={gap.position} />
         {gap.team && <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{gap.team}</span>}
       </div>
 
@@ -85,7 +75,7 @@ function GapCard({ gap }: { gap: ArbitrageGap }) {
           <LeagueBadge key={l.league_id} league={l} />
         ))}
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -93,55 +83,18 @@ const SORT_OPTIONS: SortKey[] = ["score", "free", "owned"];
 
 function SortBar({ active, onChange }: { active: SortKey; onChange: (k: SortKey) => void }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+    <div style={{ minWidth: 240 }}>
       <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 600, letterSpacing: 0.5 }}>
         SORT BY
       </span>
-      {SORT_OPTIONS.map((k) => (
-        <button
-          key={k}
-          onClick={() => onChange(k)}
-          style={{
-            background: active === k ? "var(--amber)" : "var(--card)",
-            color: active === k ? "var(--dark-base)" : "var(--text-dim)",
-            border: `1px solid ${active === k ? "var(--amber)" : "var(--border)"}`,
-            borderRadius: 6,
-            padding: "5px 12px",
-            fontSize: 11,
-            fontWeight: 600,
-            cursor: "pointer",
-            letterSpacing: 0.3,
-          }}
-        >
-          {sortLabel(k)}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function LoadingSkeleton() {
-  return (
-    <>
-      {[1, 2, 3, 4].map((i) => (
-        <div key={i} className="animate-pulse" style={{ ...cardStyle, height: 120, marginTop: 12 }} />
-      ))}
-    </>
-  );
-}
-
-function ErrorCard({ message }: { message: string }) {
-  return (
-    <div style={{ ...cardStyle, padding: 40, textAlign: "center", color: "var(--red)" }}>
-      Error: {message}
-    </div>
-  );
-}
-
-function EmptyCard({ label }: { label: string }) {
-  return (
-    <div style={{ ...cardStyle, padding: 40, textAlign: "center", color: "var(--text-muted)" }}>
-      {label}
+      <div style={{ marginTop: 6 }}>
+        <SegmentedControl
+          items={SORT_OPTIONS.map((k) => ({ key: k, label: sortLabel(k) }))}
+          value={active}
+          onChange={onChange}
+          ariaLabel="Free agent gap sort"
+        />
+      </div>
     </div>
   );
 }
@@ -152,13 +105,24 @@ export default function ArbitrageContent({ username: usernameProp }: { username?
   const { data, isLoading, error } = useFreeAgentGaps(username);
   const [sortKey, setSortKey] = useState<SortKey>("score");
 
-  if (isLoading) return <LoadingSkeleton />;
+  if (isLoading) return <LoadingSkeleton label="Loading free-agent gaps" rows={4} />;
 
   const gaps = data ? sorted(data, sortKey) : [];
 
-  if (error) return <ErrorCard message={(error as Error).message} />;
+  if (error) {
+    return (
+      <ErrorState
+        title="Could not load free-agent gaps"
+        message={(error as Error).message}
+      />
+    );
+  }
   if (gaps.length === 0) {
-    return <EmptyCard label="No free agent gaps found - your rosters are fully covered" />;
+    return (
+      <Card className="edge-state-card">
+        <p>No free agent gaps found. Your rosters are fully covered.</p>
+      </Card>
+    );
   }
 
   return (

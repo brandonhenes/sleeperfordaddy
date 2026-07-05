@@ -2,28 +2,21 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "wouter";
 import EdgeScoreBadge from "../EdgeScoreBadge";
 import FreshnessBar from "../FreshnessBar";
-import { PlayerLink } from "../ui";
+import {
+  Card,
+  ErrorState,
+  LoadingSkeleton,
+  PlayerLink,
+  PositionBadge,
+  ResponsiveTable,
+  SegmentedControl,
+  type ResponsiveTableColumn,
+} from "../ui";
 import { useOverview } from "../../hooks/use-sleeper";
 import { useWaiverWire, type WaiverPlayer } from "../../hooks/use-waiver-wire";
 import { readStoredUsername } from "../../lib/current-user";
-import { posColor } from "../../lib/position-colors";
 
 type PosFilter = "ALL" | "QB" | "RB" | "WR" | "TE";
-
-const cardStyle = {
-  background: "var(--card)",
-  border: "1px solid var(--border)",
-  borderRadius: 10,
-} as const;
-
-const thStyle = {
-  textAlign: "left" as const,
-  padding: "10px 12px",
-  fontSize: 11,
-  fontWeight: 600 as const,
-  color: "var(--text-muted)",
-  letterSpacing: 0.5,
-};
 
 function LeagueSelector({
   leagues,
@@ -35,7 +28,7 @@ function LeagueSelector({
   onChange: (id: string) => void;
 }) {
   return (
-    <div style={{ ...cardStyle, padding: 16, marginTop: 16 }}>
+    <Card className="mt-4">
       <select
         value={selected}
         onChange={(e) => onChange(e.target.value)}
@@ -52,118 +45,159 @@ function LeagueSelector({
         }}
       >
         <option value="" disabled>Select a league...</option>
-        {leagues.map((l) => (
-          <option key={l.league_id} value={l.league_id}>{l.name}</option>
+        {leagues.map((league) => (
+          <option key={league.league_id} value={league.league_id}>
+            {league.name}
+          </option>
         ))}
       </select>
+    </Card>
+  );
+}
+
+function PlayerCell({ player }: { player: WaiverPlayer }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+      <PlayerLink name={player.full_name} />
+      {player.hidden_gem && (
+        <span
+          style={{
+            fontSize: 9,
+            fontWeight: 800,
+            padding: "1px 5px",
+            borderRadius: 3,
+            background: "rgba(245,158,11,0.15)",
+            color: "var(--amber)",
+            letterSpacing: 0.5,
+          }}
+        >
+          GEM
+        </span>
+      )}
     </div>
   );
 }
 
+function AgreementLabel({ value }: { value: WaiverPlayer["source_agreement"] }) {
+  return (
+    <span
+      style={{
+        fontSize: 10,
+        fontWeight: 700,
+        color: value === "high" ? "#22c55e" : value === "medium" ? "#eab308" : "#ef4444",
+      }}
+    >
+      {value.toUpperCase()}
+    </span>
+  );
+}
+
+function CurveLabel({ zone }: { zone: string }) {
+  return (
+    <span
+      style={{
+        fontSize: 10,
+        fontWeight: 600,
+        color: zone === "Ascent" ? "#22c55e" : zone === "Peak" ? "#f59e0b" : "#ef4444",
+      }}
+    >
+      {zone}
+    </span>
+  );
+}
+
 function WaiverTable({ players, filter }: { players: WaiverPlayer[]; filter: PosFilter }) {
-  const filtered = filter === "ALL" ? players : players.filter((p) => p.position === filter);
+  const filtered = filter === "ALL" ? players : players.filter((player) => player.position === filter);
+  const columns: ResponsiveTableColumn<WaiverPlayer>[] = [
+    {
+      key: "player",
+      header: "Player",
+      render: (player) => <PlayerCell player={player} />,
+    },
+    {
+      key: "position",
+      header: "Pos",
+      render: (player) => <PositionBadge position={player.position} />,
+    },
+    {
+      key: "team",
+      header: "Team",
+      render: (player) => <span style={{ color: "var(--text-muted)" }}>{player.team}</span>,
+    },
+    {
+      key: "age",
+      header: "Age",
+      align: "right",
+      render: (player) => <span style={{ color: "var(--text-dim)" }}>{player.age ?? "-"}</span>,
+    },
+    {
+      key: "edge",
+      header: "Edge",
+      align: "right",
+      render: (player) => <EdgeScoreBadge score={player.edge_score} />,
+    },
+    {
+      key: "fc",
+      header: "FC",
+      align: "right",
+      render: (player) => <span style={{ color: "var(--text-dim)" }}>{player.fc_score != null ? player.fc_score.toFixed(1) : "-"}</span>,
+    },
+    {
+      key: "ktc",
+      header: "KTC",
+      align: "right",
+      render: (player) => <span style={{ color: "var(--text-dim)" }}>{player.ktc_score != null ? player.ktc_score.toFixed(1) : "-"}</span>,
+    },
+    {
+      key: "dp",
+      header: "DP",
+      align: "right",
+      render: (player) => <span style={{ color: "var(--text-dim)" }}>{player.dp_score != null ? player.dp_score.toFixed(1) : "-"}</span>,
+    },
+    {
+      key: "agreement",
+      header: "Agreement",
+      align: "right",
+      render: (player) => <AgreementLabel value={player.source_agreement} />,
+    },
+    {
+      key: "curve",
+      header: "Curve",
+      align: "right",
+      render: (player) => <CurveLabel zone={player.age_curve.zone} />,
+    },
+  ];
 
   if (filtered.length === 0) {
     return (
-      <div style={{ ...cardStyle, padding: 40, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>
-        No free agents found{filter !== "ALL" ? ` at ${filter}` : ""}
-      </div>
+      <Card className="edge-state-card">
+        <p>No free agents found{filter !== "ALL" ? ` at ${filter}` : ""}.</p>
+      </Card>
     );
   }
 
   return (
-    <div style={{ ...cardStyle, overflow: "auto" }}>
-      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-        <thead>
-          <tr style={{ borderBottom: "1px solid var(--border)" }}>
-            {["Player", "Pos", "Team", "Age", "Edge", "FC", "KTC", "DP", "Agreement", "Curve"].map((h) => (
-              <th key={h} style={thStyle}>{h.toUpperCase()}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {filtered.map((p) => (
-            <tr key={p.player_id} style={{ borderBottom: "1px solid var(--border)" }}>
-              <td style={{ padding: "10px 12px" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <PlayerLink name={p.full_name} />
-                  {p.hidden_gem && (
-                    <span
-                      style={{
-                        fontSize: 9,
-                        fontWeight: 800,
-                        padding: "1px 5px",
-                        borderRadius: 3,
-                        background: "rgba(245,158,11,0.15)",
-                        color: "var(--amber)",
-                        letterSpacing: 0.5,
-                      }}
-                    >
-                      GEM
-                    </span>
-                  )}
-                </div>
-              </td>
-              <td style={{ padding: "10px 12px", color: posColor(p.position), fontWeight: 600 }}>
-                {p.position}
-              </td>
-              <td style={{ padding: "10px 12px", color: "var(--text-muted)" }}>{p.team}</td>
-              <td style={{ padding: "10px 12px", color: "var(--text-dim)" }}>{p.age ?? "-"}</td>
-              <td style={{ padding: "10px 12px" }}>
-                <EdgeScoreBadge score={p.edge_score} />
-              </td>
-              <td style={{ padding: "10px 12px", color: "var(--text-dim)" }}>
-                {p.fc_score != null ? p.fc_score.toFixed(1) : "-"}
-              </td>
-              <td style={{ padding: "10px 12px", color: "var(--text-dim)" }}>
-                {p.ktc_score != null ? p.ktc_score.toFixed(1) : "-"}
-              </td>
-              <td style={{ padding: "10px 12px", color: "var(--text-dim)" }}>
-                {p.dp_score != null ? p.dp_score.toFixed(1) : "-"}
-              </td>
-              <td style={{ padding: "10px 12px" }}>
-                <span
-                  style={{
-                    fontSize: 10,
-                    fontWeight: 700,
-                    color: p.source_agreement === "high" ? "#22c55e" : p.source_agreement === "medium" ? "#eab308" : "#ef4444",
-                  }}
-                >
-                  {p.source_agreement.toUpperCase()}
-                </span>
-              </td>
-              <td style={{ padding: "10px 12px" }}>
-                <span
-                  style={{
-                    fontSize: 10,
-                    fontWeight: 600,
-                    color: p.age_curve.zone === "Ascent" ? "#22c55e" : p.age_curve.zone === "Peak" ? "#f59e0b" : "#ef4444",
-                  }}
-                >
-                  {p.age_curve.zone}
-                </span>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <ResponsiveTable
+      rows={filtered}
+      columns={columns}
+      getRowKey={(player) => player.player_id}
+    />
   );
 }
 
 export default function WaiverContent({ username: usernameProp }: { username?: string }) {
   const params = useParams<{ username: string }>();
   const username = usernameProp ?? params.username ?? readStoredUsername();
-  const { data: overview, isLoading: overviewLoading } = useOverview(username);
+  const { data: overview, isLoading: overviewLoading, error: overviewError } = useOverview(username);
   const [selectedLeagueId, setSelectedLeagueId] = useState("");
   const [posFilter, setPosFilter] = useState<PosFilter>("ALL");
 
   const leagues = useMemo(() => {
     const rows: { league_id: string; name: string }[] = [];
     if (overview?.league_groups) {
-      for (const g of overview.league_groups) {
-        if (g.leagues.length > 0) {
-          rows.push({ league_id: g.leagues[g.leagues.length - 1], name: g.name });
+      for (const group of overview.league_groups) {
+        if (group.leagues.length > 0) {
+          rows.push({ league_id: group.leagues[group.leagues.length - 1], name: group.name });
         }
       }
     }
@@ -176,19 +210,28 @@ export default function WaiverContent({ username: usernameProp }: { username?: s
     }
   }, [leagues, selectedLeagueId]);
 
-  const { data: waiverData, isLoading: waiverLoading } = useWaiverWire(selectedLeagueId);
+  const { data: waiverData, isLoading: waiverLoading, error: waiverError } = useWaiverWire(selectedLeagueId);
   const players = waiverData?.players ?? [];
   const warning = waiverData?.warning ?? null;
 
   if (overviewLoading) {
-    return <div className="animate-pulse" style={{ ...cardStyle, height: 60, marginTop: 16 }} />;
+    return <LoadingSkeleton label="Loading leagues" rows={1} />;
+  }
+
+  if (overviewError) {
+    return (
+      <ErrorState
+        title="Could not load leagues"
+        message={(overviewError as Error).message}
+      />
+    );
   }
 
   if (leagues.length === 0) {
     return (
-      <div style={{ ...cardStyle, padding: 40, marginTop: 16, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>
-        No leagues found. Sync your account first.
-      </div>
+      <Card className="edge-state-card mt-4">
+        <p>No leagues found. Sync your account first.</p>
+      </Card>
     );
   }
 
@@ -197,33 +240,22 @@ export default function WaiverContent({ username: usernameProp }: { username?: s
       <FreshnessBar leagueId={selectedLeagueId || undefined} />
       <LeagueSelector leagues={leagues} selected={selectedLeagueId} onChange={setSelectedLeagueId} />
 
-      <div style={{ display: "flex", gap: 6, marginTop: 12, flexWrap: "wrap" }}>
-        {(["ALL", "QB", "RB", "WR", "TE"] as PosFilter[]).map((pos) => (
-          <button
-            key={pos}
-            onClick={() => setPosFilter(pos)}
-            style={{
-              background: posFilter === pos ? "var(--amber)" : "var(--card)",
-              color: posFilter === pos ? "var(--dark-base)" : "var(--text-dim)",
-              border: `1px solid ${posFilter === pos ? "var(--amber)" : "var(--border)"}`,
-              borderRadius: 6,
-              padding: "6px 14px",
-              fontSize: 12,
-              fontWeight: 600,
-              cursor: "pointer",
-            }}
-          >
-            {pos}
-          </button>
-        ))}
+      <div style={{ marginTop: 12 }}>
+        <SegmentedControl
+          items={(["ALL", "QB", "RB", "WR", "TE"] as PosFilter[]).map((pos) => ({
+            key: pos,
+            label: pos,
+          }))}
+          value={posFilter}
+          onChange={setPosFilter}
+          ariaLabel="Position filter"
+        />
       </div>
 
       {warning && (
-        <div
+        <Card
           style={{
-            ...cardStyle,
             marginTop: 12,
-            padding: 14,
             borderColor: "#f59e0b",
             background: "rgba(245,158,11,0.12)",
             color: "#fde68a",
@@ -231,16 +263,17 @@ export default function WaiverContent({ username: usernameProp }: { username?: s
           }}
         >
           {warning}
-        </div>
+        </Card>
       )}
 
       <div style={{ marginTop: 12 }}>
-        {waiverLoading ? (
-          <div style={{ display: "grid", gap: 12 }}>
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="animate-pulse" style={{ ...cardStyle, height: 60 }} />
-            ))}
-          </div>
+        {waiverError ? (
+          <ErrorState
+            title="Could not load waiver wire"
+            message={(waiverError as Error).message}
+          />
+        ) : waiverLoading ? (
+          <LoadingSkeleton label="Loading waiver wire" rows={3} />
         ) : (
           <WaiverTable players={players} filter={posFilter} />
         )}
