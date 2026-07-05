@@ -1,28 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
+import type { BuyOpportunity, SellCandidate } from "@shared/types";
 import { apiFetch } from "../lib/api";
-
-export interface SellCandidate {
-  player_name: string;
-  position: string | null;
-  team: string | null;
-  league_count: number;
-  total_leagues: number;
-  composite_tag: string | null;
-  edge_score: number | null;
-  trend_30day: number | null;
-}
-
-export interface BuyOpportunity {
-  player_name: string;
-  direction: string;
-  position: string | null;
-  team: string | null;
-  edge_score: number | null;
-  rationale: string | null;
-  confidence: number | null;
-  owned_leagues: number;
-  total_leagues: number;
-}
 
 export function useSellCandidates(username: string | undefined) {
   return useQuery<SellCandidate[]>({

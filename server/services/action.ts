@@ -1,5 +1,6 @@
 import { db } from "../db/connection.js";
 import { sql } from "drizzle-orm";
+import type { BuyOpportunity, SellCandidate } from "../../shared/types.js";
 import { getDynastyLeagueIdsForUserLatestSeason } from "./dynasty-leagues.js";
 import { getCompositeValues, getGlobalScaleParams } from "./composite-values.js";
 
@@ -25,29 +26,6 @@ export function clearActionCache(username?: string) {
 }
 
 // ─── Types ───
-
-export interface SellCandidate {
-  player_name: string;
-  position: string | null;
-  team: string | null;
-  league_count: number;
-  total_leagues: number;
-  composite_tag: string | null;
-  edge_score: number | null;
-  trend_30day: number | null;
-}
-
-export interface BuyOpportunity {
-  player_name: string;
-  direction: string;
-  position: string | null;
-  team: string | null;
-  edge_score: number | null;
-  rationale: string | null;
-  confidence: number | null;
-  owned_leagues: number;
-  total_leagues: number;
-}
 
 interface ExposureRow {
   player_id: string;

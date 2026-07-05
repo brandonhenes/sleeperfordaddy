@@ -16,12 +16,8 @@ import {
 } from "../components/ui";
 import { dirColor } from "../lib/position-colors";
 import { useCurrentUsername } from "../hooks/use-current-user";
-import {
-  useSellCandidates,
-  useBuyOpportunities,
-  type SellCandidate,
-  type BuyOpportunity,
-} from "../hooks/use-action";
+import { useSellCandidates, useBuyOpportunities } from "../hooks/use-action";
+import type { BuyOpportunity, SellCandidate } from "@shared/types";
 
 function exposureLabel(player: SellCandidate): string {
   const exposure = player.total_leagues > 0
