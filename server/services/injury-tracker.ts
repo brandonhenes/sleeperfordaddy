@@ -1,6 +1,7 @@
 import { db } from "../db/connection.js";
 import { sql } from "drizzle-orm";
 import type { InjuredPlayerView, BuyingWindow } from "../../shared/types.js";
+import { getDynastyLeagueIdsForUserLatestSeason } from "./dynasty-leagues.js";
 
 // ─── Helpers ───
 const DEFAULT_AVG_WEEKS = 4;
@@ -153,6 +154,10 @@ export async function getInjuredPlayers(
 ): Promise<InjuredPlayerView[]> {
   const userId = await resolveUserId(userIdOrUsername);
   if (!userId) return [];
+  const leagueIds = await getDynastyLeagueIdsForUserLatestSeason(userId);
+  if (leagueIds.length === 0) return [];
+  const inClause = sql.join(leagueIds.map((id) => sql`${id}`), sql`, `);
+
   const rows = await db.execute(sql`
     SELECT
       it.player_name AS full_name,
@@ -177,10 +182,10 @@ export async function getInjuredPlayers(
     JOIN players_master pm
       ON LOWER(pm.full_name) = LOWER(it.player_name)
      AND pm.position = it.position
-    JOIN roster_players rp ON rp.player_id = pm.player_id
-    JOIN user_leagues ul
-     ON ul.league_id = rp.league_id
-     AND ul.user_id = ${userId}
+    JOIN roster_players rp
+      ON rp.player_id = pm.player_id
+     AND rp.owner_id = ${userId}
+     AND rp.league_id IN (${inClause})
     WHERE it.status = 'active'
       AND (
         it.estimated_healthy_date IS NOT NULL
@@ -239,8 +244,8 @@ export async function getInjuredPlayers(
       estimated_return_week: r.expected_return_weeks,
       estimated_return_date: estimateReturnDate(r.injury_date, r.expected_return_weeks ?? DEFAULT_AVG_WEEKS),
       league_count: r.league_count,
-      total_leagues: r.league_count,
-      exposure_pct: 100,
+      total_leagues: leagueIds.length,
+      exposure_pct: Math.round((r.league_count / leagueIds.length) * 100),
       current_edge_score: 0,
       pre_injury_edge_score: null,
       value_change_pct: null,

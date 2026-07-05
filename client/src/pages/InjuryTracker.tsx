@@ -2,14 +2,22 @@ import { useState } from "react";
 import { useParams } from "wouter";
 import AppShell from "../components/AppShell";
 import FreshnessBar from "../components/FreshnessBar";
-import { PlayerLink } from "../components/ui";
-import { posColor } from "../lib/position-colors";
-import { useInjuredPlayers, useBuyingWindows } from "../hooks/use-injury-tracker";
-import type { InjuredPlayerView, BuyingWindow } from "@shared/types";
+import {
+  Card,
+  ErrorState,
+  LoadingSkeleton,
+  PageHeader,
+  PlayerLink,
+  PositionBadge,
+  ResponsiveTable,
+  SegmentedControl,
+  type ResponsiveTableColumn,
+  type SegmentedControlItem,
+} from "../components/ui";
+import { useBuyingWindows, useInjuredPlayers } from "../hooks/use-injury-tracker";
+import type { BuyingWindow, InjuredPlayerView } from "@shared/types";
 
 type Tab = "injuries" | "buying";
-
-// ─── Status Helpers ───
 
 function statusColor(status: string): string {
   const s = status.toLowerCase();
@@ -29,7 +37,7 @@ function statusLabel(status: string): string {
 function formatHealthyDate(dateValue: string | null | undefined): string {
   if (!dateValue) return "-";
   const date = new Date(dateValue);
-  if (isNaN(date.getTime())) return "-";
+  if (Number.isNaN(date.getTime())) return "-";
   return date.toLocaleDateString("en-US", { month: "short", year: "numeric" });
 }
 
@@ -37,267 +45,310 @@ function formatReturnTimeline(player: InjuredPlayerView): string {
   if (player.return_label) return player.return_label;
   if (player.expected_return_date) {
     const date = new Date(player.expected_return_date);
-    if (!isNaN(date.getTime())) {
+    if (!Number.isNaN(date.getTime())) {
       return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
     }
   }
   if (player.estimated_return_date) {
     const date = new Date(player.estimated_return_date);
-    if (!isNaN(date.getTime())) {
+    if (!Number.isNaN(date.getTime())) {
       return date.toLocaleDateString("en-US", { month: "short", year: "numeric" });
     }
   }
   return "Unknown";
 }
 
-// ─── Risk Summary ───
+function StatusBadge({ status }: { status: string }) {
+  const color = statusColor(status);
+
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        minHeight: 24,
+        borderRadius: 6,
+        background: `${color}22`,
+        color,
+        padding: "0 8px",
+        fontSize: 11,
+        fontWeight: 800,
+      }}
+    >
+      {statusLabel(status)}
+    </span>
+  );
+}
+
+function RiskMetric({
+  label,
+  value,
+  color,
+}: {
+  label: string;
+  value: string | number;
+  color?: string;
+}) {
+  return (
+    <div>
+      <div className="font-mono" style={{ fontSize: 22, fontWeight: 800, color }}>
+        {value}
+      </div>
+      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>{label}</div>
+    </div>
+  );
+}
 
 function RiskSummary({ injuries }: { injuries: InjuredPlayerView[] }) {
   const activeCount = injuries.length;
-  const totalSlots = injuries.reduce((s, p) => s + p.league_count, 0);
+  const totalSlots = injuries.reduce((sum, player) => sum + player.league_count, 0);
   const highest = injuries.length > 0
     ? injuries.reduce((a, b) => (b.league_count > a.league_count ? b : a))
     : null;
 
   return (
-    <div
+    <Card
       style={{
-        background: "var(--card)",
-        border: "1px solid var(--border)",
-        borderRadius: 10,
-        padding: "16px 20px",
         marginTop: 16,
         display: "flex",
+        alignItems: "center",
         gap: 24,
         flexWrap: "wrap",
       }}
     >
-      <div>
-        <div style={{ fontSize: 22, fontWeight: 800, color: "#ef4444" }}>{activeCount}</div>
-        <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Active injuries</div>
-      </div>
-      <div>
-        <div style={{ fontSize: 22, fontWeight: 800, color: "var(--amber)" }}>{totalSlots}</div>
-        <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Affected league slots</div>
-      </div>
-      <div>
-        <div style={{ fontSize: 22, fontWeight: 800 }}>{injuries.length}</div>
-        <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Total injured</div>
-      </div>
+      <RiskMetric label="Active injuries" value={activeCount} color="#ef4444" />
+      <RiskMetric label="Affected league slots" value={totalSlots} color="var(--amber)" />
+      <RiskMetric label="Total injured" value={injuries.length} />
       {highest && (
         <div style={{ marginLeft: "auto", textAlign: "right" }}>
           <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Highest exposure risk</div>
-          <div style={{ fontSize: 13, fontWeight: 600 }}>
+          <div style={{ fontSize: 13, fontWeight: 700 }}>
             {highest.full_name} ({highest.league_count} leagues)
           </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function RecoveryPace({ player }: { player: InjuredPlayerView }) {
+  const color = player.recovery_pace === "Ahead"
+    ? "#22c55e"
+    : player.recovery_pace === "Behind"
+    ? "#ef4444"
+    : "var(--text-dim)";
+
+  return (
+    <div>
+      <span style={{ color, fontWeight: 700 }}>{player.recovery_pace ?? "-"}</span>
+      {player.avg_recovery_weeks != null && (
+        <div style={{ fontSize: 10, color: "var(--text-muted)" }}>
+          avg {player.avg_recovery_weeks} wks
         </div>
       )}
     </div>
   );
 }
 
-// ─── Injury Table ───
-
 function InjuryTable({ injuries }: { injuries: InjuredPlayerView[] }) {
-  if (injuries.length === 0) {
-    return (
-      <div style={{ ...cardStyle, padding: 40, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>
-        No injured players on your rosters
-      </div>
-    );
-  }
+  const columns: ResponsiveTableColumn<InjuredPlayerView>[] = [
+    {
+      key: "player",
+      header: "Player",
+      render: (player) => <PlayerLink name={player.full_name} />,
+    },
+    {
+      key: "position",
+      header: "Pos",
+      render: (player) => <PositionBadge position={player.position} />,
+    },
+    {
+      key: "team",
+      header: "Team",
+      render: (player) => <span style={{ color: "var(--text-muted)" }}>{player.team}</span>,
+    },
+    {
+      key: "injury",
+      header: "Injury",
+      render: (player) => (
+        <div style={{ display: "grid", gap: 4 }}>
+          <span>{player.injury_type ?? player.injury_body_part ?? "Unknown"}</span>
+          <StatusBadge status={player.status ?? player.injury_status} />
+        </div>
+      ),
+    },
+    {
+      key: "healthy",
+      header: "Healthy By",
+      render: (player) => (
+        <span style={{ color: "var(--text-dim)" }}>
+          {formatHealthyDate(player.estimated_healthy_date)}
+        </span>
+      ),
+    },
+    {
+      key: "return",
+      header: "Return",
+      render: (player) => (
+        <span style={{ color: "var(--text-dim)" }}>
+          {player.return_label ?? "Unknown"}
+        </span>
+      ),
+    },
+    {
+      key: "pace",
+      header: "Pace",
+      render: (player) => <RecoveryPace player={player} />,
+    },
+    {
+      key: "leagues",
+      header: "Leagues",
+      align: "right",
+      render: (player) => (
+        <span className="font-mono" style={{ fontWeight: 800 }}>
+          {player.league_count}
+        </span>
+      ),
+    },
+    {
+      key: "notes",
+      header: "Notes",
+      render: (player) => (
+        <span style={{ color: "var(--text-dim)", maxWidth: 320, display: "inline-block" }}>
+          {player.notes ?? "-"}
+        </span>
+      ),
+    },
+  ];
 
   return (
-    <div style={{ ...cardStyle, overflow: "auto" }}>
-      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-        <thead>
-          <tr style={{ borderBottom: "1px solid var(--border)" }}>
-            {["Player", "Pos", "Team", "Injury", "Healthy By", "Return", "Pace", "Leagues", "Notes"].map((h) => (
-              <th
-                key={h}
-                style={{
-                  textAlign: "left",
-                  padding: "10px 12px",
-                  fontSize: 11,
-                  fontWeight: 600,
-                  color: "var(--text-muted)",
-                  letterSpacing: 0.5,
-                }}
-              >
-                {h.toUpperCase()}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {injuries.map((p) => (
-            <tr key={p.player_id} style={{ borderBottom: "1px solid var(--border)" }}>
-              <td style={{ padding: "10px 12px" }}>
-                <PlayerLink name={p.full_name} />
-              </td>
-              <td style={{ padding: "10px 12px", color: posColor(p.position), fontWeight: 600 }}>
-                {p.position}
-              </td>
-              <td style={{ padding: "10px 12px", color: "var(--text-muted)" }}>{p.team}</td>
-              <td style={{ padding: "10px 12px", color: "var(--text-dim)" }}>
-                {p.injury_type ?? p.injury_body_part ?? "Unknown"}
-              </td>
-              <td style={{ padding: "10px 12px", color: "var(--text-dim)" }}>
-                {formatHealthyDate(p.estimated_healthy_date)}
-              </td>
-              <td style={{ padding: "10px 12px", color: "var(--text-dim)" }}>{p.return_label ?? "Unknown"}</td>
-              <td style={{ padding: "10px 12px" }}>
-                <div>
-                  <span style={{ color: p.recovery_pace === "Ahead" ? "#22c55e" : p.recovery_pace === "Behind" ? "#ef4444" : "var(--text-dim)", fontWeight: 600 }}>
-                    {p.recovery_pace ?? "-"}
-                  </span>
-                  {p.avg_recovery_weeks != null && (
-                    <div style={{ fontSize: 10, color: "var(--text-muted)" }}>
-                      avg {p.avg_recovery_weeks} wks
-                    </div>
-                  )}
-                </div>
-              </td>
-              <td style={{ padding: "10px 12px", fontWeight: 600 }}>
-                {p.league_count}
-              </td>
-              <td style={{ padding: "10px 12px", color: "var(--text-dim)", maxWidth: 320 }}>
-                {p.notes ?? "-"}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <ResponsiveTable
+      rows={injuries}
+      columns={columns}
+      getRowKey={(player) => player.player_id}
+      emptyLabel="No injured players on your rosters."
+    />
   );
 }
 
-// ─── Buying Window Card ───
-
 function WindowCard({ window }: { window: BuyingWindow }) {
-  const p = window.player;
+  const player = window.player;
+  const status = player.status ?? player.injury_status;
 
   return (
-    <div style={{ ...cardStyle, padding: "16px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
-      {/* Header row */}
+    <Card style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <span
+          className="font-mono"
           style={{
             display: "inline-flex",
             alignItems: "center",
             justifyContent: "center",
-            minWidth: 36,
-            height: 28,
-            borderRadius: 5,
+            minWidth: 38,
+            minHeight: 30,
+            borderRadius: 6,
+            background: "var(--amber)",
+            color: "var(--dark-base)",
             fontSize: 14,
-            fontWeight: 700,
-            background: "#f59e0b",
-            color: "#000",
+            fontWeight: 900,
           }}
-          className="font-mono"
         >
           {window.opportunity_score}
         </span>
-        <PlayerLink name={p.full_name} style={{ fontSize: 15 }} />
-        <span style={{ fontSize: 12, fontWeight: 600, color: posColor(p.position) }}>{p.position}</span>
-        {p.team && <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{p.team}</span>}
+        <PlayerLink name={player.full_name} style={{ fontSize: 15 }} />
+        <PositionBadge position={player.position} />
+        {player.team && <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{player.team}</span>}
         <span
           style={{
             marginLeft: "auto",
-            padding: "2px 8px",
-            borderRadius: 4,
+            padding: "3px 8px",
+            borderRadius: 6,
             fontSize: 11,
-            fontWeight: 700,
-            background: statusColor(p.injury_status) + "22",
-            color: statusColor(p.injury_status),
+            fontWeight: 800,
+            background: `${statusColor(status)}22`,
+            color: statusColor(status),
           }}
         >
-          {p.is_buying_window ? "BUY WINDOW" : statusLabel(p.status ?? p.injury_status)} - {p.injury_type ?? p.injury_body_part ?? "Unknown"}
+          {player.is_buying_window ? "BUY WINDOW" : statusLabel(status)} - {player.injury_type ?? player.injury_body_part ?? "Unknown"}
         </span>
       </div>
 
-      {/* Stats row */}
       <div style={{ display: "flex", gap: 20, fontSize: 13, flexWrap: "wrap" }}>
-        {p.fc_current != null && (
+        {player.fc_current != null && (
           <div>
             <span style={{ color: "var(--text-muted)" }}>Current FC: </span>
-            <span style={{ fontWeight: 700 }}>{p.fc_current}</span>
+            <span style={{ fontWeight: 800 }}>{player.fc_current}</span>
           </div>
         )}
-        {p.fc_at_injury != null && (
+        {player.fc_at_injury != null && (
           <div>
             <span style={{ color: "var(--text-muted)" }}>FC at Injury: </span>
-            <span style={{ fontWeight: 700 }}>{p.fc_at_injury}</span>
+            <span style={{ fontWeight: 800 }}>{player.fc_at_injury}</span>
           </div>
         )}
-        {p.value_change_pct != null && (
+        {player.value_change_pct != null && (
           <div>
             <span style={{ color: "var(--text-muted)" }}>Value Change: </span>
-            <span style={{ color: p.value_change_pct <= -30 ? "#ef4444" : "var(--text)", fontWeight: 700 }}>
-              {p.value_change_pct > 0 ? "+" : ""}{p.value_change_pct.toFixed(1)}%
+            <span style={{ color: player.value_change_pct <= -30 ? "#ef4444" : "var(--text)", fontWeight: 800 }}>
+              {player.value_change_pct > 0 ? "+" : ""}
+              {player.value_change_pct.toFixed(1)}%
             </span>
           </div>
         )}
         <div>
           <span style={{ color: "var(--text-muted)" }}>Return: </span>
-          <span style={{ fontWeight: 600 }}>{formatReturnTimeline(p)}</span>
+          <span style={{ fontWeight: 700 }}>{formatReturnTimeline(player)}</span>
         </div>
       </div>
 
-      {/* Reasons */}
-      {window.buy_reasons.length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12 }}>
-          {window.buy_reasons.map((r, i) => (
-            <span key={i} style={{ color: "#22c55e" }}>+ {r}</span>
+      {(window.buy_reasons.length > 0 || window.risk_factors.length > 0) && (
+        <div style={{ display: "grid", gap: 4, fontSize: 12 }}>
+          {window.buy_reasons.map((reason) => (
+            <span key={reason} style={{ color: "#22c55e" }}>
+              + {reason}
+            </span>
           ))}
-          {window.risk_factors.map((r, i) => (
-            <span key={`r-${i}`} style={{ color: "#f97316" }}>! {r}</span>
+          {window.risk_factors.map((risk) => (
+            <span key={risk} style={{ color: "#f97316" }}>
+              ! {risk}
+            </span>
           ))}
         </div>
       )}
 
-      {/* Target leagues */}
       {window.leagues_to_target.length > 0 && (
         <div>
-          <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6, fontWeight: 600 }}>
+          <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6, fontWeight: 800 }}>
             TARGET IN THESE LEAGUES
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-            {window.leagues_to_target.map((l) => (
+            {window.leagues_to_target.map((league) => (
               <a
-                key={l.league_id}
-                href={`https://sleeper.com/leagues/${l.league_id}`}
+                key={league.league_id}
+                href={`https://sleeper.com/leagues/${league.league_id}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 style={{
                   display: "inline-block",
-                  padding: "3px 10px",
+                  padding: "4px 10px",
                   borderRadius: 6,
                   fontSize: 11,
-                  fontWeight: 600,
+                  fontWeight: 700,
                   background: "rgba(96,165,250,0.12)",
                   color: "var(--blue)",
                   textDecoration: "none",
                   border: "1px solid rgba(96,165,250,0.2)",
                 }}
               >
-                {l.league_name} ({l.owner_display_name})
+                {league.league_name} ({league.owner_display_name})
               </a>
             ))}
           </div>
         </div>
       )}
-    </div>
+    </Card>
   );
 }
-
-// ─── Page ───
-
-const cardStyle = {
-  background: "var(--card)",
-  border: "1px solid var(--border)",
-  borderRadius: 10,
-} as const;
 
 export default function InjuryTracker() {
   const { username } = useParams<{ username: string }>();
@@ -307,69 +358,58 @@ export default function InjuryTracker() {
 
   const isLoading = activeTab === "injuries" ? injuriesLoading : windowsLoading;
   const error = activeTab === "injuries" ? injuriesError : windowsError;
+  const tabs: SegmentedControlItem<Tab>[] = [
+    {
+      key: "injuries",
+      label: "My Injuries",
+      description: injuries ? injuries.length : undefined,
+    },
+    {
+      key: "buying",
+      label: "Buying Windows",
+      description: windows ? windows.length : undefined,
+    },
+  ];
 
   return (
     <AppShell>
-      <div style={{ padding: "28px 0 8px" }}>
-        <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>
-          Injury Tracker
-        </h1>
-        <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 4 }}>
-          Monitor injuries across your portfolio and find buying windows
-        </p>
-        <FreshnessBar />
-      </div>
+      <PageHeader
+        title="Injury Tracker"
+        subtitle="Monitor injuries across your portfolio and find buying windows."
+        actions={<FreshnessBar />}
+      />
 
-      {/* Risk summary (only on injuries tab when data loaded) */}
       {activeTab === "injuries" && injuries && injuries.length > 0 && (
         <RiskSummary injuries={injuries} />
       )}
 
-      {/* Tab bar */}
-      <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
-        {(["injuries", "buying"] as Tab[]).map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            style={{
-              background: activeTab === tab ? "var(--amber)" : "var(--card)",
-              color: activeTab === tab ? "var(--dark-base)" : "var(--text-dim)",
-              border: `1px solid ${activeTab === tab ? "var(--amber)" : "var(--border)"}`,
-              borderRadius: 6,
-              padding: "8px 16px",
-              fontSize: 13,
-              fontWeight: 600,
-              cursor: "pointer",
-              letterSpacing: 0.3,
-            }}
-          >
-            {tab === "injuries" ? `My Injuries${injuries ? ` (${injuries.length})` : ""}` : `Buying Windows${windows ? ` (${windows.length})` : ""}`}
-          </button>
-        ))}
+      <div style={{ marginTop: 16 }}>
+        <SegmentedControl
+          items={tabs}
+          value={activeTab}
+          onChange={setActiveTab}
+          ariaLabel="Injury tracker view"
+        />
       </div>
 
-      {/* Content */}
       <div style={{ marginTop: 16 }}>
         {isLoading ? (
-          <div style={{ display: "grid", gap: 12 }}>
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="animate-pulse" style={{ ...cardStyle, height: 80 }} />
-            ))}
-          </div>
+          <LoadingSkeleton label={activeTab === "injuries" ? "Loading injuries" : "Loading buying windows"} rows={4} />
         ) : error ? (
-          <div style={{ ...cardStyle, padding: 40, textAlign: "center", color: "var(--red)" }}>
-            Error: {(error as Error).message}
-          </div>
+          <ErrorState
+            title={activeTab === "injuries" ? "Could not load injuries" : "Could not load buying windows"}
+            message={(error as Error).message}
+          />
         ) : activeTab === "injuries" ? (
           <InjuryTable injuries={injuries ?? []} />
         ) : (windows ?? []).length === 0 ? (
-          <div style={{ ...cardStyle, padding: 40, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>
-            No buying windows detected. This requires value snapshot history from syncs.
-          </div>
+          <Card className="edge-state-card">
+            <p>No buying windows detected. This requires value snapshot history from syncs.</p>
+          </Card>
         ) : (
           <div style={{ display: "grid", gap: 12 }}>
-            {(windows ?? []).map((w) => (
-              <WindowCard key={w.player.player_id} window={w} />
+            {(windows ?? []).map((window) => (
+              <WindowCard key={window.player.player_id} window={window} />
             ))}
           </div>
         )}
