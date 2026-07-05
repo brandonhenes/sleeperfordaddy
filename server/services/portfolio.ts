@@ -7,8 +7,8 @@ import { sourceWeightsKey, type SourceWeights } from "./edge-score.js";
 import {
   getPlayerAvailability,
   contributesToPortfolioValue,
-  type PlayerAvailability,
 } from "../../shared/player-availability.js";
+import type { PortfolioData, PortfolioPlayer } from "../../shared/types.js";
 
 const PORTFOLIO_TTL_MS = 30_000;
 const portfolioCache = new Map<string, { data: PortfolioData | null; expires: number }>();
@@ -28,60 +28,6 @@ export function clearPortfolioCache(username?: string) {
   portfolioCache.clear();
   portfolioInFlight.clear();
 }
-
-// ─── Types ───
-
-export interface PortfolioPlayer {
-  player_id: string;
-  full_name: string;
-  position: string;
-  age: number | null;
-  edge_score: number;
-  fc_value: number | null;
-  ktc_value: number | null;
-  fp_value: number | null;
-  fc_score: number | null;
-  ktc_score: number | null;
-  fp_score: number | null;
-  sources_available: number;
-  source_agreement: "high" | "medium" | "low";
-  leagues_owned: number;
-  total_leagues: number;
-  pct: number;
-  age_zone: string | null;
-  // Source disagreement direction
-  ktc_vs_experts: number | null;
-  disagreement_direction: "sell_signal" | "buy_signal" | "neutral" | null;
-
-  // Action needed flag
-  action_needed: { type: "risk" | "dead_weight"; reason: string } | null;
-
-  // Portfolio weight
-  portfolio_value: number;
-
-  // Availability — derived from Sleeper status + team + source coverage
-  availability: PlayerAvailability;
-  team: string | null;
-  status: string | null;
-}
-
-export interface PortfolioStats {
-  total_players: number;
-  total_leagues: number;
-  avg_edge_score: number;
-  high_exposure_count: number;
-  position_counts: { position: string; count: number; avg_score: number }[];
-  portfolio_value_total: number;
-  weighted_avg_age: number;
-  source_coverage_pct: number;
-}
-
-export interface PortfolioData {
-  players: PortfolioPlayer[];
-  stats: PortfolioStats;
-}
-
-// ─── Main ───
 
 export async function getPortfolio(
   username: string,

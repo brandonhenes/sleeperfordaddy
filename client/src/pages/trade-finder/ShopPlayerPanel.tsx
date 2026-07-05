@@ -1,6 +1,5 @@
 import type { Dispatch, SetStateAction } from "react";
-import type { PortfolioData } from "../../hooks/use-portfolio";
-import type { ShopOpportunity, ShopPlayerResult } from "@shared/types";
+import type { PortfolioData, ShopOpportunity, ShopPlayerResult } from "@shared/types";
 import ShopOpportunityCard from "./ShopOpportunityCard";
 
 export type ShopPathFilter = ShopOpportunity["path"] | null;

@@ -1,6 +1,6 @@
 import { Link } from "wouter";
 import { ShoppingBag } from "lucide-react";
-import type { PortfolioPlayer } from "../hooks/use-portfolio";
+import type { PortfolioPlayer } from "@shared/types";
 import {
   ExposureBar,
   PlayerLink,
