@@ -1,4 +1,4 @@
-import type { Prospect } from "../../hooks/use-market";
+import type { Prospect } from "@shared/types";
 import { TIER_CONFIG } from "./rookie-draft-config";
 
 type DisagreementSection = {

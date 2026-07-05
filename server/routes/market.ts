@@ -11,10 +11,11 @@ import { getMockDraftSetup } from "../services/mock-draft.js";
 import { getActiveDrafts, getLiveDraftState } from "../services/live-draft.js";
 import { getDraftHitRates } from "../services/draft-hit-rates.js";
 import { computeRookieADP } from "../services/sync-league-drafts.js";
+import type { ValueMover } from "../../shared/types.js";
 
 const router = Router();
 
-async function fetchValueMovers() {
+async function fetchValueMovers(): Promise<ValueMover[]> {
   const rows = await db.execute(sql`
     SELECT
       player_name AS player_id,
@@ -34,7 +35,7 @@ async function fetchValueMovers() {
     ORDER BY ABS(COALESCE(fc_delta_7d, 0)) DESC
     LIMIT 100
   `);
-  return rows;
+  return rows as unknown as ValueMover[];
 }
 
 /** GET /api/market/recommendations — Buy/Sell/Hold recs */

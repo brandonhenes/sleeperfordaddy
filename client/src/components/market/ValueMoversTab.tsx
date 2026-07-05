@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { useMovers, type ValueMover } from "../../hooks/use-market";
+import { useMovers } from "../../hooks/use-market";
+import type { ValueMover } from "@shared/types";
 import {
   Card,
   ErrorState,

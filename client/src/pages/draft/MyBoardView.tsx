@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { PlayerLink } from "../../components/ui";
-import type { Prospect } from "../../hooks/use-market";
+import type { Prospect } from "@shared/types";
 import { posColor } from "../../lib/position-colors";
 import TierBadge from "./TierBadge";
 import { TIER_CONFIG, TIER_ORDER, type MyBoardState, type TierKey } from "./rookie-draft-config";

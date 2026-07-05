@@ -1,5 +1,5 @@
 import { PlayerLink } from "../../components/ui";
-import type { Prospect } from "../../hooks/use-market";
+import type { Prospect } from "@shared/types";
 import { posColor } from "../../lib/position-colors";
 import TierBadge from "./TierBadge";
 

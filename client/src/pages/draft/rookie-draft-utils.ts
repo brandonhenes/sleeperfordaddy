@@ -1,4 +1,4 @@
-import type { Prospect } from "../../hooks/use-market";
+import type { Prospect } from "@shared/types";
 import { MYBOARD_KEY, WATCHLIST_KEY, type MyBoardState } from "./rookie-draft-config";
 
 export function cleanText(val: string | null | undefined): string | null {

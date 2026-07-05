@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { PlayerLink } from "../../components/ui";
-import type { Prospect } from "../../hooks/use-market";
+import type { Prospect } from "@shared/types";
 import type { ProspectRanking } from "../../hooks/use-prospect-rankings";
 import { posColor } from "../../lib/position-colors";
 import { cleanText, formatMarketNumber, scoutingReport } from "./rookie-draft-utils";

@@ -1,5 +1,5 @@
 import { PositionBadge } from "../../components/ui";
-import type { Prospect } from "../../hooks/use-market";
+import type { Prospect } from "@shared/types";
 import { cleanText } from "./rookie-draft-utils";
 import TierBadge from "./TierBadge";
 

@@ -1,7 +1,8 @@
 import { useState, useMemo } from "react";
 import AppShell from "../components/AppShell";
 import FreshnessBar from "../components/FreshnessBar";
-import { useProspects, type Prospect } from "../hooks/use-market";
+import { useProspects } from "../hooks/use-market";
+import type { Prospect } from "@shared/types";
 import { useRookieDraftContext } from "../hooks/use-rookie-draft";
 import { usePowerRankings } from "../hooks/use-power-rankings";
 import { useMockDraftSetup, type MockDraftPick } from "../hooks/use-mock-draft";

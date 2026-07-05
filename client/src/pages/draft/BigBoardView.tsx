@@ -1,4 +1,4 @@
-import type { Prospect } from "../../hooks/use-market";
+import type { Prospect } from "@shared/types";
 import type { ProspectRanking } from "../../hooks/use-prospect-rankings";
 import type { DraftPickContext, PickValueReference } from "../../hooks/use-rookie-draft";
 import ProspectCard from "./ProspectCard";
