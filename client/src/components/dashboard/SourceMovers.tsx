@@ -1,6 +1,6 @@
 import { posColor } from "../../lib/position-colors";
 import { PlayerLink } from "../ui";
-import type { DashboardData, SourceMover } from "../../hooks/use-dashboard";
+import type { DashboardData, SourceMover } from "@shared/types";
 
 function MoverRow({ m, direction }: { m: SourceMover; direction: "up" | "down" }) {
   const changeColor = direction === "up" ? "#22c55e" : "#ef4444";

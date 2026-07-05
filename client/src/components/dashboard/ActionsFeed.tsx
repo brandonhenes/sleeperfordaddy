@@ -1,6 +1,6 @@
 import EdgeScoreBadge from "../EdgeScoreBadge";
 import { PlayerLink } from "../ui";
-import type { ActionFeedItem } from "../../hooks/use-dashboard";
+import type { ActionFeedItem } from "@shared/types";
 
 const CARD_ACCENTS: Record<
   ActionFeedItem["type"],

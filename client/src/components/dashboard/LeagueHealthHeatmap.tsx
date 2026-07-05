@@ -1,4 +1,4 @@
-import type { LeagueHealth, SlotGradeInfo } from "../../hooks/use-dashboard";
+import type { LeagueHealth, SlotGradeInfo } from "@shared/types";
 
 function gradeColor(score: number): string {
   if (score >= 85) return "#22c55e";

@@ -4,8 +4,8 @@ import SyncGate from "../components/SyncGate";
 import { SectionHeader } from "../components/ui";
 import {
   useDashboard,
-  type DashboardLeagueScope,
 } from "../hooks/use-dashboard";
+import type { DashboardLeagueScope } from "@shared/types";
 import { useCurrentUsername } from "../hooks/use-current-user";
 import FreshnessBar from "../components/FreshnessBar";
 import EmpireOverview from "../components/dashboard/EmpireOverview";

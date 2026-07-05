@@ -1,7 +1,7 @@
 import EdgeScoreBadge from "../EdgeScoreBadge";
 import { PlayerLink } from "../ui";
 import { posColor } from "../../lib/position-colors";
-import type { ExposureEntry } from "../../hooks/use-dashboard";
+import type { ExposureEntry } from "@shared/types";
 
 export default function ExposureChart({ players }: { players: ExposureEntry[] }) {
   if (players.length === 0) {

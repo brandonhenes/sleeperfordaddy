@@ -1,6 +1,6 @@
 import { Router } from "express";
-import { getDashboardData, type DashboardData } from "../services/dashboard.js";
-import type { LeagueScope } from "../services/dynasty-leagues.js";
+import { getDashboardData } from "../services/dashboard.js";
+import type { DashboardData, DashboardLeagueScope } from "../../shared/types.js";
 import { parseWeights } from "../lib/parse-weights.js";
 
 const router = Router();
@@ -13,7 +13,7 @@ const TTL = 5 * 60 * 1000;
 router.get("/api/dashboard/:username", async (req, res) => {
   try {
     const username = req.params.username;
-    const scope: LeagueScope = req.query.leagueScope === "redraft" ? "redraft" : "dynasty";
+    const scope: DashboardLeagueScope = req.query.leagueScope === "redraft" ? "redraft" : "dynasty";
     const weights = parseWeights(req);
     const weightKey = weights ? `${weights.fc}-${weights.ktc}-${weights.dp}` : "default";
     const key = `${username.toLowerCase()}:${scope}:${weightKey}`;

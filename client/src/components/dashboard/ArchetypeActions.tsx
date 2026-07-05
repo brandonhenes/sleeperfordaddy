@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { ArchetypeAction } from "../../hooks/use-dashboard";
+import type { ArchetypeAction } from "@shared/types";
 
 const ARCH_COLORS: Record<string, { bg: string; text: string }> = {
   "Dynasty Juggernaut": { bg: "#f59e0b", text: "#000" },

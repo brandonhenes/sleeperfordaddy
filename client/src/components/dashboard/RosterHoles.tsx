@@ -1,7 +1,7 @@
 import EdgeScoreBadge from "../EdgeScoreBadge";
 import { PlayerLink } from "../ui";
 import { posColor } from "../../lib/position-colors";
-import type { RosterHole } from "../../hooks/use-dashboard";
+import type { RosterHole } from "@shared/types";
 
 function slotLabelColor(score: number): string {
   if (score < 65) return "#ef4444";

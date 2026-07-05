@@ -6,8 +6,13 @@ import {
   type LeaguePowerRanking,
   type RosterRanking,
 } from "./power-rankings.js";
-import { getScoreMovers, type Mover } from "./snapshot-scores.js";
-import type { LeagueScope } from "./dynasty-leagues.js";
+import { getScoreMovers } from "./snapshot-scores.js";
+import type {
+  ActionFeedItem,
+  DashboardData,
+  DashboardLeagueScope,
+  SlotGradeInfo,
+} from "../../shared/types.js";
 import { optimizeLineup } from "./lineup-optimizer.js";
 import {
   computeEdgeScores,
@@ -41,68 +46,6 @@ export function clearDashboardCache(username?: string) {
 }
 
 // ─── Types ───
-
-export interface SlotGradeInfo {
-  avg_score: number;
-  grade: "elite" | "strong" | "average" | "weak" | "hole";
-}
-
-export interface ActionFeedItem {
-  type: "sell_high" | "buy_low" | "roster_move" | "exposure_alert";
-  title: string;
-  player_name: string;
-  position: string;
-  edge_score: number;
-  signal: string;
-  leagues: string[];
-}
-
-export interface DashboardData {
-  actions_feed: ActionFeedItem[];
-  empire: {
-    total_leagues: number;
-    avg_starter_score: number;
-    archetypes: { name: string; count: number }[];
-    strongest_league: { name: string; avg_score: number };
-    weakest_league: { name: string; avg_score: number };
-  };
-  roster_holes: Array<{
-    league_name: string;
-    league_id: string;
-    slot_label: string;
-    player_name: string;
-    position: string;
-    edge_score: number;
-  }>;
-  source_movers: {
-    has_data: boolean;
-    risers: Array<Mover & { leagues_owned: number }>;
-    fallers: Array<Mover & { leagues_owned: number }>;
-  };
-  league_health: Array<{
-    league_name: string;
-    league_id: string;
-    archetype: string;
-    qb_grade: SlotGradeInfo;
-    rb_grade: SlotGradeInfo;
-    wr_grade: SlotGradeInfo;
-    te_grade: SlotGradeInfo;
-  }>;
-  exposure: Array<{
-    player_id: string;
-    full_name: string;
-    position: string;
-    edge_score: number;
-    leagues_owned: number;
-    total_leagues: number;
-    pct: number;
-  }>;
-  archetype_actions: Array<{
-    archetype: string;
-    strategy: string;
-    leagues: Array<{ name: string; league_id: string; avg_score: number }>;
-  }>;
-}
 
 // ─── Archetype Strategies ───
 
@@ -269,7 +212,7 @@ async function applyRedraftMultiSourcePpg(
 
 export async function getDashboardData(
   username: string,
-  scope: LeagueScope = "dynasty",
+  scope: DashboardLeagueScope = "dynasty",
   weights?: SourceWeights
 ): Promise<DashboardData | null> {
   const cacheKey = `${username.toLowerCase()}:${scope}:${sourceWeightsKey(weights)}`;

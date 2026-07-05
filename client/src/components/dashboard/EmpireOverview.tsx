@@ -1,6 +1,6 @@
 import { StatCard } from "../ui";
 import EdgeScoreBadge from "../EdgeScoreBadge";
-import type { DashboardData } from "../../hooks/use-dashboard";
+import type { DashboardData } from "@shared/types";
 
 const ARCHETYPE_INLINE_COLORS: Record<string, string> = {
   "Dynasty Juggernaut": "#f59e0b",
