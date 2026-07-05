@@ -7,18 +7,6 @@ import { posColor } from "../lib/position-colors";
 import VerdictBadge from "./VerdictBadge";
 import WinImpactBar from "./WinImpactBar";
 
-const cardStyle = {
-  background: "var(--card)",
-  border: "1px solid var(--border)",
-  borderRadius: 12,
-  padding: 18,
-  textAlign: "left" as const,
-  color: "var(--text)",
-  cursor: "default",
-  fontFamily: "inherit",
-  width: "100%",
-} as const;
-
 export interface TradeCardProps {
   outcome: TradeOutcome;
   assets: TradeAssetWithPlayer[];
@@ -92,39 +80,24 @@ function AssetRow({ asset }: { asset: TradeAssetWithPlayer }) {
   const position = asset.position ?? (asset.asset_type === "pick" ? "PICK" : null);
 
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        gap: 10,
-        padding: "8px 0",
-        borderBottom: "1px solid rgba(51, 65, 85, 0.35)",
-      }}
-    >
-      <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
-          {assetLabel(asset)}
-        </div>
+    <div className="trade-asset-row">
+      <div className="trade-asset-copy">
+        <div className="trade-asset-name">{assetLabel(asset)}</div>
         {asset.asset_type === "pick" && asset.drafted_player_name ? (
-          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
+          <div className="trade-asset-meta">
             {"-> "}
             {asset.drafted_player_name}
             {asset.drafted_position ? ` (${asset.drafted_position})` : ""}
           </div>
         ) : asset.team ? (
-          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
-            {asset.team}
-          </div>
+          <div className="trade-asset-meta">{asset.team}</div>
         ) : null}
       </div>
 
       {position && (
         <span
+          className="trade-asset-badge"
           style={{
-            flexShrink: 0,
-            padding: "3px 8px",
-            borderRadius: 999,
             background:
               asset.asset_type === "pick"
                 ? "rgba(6, 182, 212, 0.16)"
@@ -137,9 +110,6 @@ function AssetRow({ asset }: { asset: TradeAssetWithPlayer }) {
               asset.asset_type === "pick"
                 ? "#67e8f9"
                 : posColor(asset.position ?? "WR"),
-            fontSize: 10,
-            fontWeight: 800,
-            letterSpacing: 0.4,
           }}
         >
           {position}
@@ -174,49 +144,21 @@ export default function TradeCard({
   const detailsLoading = expanded && seasons === undefined;
 
   return (
-    <div style={cardStyle}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "flex-start",
-          justifyContent: "space-between",
-          gap: 16,
-          flexWrap: "wrap",
-        }}
-      >
-        <div style={{ minWidth: 0 }}>
-          <div
-            style={{
-              fontSize: 10,
-              fontWeight: 800,
-              color: "var(--text-muted)",
-              letterSpacing: 1,
-              textTransform: "uppercase",
-            }}
-          >
-            Trade Grade
-          </div>
-          <div style={{ fontSize: 16, fontWeight: 700, marginTop: 4 }}>
-            {ownerName}
-          </div>
-          <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>
+    <div className="edge-card trade-card">
+      <div className="trade-card-header">
+        <div className="trade-card-title-wrap">
+          <div className="trade-card-kicker">Trade Grade</div>
+          <div className="trade-card-title">{ownerName}</div>
+          <div className="trade-card-meta">
             vs {counterpartyName} · {formatTradeMonth(outcome.trade_date)}
           </div>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <div className="trade-card-badges">
           {outcome.scoring_adjusted && (
             <span
+              className="trade-scoring-chip"
               title="Values adjusted for this league's custom scoring (TEP, PPC, etc.)"
-              style={{
-                padding: "5px 10px",
-                borderRadius: 999,
-                background: "rgba(245, 158, 11, 0.14)",
-                border: "1px solid rgba(245, 158, 11, 0.28)",
-                color: "var(--amber)",
-                fontSize: 11,
-                fontWeight: 700,
-              }}
             >
               Scoring Adjusted
             </span>
@@ -225,34 +167,10 @@ export default function TradeCard({
         </div>
       </div>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
-          gap: 14,
-          marginTop: 16,
-        }}
-      >
-        <div
-          style={{
-            background: "rgba(15, 23, 42, 0.48)",
-            border: "1px solid rgba(51, 65, 85, 0.55)",
-            borderRadius: 10,
-            padding: 14,
-          }}
-        >
-          <div
-            style={{
-              fontSize: 11,
-              fontWeight: 800,
-              letterSpacing: 0.6,
-              color: "#f87171",
-              textTransform: "uppercase",
-            }}
-          >
-            Gave
-          </div>
-          <div style={{ marginTop: 8 }}>
+      <div className="trade-asset-grid">
+        <div className="trade-asset-panel">
+          <div className="trade-asset-panel-title gave">Gave</div>
+          <div className="trade-asset-list">
             {gave.length > 0 ? (
               gave.map((asset) => (
                 <AssetRow
@@ -261,33 +179,14 @@ export default function TradeCard({
                 />
               ))
             ) : (
-              <div style={{ fontSize: 12, color: "var(--text-muted)", padding: "8px 0" }}>
-                No assets logged
-              </div>
+              <div className="trade-empty-row">No assets logged</div>
             )}
           </div>
         </div>
 
-        <div
-          style={{
-            background: "rgba(15, 23, 42, 0.48)",
-            border: "1px solid rgba(51, 65, 85, 0.55)",
-            borderRadius: 10,
-            padding: 14,
-          }}
-        >
-          <div
-            style={{
-              fontSize: 11,
-              fontWeight: 800,
-              letterSpacing: 0.6,
-              color: "#4ade80",
-              textTransform: "uppercase",
-            }}
-          >
-            Received
-          </div>
-          <div style={{ marginTop: 8 }}>
+        <div className="trade-asset-panel">
+          <div className="trade-asset-panel-title received">Received</div>
+          <div className="trade-asset-list">
             {received.length > 0 ? (
               received.map((asset) => (
                 <AssetRow
@@ -296,49 +195,32 @@ export default function TradeCard({
                 />
               ))
             ) : (
-              <div style={{ fontSize: 12, color: "var(--text-muted)", padding: "8px 0" }}>
-                No assets logged
-              </div>
+              <div className="trade-empty-row">No assets logged</div>
             )}
           </div>
         </div>
       </div>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-          gap: 12,
-          marginTop: 16,
-        }}
-      >
-        <div
-          style={{
-            background: "rgba(15, 23, 42, 0.65)",
-            borderRadius: 10,
-            padding: 12,
-          }}
-        >
-          <div style={{ fontSize: 10, fontWeight: 800, color: "var(--text-muted)", letterSpacing: 0.6, textTransform: "uppercase" }}>
-            Current Value (FC)
-          </div>
-          <div style={{ marginTop: 8, display: "grid", gap: 6 }}>
-            <div style={{ fontSize: 12, color: "var(--text-dim)" }}>
+      <div className="trade-metric-grid">
+        <div className="trade-metric-card">
+          <div className="trade-metric-label">Current Value (FC)</div>
+          <div className="trade-metric-body">
+            <div className="trade-metric-row">
               Gave:{" "}
-              <span className="font-mono" style={{ color: "var(--text)", fontWeight: 700 }}>
+              <span className="font-mono trade-metric-value">
                 {formatPoints(outcome.value_gave_current)}
               </span>
             </div>
-            <div style={{ fontSize: 12, color: "var(--text-dim)" }}>
+            <div className="trade-metric-row">
               Received:{" "}
-              <span className="font-mono" style={{ color: "var(--text)", fontWeight: 700 }}>
+              <span className="font-mono trade-metric-value">
                 {formatPoints(outcome.value_received_current)}
               </span>
             </div>
-            <div style={{ fontSize: 13, fontWeight: 800, color: valueColor, marginTop: 2 }}>
+            <div className="trade-delta-line" style={{ color: valueColor }}>
               {formatSignedPercent(outcome.value_delta_pct)}
               {" "}
-              <span style={{ fontWeight: 600, fontSize: 11 }}>
+              <span>
                 ({outcome.value_verdict === "won"
                   ? "Won"
                   : outcome.value_verdict === "lost"
@@ -349,27 +231,19 @@ export default function TradeCard({
           </div>
         </div>
 
-        <div
-          style={{
-            background: "rgba(15, 23, 42, 0.65)",
-            borderRadius: 10,
-            padding: 12,
-          }}
-        >
-          <div style={{ fontSize: 10, fontWeight: 800, color: "var(--text-muted)", letterSpacing: 0.6, textTransform: "uppercase", marginBottom: 8 }}>
-            Win Impact
-          </div>
+        <div className="trade-metric-card">
+          <div className="trade-metric-label with-gap">Win Impact</div>
           <WinImpactBar value={outcome.win_impact} />
-          <div style={{ marginTop: 8, display: "grid", gap: 4 }}>
-            <div style={{ fontSize: 12, color: "var(--text-dim)" }}>
+          <div className="trade-metric-body compact">
+            <div className="trade-metric-row">
               Points received:{" "}
-              <span className="font-mono" style={{ color: "var(--text)", fontWeight: 700 }}>
+              <span className="font-mono trade-metric-value">
                 {formatPoints(outcome.points_received_assets)}
               </span>
             </div>
-            <div style={{ fontSize: 12, color: "var(--text-dim)" }}>
+            <div className="trade-metric-row">
               Points gave:{" "}
-              <span className="font-mono" style={{ color: "var(--text)", fontWeight: 700 }}>
+              <span className="font-mono trade-metric-value">
                 {formatPoints(outcome.points_gave_assets)}
               </span>
             </div>
@@ -379,21 +253,10 @@ export default function TradeCard({
 
       <div
         onClick={onToggle}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: 6,
-          padding: "8px 0",
-          cursor: "pointer",
-          color: "var(--text-muted)",
-          fontSize: 12,
-          borderTop: "1px solid var(--border)",
-          marginTop: 12,
-        }}
+        className="trade-breakdown-toggle"
       >
         <span>{expanded ? "Hide Details" : "Show Season Breakdown"}</span>
-        <span style={{ fontSize: 10 }}>{expanded ? "\u25B2" : "\u25BC"}</span>
+        <span className="trade-breakdown-chevron">{expanded ? "\u25B2" : "\u25BC"}</span>
       </div>
 
       {expanded && (
