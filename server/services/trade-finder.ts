@@ -1759,16 +1759,6 @@ export async function findTrades(
   if (!userProfile) return [];
 
   const opponents = profiles.filter((p) => !p.roster.is_user);
-  const healthScoreMap = new Map<string, number>();
-  for (const roster of league.rosters) {
-    for (const asset of roster.core_assets) {
-      healthScoreMap.set(asset.player_id, asset.edge_score);
-    }
-  }
-  const tradeHealthData = await loadTradeHealthPlayerInfo(
-    [...healthScoreMap.keys()],
-    healthScoreMap
-  );
 
   const ranked = opponents
     .map((opp) => {
@@ -1799,6 +1789,19 @@ export async function findTrades(
           packageClassStrengths,
           weights
         )
+    );
+    if (basePackages.length === 0) continue;
+    const packageHealthScores = new Map<string, number>();
+    for (const pkg of basePackages) {
+      for (const asset of [...pkg.you_send, ...pkg.you_receive]) {
+        if (asset.asset_type === "player" && asset.player_id) {
+          packageHealthScores.set(asset.player_id, asset.edge_score);
+        }
+      }
+    }
+    const tradeHealthData = await loadTradeHealthPlayerInfo(
+      [...packageHealthScores.keys()],
+      packageHealthScores
     );
     const qualityContext: TradeFinderQualityContext = {
       userNeeds: userProfile.needs,
