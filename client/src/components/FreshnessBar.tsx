@@ -21,7 +21,7 @@ function timeAgo(dateStr: string | null): { label: string; color: string } {
   const hours = diff / 3_600_000;
   const days = hours / 24;
 
-  const color = hours < 24 ? "var(--green)" : days < 3 ? "var(--amber)" : "var(--red)";
+  const color = hours < 24 ? "var(--green)" : days < 3 ? "var(--warning)" : "var(--red)";
 
   if (hours < 1) return { label: `${Math.round(hours * 60)}m ago`, color };
   if (hours < 24) return { label: `${Math.round(hours)}h ago`, color };
@@ -103,7 +103,7 @@ export default function FreshnessBar({
       {username ? (
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
           {syncMessage ? (
-            <span style={{ fontWeight: 700, color: syncing ? "var(--amber)" : "var(--text-muted)" }}>
+            <span style={{ fontWeight: 700, color: syncing ? "var(--warning)" : "var(--text-muted)" }}>
               {syncMessage}
             </span>
           ) : null}
@@ -128,7 +128,7 @@ export default function FreshnessBar({
             style={{
               border: "1px solid rgba(245,158,11,0.3)",
               background: syncing ? "rgba(245,158,11,0.08)" : "rgba(245,158,11,0.14)",
-              color: "var(--amber)",
+              color: "var(--warning)",
               borderRadius: 8,
               padding: "6px 10px",
               fontSize: 11,

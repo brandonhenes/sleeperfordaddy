@@ -14,9 +14,9 @@ const GRADE_COLORS: Record<string, string> = {
 function gradeColor(g: string) { return GRADE_COLORS[g] ?? "var(--text-muted)"; }
 
 const FLAG_STYLES: Record<string, { bg: string; color: string }> = {
-  HOARDING: { bg: "rgba(245,158,11,0.15)", color: "var(--amber)" },
+  HOARDING: { bg: "rgba(61,139,253,0.15)", color: "var(--amber)" },
   ONE_DEEP: { bg: "rgba(239,68,68,0.15)", color: "var(--red)" },
-  DEAD_WEIGHT: { bg: "rgba(148,163,184,0.15)", color: "var(--text-dim)" },
+  DEAD_WEIGHT: { bg: "rgba(152,162,179,0.15)", color: "var(--text-dim)" },
   SURPLUS: { bg: "rgba(74,222,128,0.15)", color: "var(--green)" },
 };
 

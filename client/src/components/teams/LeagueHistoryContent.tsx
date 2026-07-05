@@ -182,7 +182,7 @@ function TeamValueChart({ data }: { data: LeagueHistoryData }) {
     <div style={{ ...cardStyle, padding: "16px 8px 8px" }}>
       <ResponsiveContainer width="100%" height={350}>
         <LineChart data={chartData}>
-          <CartesianGrid stroke="rgba(51,65,85,0.2)" strokeDasharray="3 3" />
+          <CartesianGrid stroke="rgba(35,41,54,0.2)" strokeDasharray="3 3" />
           <XAxis
             dataKey="date"
             tick={{ fill: "var(--text-muted)", fontSize: 10 }}
@@ -343,7 +343,7 @@ function SeasonTable({
                           style={{
                             padding: "2px 8px",
                             borderRadius: 4,
-                            background: "rgba(245,158,11,0.12)",
+                            background: "rgba(61,139,253,0.12)",
                             color: "var(--amber)",
                             fontWeight: 600,
                           }}

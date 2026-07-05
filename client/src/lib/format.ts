@@ -18,7 +18,7 @@ export function formatSignedTradeValue(value: number): string {
 
 export function acceptanceColor(label: string): string {
   if (label === "Likely") return "var(--green)";
-  if (label === "Possible") return "var(--amber)";
+  if (label === "Possible") return "var(--warning)";
   if (label === "Unlikely") return "#f97316";
   return "var(--red)";
 }

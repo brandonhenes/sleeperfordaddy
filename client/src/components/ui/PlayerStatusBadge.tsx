@@ -4,10 +4,10 @@ import {
 } from "../../../../shared/player-availability";
 
 const TONE_STYLES: Record<string, { bg: string; color: string }> = {
-  neutral: { bg: "rgba(148,163,184,0.15)", color: "var(--text-muted)" },
+  neutral: { bg: "rgba(152,162,179,0.15)", color: "var(--text-muted)" },
   info: { bg: "rgba(96,165,250,0.15)", color: "var(--blue)" },
-  warning: { bg: "rgba(245,158,11,0.18)", color: "var(--amber)" },
-  muted: { bg: "rgba(148,163,184,0.12)", color: "var(--text-dim)" },
+  warning: { bg: "rgba(245,158,11,0.18)", color: "var(--warning)" },
+  muted: { bg: "rgba(152,162,179,0.12)", color: "var(--text-dim)" },
   danger: { bg: "rgba(239,68,68,0.18)", color: "var(--red)" },
 };
 

@@ -26,8 +26,8 @@ export default defineConfig({
         scope: "/",
         display: "standalone",
         display_override: ["window-controls-overlay", "standalone"],
-        background_color: "#0b1020",
-        theme_color: "#f59e0b",
+        background_color: "#07080b",
+        theme_color: "#0b0d12",
         icons: [
           { src: "/pwa-192.png", sizes: "192x192", type: "image/png" },
           { src: "/pwa-512.png", sizes: "512x512", type: "image/png" },

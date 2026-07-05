@@ -23,9 +23,9 @@ function confidenceStyle(confidence: ExploitAngle["confidence"]) {
     return { bg: "rgba(34,197,94,0.16)", color: "#4ade80" };
   }
   if (confidence === "medium") {
-    return { bg: "rgba(245,158,11,0.16)", color: "#fbbf24" };
+    return { bg: "rgba(61,139,253,0.16)", color: "#fbbf24" };
   }
-  return { bg: "rgba(148,163,184,0.16)", color: "#cbd5e1" };
+  return { bg: "rgba(152,162,179,0.16)", color: "#cbd5e1" };
 }
 
 export default function OpponentDetail({
@@ -67,7 +67,7 @@ export default function OpponentDetail({
           {profile.isStale && (
             <span
               style={{
-                background: "rgba(245,158,11,0.16)",
+                background: "rgba(61,139,253,0.16)",
                 color: "#fbbf24",
                 borderRadius: 999,
                 padding: "6px 10px",
@@ -82,8 +82,8 @@ export default function OpponentDetail({
             type="button"
             onClick={onFindTrades}
             style={{
-              border: "1px solid rgba(245,158,11,0.35)",
-              background: "rgba(245,158,11,0.14)",
+              border: "1px solid rgba(61,139,253,0.35)",
+              background: "rgba(61,139,253,0.14)",
               color: "var(--amber)",
               borderRadius: 10,
               padding: "10px 14px",

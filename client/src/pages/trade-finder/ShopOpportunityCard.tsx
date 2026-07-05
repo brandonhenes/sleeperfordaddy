@@ -48,7 +48,7 @@ export default function ShopOpportunityCard({ opp }: { opp: ShopOpportunity }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", flex: "1 1 240px", minWidth: 0 }}>
           <span style={{ fontSize: 14, fontWeight: 700, overflowWrap: "anywhere" }}>{opp.league_name}</span>
-          <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 3, background: "rgba(245,158,11,0.1)", color: "var(--amber)" }}>
+          <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 3, background: "rgba(61,139,253,0.1)", color: "var(--amber)" }}>
             {opp.path_label}
           </span>
           <span style={{ fontSize: 10, fontWeight: 600, color: "var(--text-muted)", padding: "2px 6px", background: "rgba(255,255,255,0.05)", borderRadius: 4 }}>
@@ -97,7 +97,7 @@ export default function ShopOpportunityCard({ opp }: { opp: ShopOpportunity }) {
             fontWeight: 800,
             padding: "3px 8px",
             borderRadius: 4,
-            background: opp.acceptance.label === "Likely" ? "rgba(34,197,94,0.15)" : opp.acceptance.label === "Possible" ? "rgba(245,158,11,0.15)" : "rgba(239,68,68,0.15)",
+            background: opp.acceptance.label === "Likely" ? "rgba(34,197,94,0.15)" : opp.acceptance.label === "Possible" ? "rgba(61,139,253,0.15)" : "rgba(239,68,68,0.15)",
             color: opp.acceptance.label === "Likely" ? "#22c55e" : opp.acceptance.label === "Possible" ? "#f59e0b" : "#ef4444",
           }}>
             {opp.acceptance.label} ({opp.acceptance.probability}%)

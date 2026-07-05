@@ -9,7 +9,7 @@ const CARD_ACCENTS: Record<
   sell_high: { bg: "rgba(239,68,68,0.08)", border: "rgba(239,68,68,0.25)", label: "SELL HIGH", color: "#ef4444" },
   buy_low: { bg: "rgba(34,197,94,0.08)", border: "rgba(34,197,94,0.25)", label: "BUY LOW", color: "#22c55e" },
   roster_move: { bg: "rgba(59,130,246,0.08)", border: "rgba(59,130,246,0.25)", label: "ROSTER MOVE", color: "#3b82f6" },
-  exposure_alert: { bg: "rgba(245,158,11,0.08)", border: "rgba(245,158,11,0.25)", label: "EXPOSURE ALERT", color: "#f59e0b" },
+  exposure_alert: { bg: "rgba(61,139,253,0.08)", border: "rgba(61,139,253,0.25)", label: "EXPOSURE ALERT", color: "#f59e0b" },
 };
 
 export default function ActionsFeed({ items }: { items: ActionFeedItem[] }) {

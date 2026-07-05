@@ -264,7 +264,7 @@ export default function TradeCard({
           style={{
             marginTop: 16,
             paddingTop: 16,
-            borderTop: "1px solid rgba(51, 65, 85, 0.55)",
+            borderTop: "1px solid rgba(35,41,54, 0.55)",
           }}
         >
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
@@ -317,7 +317,7 @@ export default function TradeCard({
             <div
               style={{
                 marginTop: 12,
-                background: "rgba(15, 23, 42, 0.55)",
+                background: "rgba(11,13,18, 0.55)",
                 borderRadius: 10,
                 padding: 16,
                 color: "var(--amber)",
@@ -332,8 +332,8 @@ export default function TradeCard({
                 <div
                   key={`${season.trade_outcome_id}-${season.season_year}-${season.season_number}`}
                   style={{
-                    background: "rgba(15, 23, 42, 0.55)",
-                    border: "1px solid rgba(51, 65, 85, 0.55)",
+                    background: "rgba(11,13,18, 0.55)",
+                    border: "1px solid rgba(35,41,54, 0.55)",
                     borderRadius: 10,
                     padding: 14,
                   }}
@@ -426,7 +426,7 @@ export default function TradeCard({
             <div
               style={{
                 marginTop: 12,
-                background: "rgba(15, 23, 42, 0.55)",
+                background: "rgba(11,13,18, 0.55)",
                 borderRadius: 10,
                 padding: 16,
                 color: "var(--text-muted)",

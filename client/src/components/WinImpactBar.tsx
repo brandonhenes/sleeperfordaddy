@@ -41,8 +41,8 @@ export default function WinImpactBar({ value }: WinImpactBarProps) {
           position: "relative",
           height: 10,
           borderRadius: 999,
-          background: "rgba(15, 23, 42, 0.9)",
-          border: "1px solid rgba(51, 65, 85, 0.7)",
+          background: "rgba(11,13,18, 0.9)",
+          border: "1px solid rgba(35,41,54, 0.7)",
           overflow: "hidden",
         }}
       >
@@ -53,7 +53,7 @@ export default function WinImpactBar({ value }: WinImpactBarProps) {
             top: 0,
             bottom: 0,
             width: 1,
-            background: "rgba(148, 163, 184, 0.45)",
+            background: "rgba(152,162,179, 0.45)",
           }}
         />
         <div

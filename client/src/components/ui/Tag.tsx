@@ -5,12 +5,12 @@ const TAG_MAP: Record<string, { bg: string; text: string; label: string }> = {
     label: "STARTER",
   },
   BENCH_STASH: {
-    bg: "rgba(148,163,184,0.15)",
+    bg: "rgba(152,162,179,0.15)",
     text: "var(--text-dim)",
     label: "STASH",
   },
   SPECULATIVE: {
-    bg: "rgba(148,163,184,0.15)",
+    bg: "rgba(152,162,179,0.15)",
     text: "var(--text-muted)",
     label: "SPEC",
   },
@@ -35,7 +35,7 @@ const TAG_MAP: Record<string, { bg: string; text: string; label: string }> = {
     label: "HIGH EXPOSURE",
   },
   LOW_EXPOSURE_UPSIDE: {
-    bg: "rgba(245,158,11,0.15)",
+    bg: "rgba(61,139,253,0.15)",
     text: "var(--amber)",
     label: "LOW EXPOSURE",
   },

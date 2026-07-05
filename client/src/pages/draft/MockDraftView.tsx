@@ -123,7 +123,7 @@ export default function MockDraftView({
                   gap: 10,
                   padding: "8px 14px",
                   borderBottom: "1px solid var(--border)",
-                  background: pick.is_user ? "rgba(245,158,11,0.08)" : "transparent",
+                  background: pick.is_user ? "rgba(61,139,253,0.08)" : "transparent",
                   opacity: pick.selected_player ? 1 : 0.6,
                 }}
               >

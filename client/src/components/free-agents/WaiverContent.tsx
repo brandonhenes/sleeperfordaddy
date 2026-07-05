@@ -67,7 +67,7 @@ function PlayerCell({ player }: { player: WaiverPlayer }) {
             fontWeight: 800,
             padding: "1px 5px",
             borderRadius: 3,
-            background: "rgba(245,158,11,0.15)",
+            background: "rgba(61,139,253,0.15)",
             color: "var(--amber)",
             letterSpacing: 0.5,
           }}
@@ -258,7 +258,7 @@ export default function WaiverContent({ username: usernameProp }: { username?: s
           style={{
             marginTop: 12,
             borderColor: "#f59e0b",
-            background: "rgba(245,158,11,0.12)",
+            background: "rgba(61,139,253,0.12)",
             color: "#fde68a",
             fontSize: 13,
           }}

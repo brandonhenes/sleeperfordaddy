@@ -101,7 +101,7 @@ export default function AcquisitionCard({ opportunity }: { opportunity: Acquisit
               </div>
 
               {offer.sweetener_hint && (
-                <div style={{ marginTop: 8, padding: "8px 14px", background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.2)", borderRadius: 8, fontSize: 12, color: "var(--amber)" }}>
+                <div style={{ marginTop: 8, padding: "8px 14px", background: "rgba(61,139,253,0.08)", border: "1px solid rgba(61,139,253,0.2)", borderRadius: 8, fontSize: 12, color: "var(--amber)" }}>
                   {offer.sweetener_hint}
                 </div>
               )}

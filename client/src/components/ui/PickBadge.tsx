@@ -9,8 +9,8 @@ const ROUND_STYLES: Record<number, { background: string; border: string; color: 
     color: "#fbbf24",
   },
   2: {
-    background: "rgba(148,163,184,0.16)",
-    border: "1px solid rgba(148,163,184,0.28)",
+    background: "rgba(152,162,179,0.16)",
+    border: "1px solid rgba(152,162,179,0.28)",
     color: "#cbd5e1",
   },
   3: {

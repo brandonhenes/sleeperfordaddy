@@ -117,7 +117,7 @@ function RiskSummary({ injuries }: { injuries: InjuredPlayerView[] }) {
       }}
     >
       <RiskMetric label="Active injuries" value={activeCount} color="#ef4444" />
-      <RiskMetric label="Affected league slots" value={totalSlots} color="var(--amber)" />
+      <RiskMetric label="Affected league slots" value={totalSlots} color="var(--warning)" />
       <RiskMetric label="Total injured" value={injuries.length} />
       {highest && (
         <div style={{ marginLeft: "auto", textAlign: "right" }}>
@@ -247,7 +247,7 @@ function WindowCard({ window }: { window: BuyingWindow }) {
             minWidth: 38,
             minHeight: 30,
             borderRadius: 6,
-            background: "var(--amber)",
+            background: "var(--warning)",
             color: "var(--dark-base)",
             fontSize: 14,
             fontWeight: 900,

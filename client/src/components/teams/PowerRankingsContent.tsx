@@ -381,8 +381,8 @@ function LeagueSyncButton({
       }}
       disabled={syncing || startSync.isPending}
       style={{
-        border: "1px solid rgba(245,158,11,0.3)",
-        background: syncing ? "rgba(245,158,11,0.08)" : "rgba(245,158,11,0.14)",
+        border: "1px solid rgba(61,139,253,0.3)",
+        background: syncing ? "rgba(61,139,253,0.08)" : "rgba(61,139,253,0.14)",
         color: "var(--amber)",
         borderRadius: 8,
         padding: "6px 10px",
@@ -570,7 +570,7 @@ export default function PowerRankingsContent({ username }: { username: string })
                   cursor: "pointer",
                   fontFamily: "inherit",
                   border: archetypeFilter.size === 0 ? "2px solid var(--amber)" : "1px solid var(--border)",
-                  background: archetypeFilter.size === 0 ? "rgba(245,158,11,0.1)" : "transparent",
+                  background: archetypeFilter.size === 0 ? "rgba(61,139,253,0.1)" : "transparent",
                   color: archetypeFilter.size === 0 ? "var(--amber)" : "var(--text-muted)",
                 }}
               >

@@ -408,7 +408,7 @@ function MarketMetric({
   const toneStyles: Record<"neutral" | "good" | "warn" | "bad", { color: string; border: string; background: string }> = {
     neutral: { color: "var(--text)", border: "var(--border)", background: "var(--card)" },
     good: { color: "#86efac", border: "rgba(34,197,94,0.35)", background: "rgba(34,197,94,0.08)" },
-    warn: { color: "var(--amber)", border: "rgba(245,158,11,0.35)", background: "rgba(245,158,11,0.08)" },
+    warn: { color: "var(--amber)", border: "rgba(61,139,253,0.35)", background: "rgba(61,139,253,0.08)" },
     bad: { color: "#fca5a5", border: "rgba(239,68,68,0.35)", background: "rgba(239,68,68,0.08)" },
   };
   const style = toneStyles[tone];

@@ -3,8 +3,8 @@ import type { OpponentProfile } from "@shared/types";
 const ACTIVITY_STYLES: Record<OpponentProfile["activityLevel"], { bg: string; color: string }> = {
   hyperactive: { bg: "rgba(34,197,94,0.18)", color: "#4ade80" },
   active: { bg: "rgba(59,130,246,0.18)", color: "#60a5fa" },
-  moderate: { bg: "rgba(245,158,11,0.18)", color: "#fbbf24" },
-  passive: { bg: "rgba(148,163,184,0.18)", color: "#cbd5e1" },
+  moderate: { bg: "rgba(61,139,253,0.18)", color: "#fbbf24" },
+  passive: { bg: "rgba(152,162,179,0.18)", color: "#cbd5e1" },
   inactive: { bg: "rgba(239,68,68,0.18)", color: "#f87171" },
 };
 
@@ -39,8 +39,8 @@ export default function OpponentCard({
   return (
     <div
       style={{
-        background: selected ? "rgba(245,158,11,0.08)" : "var(--card)",
-        border: selected ? "1px solid rgba(245,158,11,0.45)" : "1px solid var(--border)",
+        background: selected ? "rgba(61,139,253,0.08)" : "var(--card)",
+        border: selected ? "1px solid rgba(61,139,253,0.45)" : "1px solid var(--border)",
         borderRadius: 14,
         padding: 16,
         display: "grid",
@@ -60,7 +60,7 @@ export default function OpponentCard({
               exploitability >= 70
                 ? "rgba(239,68,68,0.2)"
                 : exploitability >= 45
-                  ? "rgba(245,158,11,0.2)"
+                  ? "rgba(61,139,253,0.2)"
                   : "rgba(59,130,246,0.2)",
             color:
               exploitability >= 70
@@ -109,8 +109,8 @@ export default function OpponentCard({
         type="button"
         onClick={onExploit}
         style={{
-          border: "1px solid rgba(245,158,11,0.35)",
-          background: "rgba(245,158,11,0.14)",
+          border: "1px solid rgba(61,139,253,0.35)",
+          background: "rgba(61,139,253,0.14)",
           color: "var(--amber)",
           borderRadius: 10,
           padding: "10px 12px",

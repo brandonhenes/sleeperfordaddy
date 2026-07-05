@@ -154,8 +154,8 @@ export default function ExposureTable({ players }: ExposureTableProps) {
             width: 32,
             height: 32,
             borderRadius: 8,
-            background: "rgba(245,158,11,0.1)",
-            border: "1px solid rgba(245,158,11,0.2)",
+            background: "rgba(61,139,253,0.1)",
+            border: "1px solid rgba(61,139,253,0.2)",
             color: "var(--amber)",
             textDecoration: "none",
           }}

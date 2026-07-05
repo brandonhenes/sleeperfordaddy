@@ -12,7 +12,7 @@ export function posColor(pos: string): string {
 const DIR_COLORS: Record<string, string> = {
   BUY: "var(--green)",
   SELL: "var(--red)",
-  HOLD: "var(--amber)",
+  HOLD: "var(--warning)",
   MONITOR: "var(--blue)",
   DROP: "var(--red)",
 };

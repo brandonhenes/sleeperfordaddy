@@ -36,10 +36,10 @@ export default function OwnedPicksPanel({ draftContext }: OwnedPicksPanelProps) 
                   fontWeight: 700,
                   padding: "3px 8px",
                   borderRadius: 4,
-                  background: need.overall_urgency === "critical" ? "rgba(239,68,68,0.15)" : "rgba(245,158,11,0.15)",
+                  background: need.overall_urgency === "critical" ? "rgba(239,68,68,0.15)" : "rgba(61,139,253,0.15)",
                   color: need.overall_urgency === "critical" ? "var(--red)" : "var(--amber)",
                   border: `1px solid ${
-                    need.overall_urgency === "critical" ? "rgba(239,68,68,0.3)" : "rgba(245,158,11,0.3)"
+                    need.overall_urgency === "critical" ? "rgba(239,68,68,0.3)" : "rgba(61,139,253,0.3)"
                   }`,
                 }}
               >

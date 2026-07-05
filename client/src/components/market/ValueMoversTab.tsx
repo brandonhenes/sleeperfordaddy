@@ -166,7 +166,7 @@ function MovementPanel({
         style={{
           padding: "14px 16px",
           borderBottom: "1px solid var(--border)",
-          background: "linear-gradient(180deg, rgba(15,23,42,0.45), rgba(15,23,42,0.1))",
+          background: "linear-gradient(180deg, rgba(11,13,18,0.45), rgba(11,13,18,0.1))",
         }}
       >
         <div

@@ -67,7 +67,7 @@ export default function LiveDraftView({
                 fontSize: 11,
                 fontWeight: 700,
                 background:
-                  d.status === "drafting" ? "rgba(34,197,94,0.15)" : "rgba(245,158,11,0.15)",
+                  d.status === "drafting" ? "rgba(34,197,94,0.15)" : "rgba(61,139,253,0.15)",
                 color: d.status === "drafting" ? "var(--green)" : "var(--amber)",
               }}
             >
@@ -106,7 +106,7 @@ export default function LiveDraftView({
       {ds.on_the_clock && (
         <div
           style={{
-            background: ds.on_the_clock.is_user ? "rgba(245,158,11,0.1)" : "var(--card)",
+            background: ds.on_the_clock.is_user ? "rgba(61,139,253,0.1)" : "var(--card)",
             border: ds.on_the_clock.is_user ? "2px solid var(--amber)" : "1px solid var(--border)",
             borderRadius: 10,
             padding: "14px 18px",
@@ -138,7 +138,7 @@ export default function LiveDraftView({
                     padding: "2px 6px",
                     borderRadius: 3,
                     background:
-                      n.grade === "hole" ? "rgba(239,68,68,0.15)" : "rgba(245,158,11,0.15)",
+                      n.grade === "hole" ? "rgba(239,68,68,0.15)" : "rgba(61,139,253,0.15)",
                     color: n.grade === "hole" ? "#fca5a5" : "var(--amber)",
                   }}
                 >
@@ -152,7 +152,7 @@ export default function LiveDraftView({
               style={{
                 marginTop: 8,
                 padding: "8px 12px",
-                background: "rgba(245,158,11,0.08)",
+                background: "rgba(61,139,253,0.08)",
                 borderRadius: 8,
                 fontSize: 12,
                 color: "var(--amber)",
@@ -201,7 +201,7 @@ export default function LiveDraftView({
                   gap: 10,
                   padding: "8px 14px",
                   borderBottom: "1px solid var(--border)",
-                  background: pick.is_user_pick ? "rgba(245,158,11,0.08)" : "transparent",
+                  background: pick.is_user_pick ? "rgba(61,139,253,0.08)" : "transparent",
                 }}
               >
                 <span className="font-mono" style={{ width: 40, fontSize: 11, color: "var(--text-muted)" }}>

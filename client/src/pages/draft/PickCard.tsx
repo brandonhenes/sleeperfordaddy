@@ -5,8 +5,8 @@ import type { DraftPickContext } from "@shared/types";
 function NeedGradeBadge({ grade, urgency }: { grade: string; urgency: string }) {
   const colors: Record<string, { bg: string; text: string }> = {
     "A+": { bg: "rgba(239,68,68,0.15)", text: "#fca5a5" },
-    "A": { bg: "rgba(245,158,11,0.15)", text: "var(--amber)" },
-    "B": { bg: "rgba(148,163,184,0.1)", text: "var(--text-dim)" },
+    "A": { bg: "rgba(61,139,253,0.15)", text: "var(--amber)" },
+    "B": { bg: "rgba(152,162,179,0.1)", text: "var(--text-dim)" },
     "C": { bg: "rgba(34,197,94,0.1)", text: "var(--green)" },
     "D": { bg: "rgba(34,197,94,0.15)", text: "#86efac" },
   };
@@ -89,7 +89,7 @@ export default function PickCard({ pick }: { pick: DraftPickContext }) {
               fontWeight: 700,
               padding: "2px 6px",
               borderRadius: 3,
-              background: n.urgency === "A+" ? "rgba(239,68,68,0.15)" : "rgba(245,158,11,0.15)",
+              background: n.urgency === "A+" ? "rgba(239,68,68,0.15)" : "rgba(61,139,253,0.15)",
               color: n.urgency === "A+" ? "#fca5a5" : "var(--amber)",
             }}>
               {n.position} {n.urgency}

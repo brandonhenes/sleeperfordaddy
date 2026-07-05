@@ -167,7 +167,7 @@ function PackageView({ pkg }: { pkg: TradePackage }) {
       {(oppLabel || tierLabel || qualityLabel || pkg.is_pick_only != null) && (
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
           {oppLabel && (
-            <span style={{ fontSize: 10, fontWeight: 800, color: "var(--amber)", border: "1px solid rgba(245,158,11,0.35)", borderRadius: 999, padding: "3px 8px", textTransform: "uppercase", letterSpacing: 0.4 }}>
+            <span style={{ fontSize: 10, fontWeight: 800, color: "var(--amber)", border: "1px solid rgba(61,139,253,0.35)", borderRadius: 999, padding: "3px 8px", textTransform: "uppercase", letterSpacing: 0.4 }}>
               {oppLabel}
             </span>
           )}
@@ -243,14 +243,14 @@ function PackageView({ pkg }: { pkg: TradePackage }) {
             <div>
               {pkg.acceptance.accept_reasons.slice(0, 2).map((r, i) => (
                 <div key={`acc-${i}`} style={{ fontSize: 11, color: "var(--green)", lineHeight: 1.5 }}>
-                  {"\u00e2\u20ac\u00a2"} {r}
+                  - {r}
                 </div>
               ))}
             </div>
             <div>
               {pkg.acceptance.reject_reasons.slice(0, 2).map((r, i) => (
                 <div key={`rej-${i}`} style={{ fontSize: 11, color: "var(--red)", lineHeight: 1.5 }}>
-                  {"\u00e2\u20ac\u00a2"} {r}
+                  - {r}
                 </div>
               ))}
             </div>
@@ -270,7 +270,7 @@ function PackageView({ pkg }: { pkg: TradePackage }) {
       </div>
 
       {pkg.sweetener_hint && (
-        <div style={{ marginTop: 10, padding: "8px 14px", background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.2)", borderRadius: 8, fontSize: 12, color: "var(--amber)" }}>
+        <div style={{ marginTop: 10, padding: "8px 14px", background: "rgba(61,139,253,0.08)", border: "1px solid rgba(61,139,253,0.2)", borderRadius: 8, fontSize: 12, color: "var(--amber)" }}>
           {pkg.sweetener_hint}
         </div>
       )}

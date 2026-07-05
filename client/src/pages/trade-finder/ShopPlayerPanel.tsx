@@ -118,7 +118,7 @@ export default function ShopPlayerPanel({
                   maxWidth: 180,
                   minWidth: 0,
                   border: shopAmbition === opt.value ? "2px solid var(--amber)" : "1px solid var(--border)",
-                  background: shopAmbition === opt.value ? "rgba(245,158,11,0.1)" : "transparent",
+                  background: shopAmbition === opt.value ? "rgba(61,139,253,0.1)" : "transparent",
                   color: shopAmbition === opt.value ? "var(--amber)" : "var(--text-muted)",
                 }}
                 title={opt.desc}
@@ -152,7 +152,7 @@ export default function ShopPlayerPanel({
             </span>
           </div>
           {(shopResult.partial_results || (shopResult.warnings?.length ?? 0) > 0) && (
-            <div style={{ background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.28)", borderRadius: 10, padding: "10px 12px", marginBottom: 12, color: "var(--amber)", fontSize: 12, lineHeight: 1.5, overflowWrap: "anywhere" }}>
+            <div style={{ background: "rgba(61,139,253,0.1)", border: "1px solid rgba(61,139,253,0.28)", borderRadius: 10, padding: "10px 12px", marginBottom: 12, color: "var(--amber)", fontSize: 12, lineHeight: 1.5, overflowWrap: "anywhere" }}>
               Showing the best completed results so far.
               {shopResult.warnings && shopResult.warnings.length > 0 && (
                 <span style={{ color: "var(--text-dim)", marginLeft: 6 }}>
@@ -180,7 +180,7 @@ export default function ShopPlayerPanel({
                   cursor: "pointer",
                   fontFamily: "inherit",
                   border: shopPathFilter === f.key ? "1px solid var(--amber)" : "1px solid var(--border)",
-                  background: shopPathFilter === f.key ? "rgba(245,158,11,0.1)" : "transparent",
+                  background: shopPathFilter === f.key ? "rgba(61,139,253,0.1)" : "transparent",
                   color: shopPathFilter === f.key ? "var(--amber)" : "var(--text-muted)",
                 }}
               >

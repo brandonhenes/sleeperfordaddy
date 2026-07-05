@@ -173,7 +173,7 @@ function ValueChart({ data }: { data: PD["valueHistory"] }) {
     <Card style={{ padding: "16px 12px 8px" }}>
       <ResponsiveContainer width="100%" height={220}>
         <LineChart data={formatted}>
-          <CartesianGrid stroke="rgba(51,65,85,0.2)" strokeDasharray="3 3" />
+          <CartesianGrid stroke="rgba(35,41,54,0.2)" strokeDasharray="3 3" />
           <XAxis dataKey="date" tick={{ fill: "var(--text-muted)", fontSize: 10 }} tickLine={false} />
           <YAxis tick={{ fill: "var(--text-muted)", fontSize: 10 }} tickLine={false} width={45} />
           <Tooltip

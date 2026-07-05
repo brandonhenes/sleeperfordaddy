@@ -50,8 +50,8 @@ function getVerdictStyles(verdict: VerdictBadgeProps["verdict"]) {
 
   return {
     label: "Push",
-    background: "rgba(148, 163, 184, 0.14)",
-    borderColor: "rgba(148, 163, 184, 0.28)",
+    background: "rgba(152,162,179, 0.14)",
+    borderColor: "rgba(152,162,179, 0.28)",
     color: "#cbd5e1",
   };
 }

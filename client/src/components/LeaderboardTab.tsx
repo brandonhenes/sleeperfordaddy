@@ -31,9 +31,9 @@ function getPositionPillColor(position: string): { background: string; color: st
   };
   return (
     colors[position] ?? {
-      background: "rgba(148, 163, 184, 0.14)",
+      background: "rgba(152,162,179, 0.14)",
       color: "#cbd5e1",
-      border: "rgba(148, 163, 184, 0.28)",
+      border: "rgba(152,162,179, 0.28)",
     }
   );
 }
@@ -188,7 +188,7 @@ function LeaderboardTable({
             ? { background: "rgba(34, 197, 94, 0.14)", color: "#4ade80", border: "rgba(34, 197, 94, 0.3)" }
             : profile.youth_vet_bias === "veteran"
               ? { background: "rgba(249, 115, 22, 0.14)", color: "#fb923c", border: "rgba(249, 115, 22, 0.3)" }
-              : { background: "rgba(148, 163, 184, 0.14)", color: "#cbd5e1", border: "rgba(148, 163, 184, 0.28)" };
+              : { background: "rgba(152,162,179, 0.14)", color: "#cbd5e1", border: "rgba(152,162,179, 0.28)" };
 
         return (
           <span

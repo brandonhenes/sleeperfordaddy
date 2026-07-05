@@ -143,8 +143,8 @@ export default function ScoutPanel({
               onClick={onRefreshProfiles}
               disabled={!selectedLeague || refreshProfilesPending}
               style={{
-                border: "1px solid rgba(245,158,11,0.35)",
-                background: "rgba(245,158,11,0.14)",
+                border: "1px solid rgba(61,139,253,0.35)",
+                background: "rgba(61,139,253,0.14)",
                 color: "var(--amber)",
                 borderRadius: 10,
                 padding: "10px 14px",
@@ -162,7 +162,7 @@ export default function ScoutPanel({
                 Last profiled: {formatDateTime(scoutProfilesData?.lastProfiled ?? null)}
               </span>
               {scoutProfilesData?.isStale && (
-                <span style={{ background: "rgba(245,158,11,0.16)", color: "#fbbf24", borderRadius: 999, padding: "4px 8px", fontSize: 10, fontWeight: 800 }}>
+                <span style={{ background: "rgba(61,139,253,0.16)", color: "#fbbf24", borderRadius: 999, padding: "4px 8px", fontSize: 10, fontWeight: 800 }}>
                   Stale data
                 </span>
               )}
@@ -172,7 +172,7 @@ export default function ScoutPanel({
       </div>
 
       {scoutRouteWarning && (
-        <div style={{ background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.25)", borderRadius: 10, padding: "12px 16px", marginTop: 12, color: "var(--amber)", fontSize: 12, lineHeight: 1.5 }}>
+        <div style={{ background: "rgba(61,139,253,0.1)", border: "1px solid rgba(61,139,253,0.25)", borderRadius: 10, padding: "12px 16px", marginTop: 12, color: "var(--amber)", fontSize: 12, lineHeight: 1.5 }}>
           {scoutRouteWarning}
         </div>
       )}
