@@ -21,6 +21,10 @@ import {
   type OpportunityPackageValuation,
   type OpportunityPackageValuationInput,
 } from "./trade-opportunity-valuation.js";
+import {
+  recommendationAcceptanceProbability,
+  recommendationRejectReason,
+} from "./trade-recommendation-quality.js";
 
 const POSITIONS = ["QB", "RB", "WR", "TE"];
 const MIN_STARTERS: Record<string, number> = { QB: 1, RB: 2, WR: 2, TE: 1 };
@@ -527,9 +531,17 @@ function scorePassesCandidateFilter(
   candidate: ShopPackageCandidate,
   scored: ShopPackageScore
 ): boolean {
+  const recommendationReject = recommendationRejectReason({
+    valueEdgeForUser: -scored.delta,
+    percentGap: scored.percentGap,
+    fairness: scored.fairness,
+    sendAssets: scored.sendAssets,
+    receiveAssets: scored.receiveAssets,
+  });
+  if (recommendationReject) return false;
   if (candidate.score_filter === "not_lopsided") return scored.fairness !== "lopsided";
-  if (candidate.score_filter === "delta_nonnegative") return scored.delta >= 0;
-  return !(scored.fairness === "lopsided" && scored.delta < 0);
+  if (candidate.score_filter === "delta_nonnegative") return scored.delta >= 0 && scored.fairness !== "lopsided";
+  return scored.fairness !== "lopsided";
 }
 
 export function selectShopCandidatesForEvaluation(
@@ -944,7 +956,14 @@ export async function shopPlayer(
           },
         });
 
-        const acceptanceScore = acceptance?.probability ?? 0;
+        const acceptanceScore = recommendationAcceptanceProbability({
+          valueEdgeForUser: -pkg.delta,
+          percentGap: pkg.percentGap,
+          fairness: pkg.fairness,
+          acceptance,
+          sendAssets: pkg.you_send,
+          receiveAssets: pkg.you_receive,
+        });
         const fillsNeed = pkg.you_send.some((a) => a.position && oppNeeds.includes(a.position));
         const healthCheck = tradeHealthCheck(
           pkg.you_send,
@@ -953,6 +972,17 @@ export async function shopPlayer(
           pkg.fairness
         );
         if (healthCheck.some((warning) => warning.type === "block")) {
+          continue;
+        }
+        if (recommendationRejectReason({
+          valueEdgeForUser: -pkg.delta,
+          percentGap: pkg.percentGap,
+          fairness: pkg.fairness,
+          acceptance,
+          sendAssets: pkg.you_send,
+          receiveAssets: pkg.you_receive,
+          healthWarnings: healthCheck,
+        })) {
           continue;
         }
         const score = Math.round(

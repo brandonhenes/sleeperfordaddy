@@ -39,6 +39,14 @@ import {
   type ClassStrengthMap,
 } from "./pick-values.js";
 import { evaluateOpportunityPackage } from "./trade-opportunity-valuation.js";
+import {
+  MAJOR_RECOMMENDATION_EDGE,
+  isExcessiveRecommendationOverpay,
+  isOverpayDrivenAcceptance,
+  recommendationAcceptanceProbability,
+  recommendationPercentGapFraction,
+  recommendationRejectReason,
+} from "./trade-recommendation-quality.js";
 
 // Constants
 
@@ -49,9 +57,7 @@ const MIN_STARTERS: Record<Pos, number> = { QB: 1, RB: 2, WR: 2, TE: 1 };
 const MIN_EDGE_SCORE = 42;
 const ANCHOR_EDGE_SCORE = 62;
 const ELITE_EDGE_SCORE = 85;
-const MAJOR_VALUATION_EDGE = 1_500;
-const EXCESSIVE_OVERPAY_TP = 2_500;
-const EXCESSIVE_OVERPAY_PERCENT_GAP = 0.22;
+const MAJOR_VALUATION_EDGE = MAJOR_RECOMMENDATION_EDGE;
 
 const ARCHETYPE_WANTS: Record<string, string> = {
   "Dynasty Juggernaut": "depth maintenance",
@@ -329,31 +335,11 @@ export function isMaterialPickOnlyTrade(pkg: Pick<TradePackage, "you_send" | "yo
 
 function majorValuationEdge(pkg: Pick<TradePackage, "delta" | "valuation_edge" | "valuation_percent_gap">): boolean {
   const edge = Math.abs(pkg.valuation_edge ?? pkg.delta);
-  return edge >= MAJOR_VALUATION_EDGE || percentGapFraction(pkg) > 0.24;
+  return edge >= MAJOR_VALUATION_EDGE || recommendationPercentGapFraction(pkg.valuation_percent_gap) > 0.24;
 }
 
 function valuationEdgeForUser(pkg: Pick<TradePackage, "delta" | "valuation_edge">): number {
   return pkg.valuation_edge ?? pkg.delta;
-}
-
-function percentGapFraction(pkg: Pick<TradePackage, "valuation_percent_gap">): number {
-  const gap = pkg.valuation_percent_gap ?? 0;
-  return gap > 1 ? gap / 100 : gap;
-}
-
-function isExcessiveUserOverpay(
-  pkg: Pick<TradePackage, "delta" | "valuation_edge" | "valuation_percent_gap">
-): boolean {
-  const edge = valuationEdgeForUser(pkg);
-  if (edge >= 0) return false;
-  return edge <= -EXCESSIVE_OVERPAY_TP ||
-    (edge <= -MAJOR_VALUATION_EDGE && percentGapFraction(pkg) >= EXCESSIVE_OVERPAY_PERCENT_GAP);
-}
-
-function acceptanceIsOnlyOverpayDriven(pkg: Pick<TradePackage, "delta" | "valuation_edge" | "acceptance">): boolean {
-  const edge = valuationEdgeForUser(pkg);
-  if (edge >= 0 || !pkg.acceptance) return false;
-  return pkg.acceptance.accept_reasons.some((reason) => /overpay/i.test(reason));
 }
 
 function hasInvalidAssetData(pkg: Pick<TradePackage, "you_send" | "you_receive" | "send_total" | "receive_total">): boolean {
@@ -395,9 +381,16 @@ function anchorRuleViolation(pkg: Pick<TradePackage, "you_send" | "you_receive">
 
 function hardRejectReason(pkg: TradePackage): string | null {
   if (hasInvalidAssetData(pkg)) return "Invalid or missing asset data.";
-  if (isExcessiveUserOverpay(pkg)) {
-    return "Rejecting excessive overpay; acceptance is not useful if you are donating too much value.";
-  }
+  const recommendationReject = recommendationRejectReason({
+    valueEdgeForUser: valuationEdgeForUser(pkg),
+    percentGap: pkg.valuation_percent_gap,
+    fairness: pkg.fairness,
+    acceptance: pkg.acceptance,
+    sendAssets: pkg.you_send,
+    receiveAssets: pkg.you_receive,
+    healthWarnings: pkg.healthCheck,
+  });
+  if (recommendationReject) return recommendationReject;
   if (isPickOnlyTradePackage(pkg) && !isMaterialPickOnlyTrade(pkg)) {
     return "Pick swap is not a meaningful tier-up or liquidity move.";
   }
@@ -452,8 +445,18 @@ function qualityScore(pkg: TradePackage): number {
   if (pkg.fairness === "lopsided") score -= 22;
   if (pkg.fairness === "lopsided" && valuationEdgeForUser(pkg) < 0) score -= 12;
   if (valuationEdgeForUser(pkg) < -MAJOR_VALUATION_EDGE) score -= 18;
-  if (isExcessiveUserOverpay(pkg)) score -= 45;
-  if (acceptanceIsOnlyOverpayDriven(pkg)) score -= 16;
+  if (isExcessiveRecommendationOverpay({
+    valueEdgeForUser: valuationEdgeForUser(pkg),
+    percentGap: pkg.valuation_percent_gap,
+    fairness: pkg.fairness,
+    acceptance: pkg.acceptance,
+  })) score -= 45;
+  if (isOverpayDrivenAcceptance({
+    valueEdgeForUser: valuationEdgeForUser(pkg),
+    percentGap: pkg.valuation_percent_gap,
+    fairness: pkg.fairness,
+    acceptance: pkg.acceptance,
+  })) score -= 16;
   if (pkg.acceptance?.reject_reasons.some((reason) => reason.includes("Does not address a clear need"))) {
     score -= majorValuationEdge(pkg) ? 6 : 14;
   }
@@ -492,7 +495,6 @@ function qualityTier(pkg: TradePackage, quality: number): TradePackageQualityTie
 
 function rankingComponents(pkg: TradePackage, quality: number): TradePackageRankingComponents {
   const edge = valuationEdgeForUser(pkg);
-  const overpayDrivenAcceptance = acceptanceIsOnlyOverpayDriven(pkg);
   const valuationEdge = clamp(55 + (edge / 1_500) * 16, 5, 95);
   const noClearNeed = !pkg.addresses_my_need && !pkg.addresses_their_need;
   const rosterFit = pkg.addresses_my_need
@@ -511,8 +513,14 @@ function rankingComponents(pkg: TradePackage, quality: number): TradePackageRank
       : packageHasPickSend(pkg)
       ? 58
       : 20;
-  const rawAcceptance = pkg.acceptance?.probability ?? (pkg.addresses_their_need ? 62 : 42);
-  const acceptance = overpayDrivenAcceptance ? Math.min(rawAcceptance, 28) : rawAcceptance;
+  const acceptance = pkg.acceptance
+    ? recommendationAcceptanceProbability({
+        valueEdgeForUser: edge,
+        percentGap: pkg.valuation_percent_gap,
+        fairness: pkg.fairness,
+        acceptance: pkg.acceptance,
+      })
+    : (pkg.addresses_their_need ? 62 : 42);
   const liquidity = isPickOnlyTradePackage(pkg)
     ? 56
     : packageContainsPick(pkg)
@@ -520,7 +528,12 @@ function rankingComponents(pkg: TradePackage, quality: number): TradePackageRank
       : 48;
   const risk = anchorRuleViolation(pkg)
     ? 12
-    : isExcessiveUserOverpay(pkg)
+    : isExcessiveRecommendationOverpay({
+        valueEdgeForUser: edge,
+        percentGap: pkg.valuation_percent_gap,
+        fairness: pkg.fairness,
+        acceptance: pkg.acceptance,
+      })
       ? 5
     : pkg.fairness === "lopsided"
       ? 35

@@ -334,6 +334,91 @@ describe("Shop a Player valuation helpers", () => {
 
     expect(evaluatedPackages).toEqual([]);
   });
+
+  it("rejects protected-core sell-for-picks packages that are only attractive because of massive overpay", async () => {
+    const evaluatePackage = async (
+      input: OpportunityPackageValuationInput
+    ): Promise<OpportunityPackageValuation> => ({
+      ...fairValuation(input),
+      sendAssets: input.send.map((asset) => evaluated(asset, 11_342.7)),
+      receiveAssets: input.receive.map((asset, index) => evaluated(asset, index === 0 ? 1_731 : 1_583)),
+      sendContextTradeValue: 11_342.7,
+      receiveContextTradeValue: 3_314,
+      sendBaseMarketValue: 11_342.7,
+      receiveBaseMarketValue: 3_314,
+      sendLeagueMarketValue: 11_342.7,
+      receiveLeagueMarketValue: 3_314,
+      delta: -8_028.7,
+      fairness: "lopsided",
+      percentGap: 0.708,
+    });
+    const ctx = packageContext(evaluatePackage, createShopEvaluationBudget({ maxEvaluations: 10 }));
+    const drakeMaye = shopPlayerAssetToTradePackageAsset(coreAsset({
+      player_id: "drake-maye",
+      full_name: "Drake Maye",
+      position: "QB",
+      edge_score: 98,
+      age: 23,
+    }));
+    const fourthA = shopPickToTradePackageAsset({
+      season: "2027",
+      round: 4,
+      roster_id: 3,
+      original_owner_id: 8,
+      pick_slot: null,
+      tier: "mid",
+      label: "2027 Mid 4th",
+      ktc_value: 1_731,
+      dp_value: 1_500,
+      edge_score: 52,
+      ktc_score: 52,
+      dp_score: 44,
+      pick_breakdown: pickBreakdown({
+        season: "2027",
+        round: 4,
+        tier: "mid",
+        baseEdgeValue: 52,
+        finalValue: 52,
+        pickLabel: "2027 Mid 4th",
+      }),
+    });
+    const fourthB = shopPickToTradePackageAsset({
+      season: "2028",
+      round: 4,
+      roster_id: 3,
+      original_owner_id: 8,
+      pick_slot: null,
+      tier: "mid",
+      label: "2028 Mid 4th",
+      ktc_value: 1_583,
+      dp_value: 1_400,
+      edge_score: 44,
+      ktc_score: 44,
+      dp_score: 40,
+      pick_breakdown: pickBreakdown({
+        season: "2028",
+        round: 4,
+        tier: "mid",
+        baseEdgeValue: 44,
+        finalValue: 44,
+        pickLabel: "2028 Mid 4th",
+      }),
+    });
+    const candidates: ShopPackageCandidate[] = [{
+      path: "sell_for_pieces",
+      path_label: "Sell for Picks",
+      send: [drakeMaye],
+      receive: [fourthA, fourthB],
+      why_you_do_it: "Cash out Drake Maye into multiple future darts",
+      why_they_accept: "Consolidates pick surplus into a lineup upgrade.",
+      cheap_score: 100,
+      score_filter: "not_negative_lopsided",
+    }];
+
+    const evaluatedPackages = await evaluateShopPackageCandidates(ctx, candidates, 1);
+
+    expect(evaluatedPackages).toEqual([]);
+  });
 });
 
 function fairValuation(input: OpportunityPackageValuationInput): OpportunityPackageValuation {

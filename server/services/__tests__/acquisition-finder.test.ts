@@ -4,7 +4,10 @@ import type {
   OpportunityPackageValuation,
   OpportunityPackageValuationInput,
 } from "../trade-opportunity-valuation.js";
-import { valueAcquisitionOfferWithKtcLeague } from "../acquisition-finder.js";
+import {
+  filterAcquisitionRecommendationOffers,
+  valueAcquisitionOfferWithKtcLeague,
+} from "../acquisition-finder.js";
 
 function asset(label: string, playerId: string, edgeScore: number): TradePackageAsset {
   return {
@@ -126,5 +129,28 @@ describe("acquisition finder valuation bridge", () => {
     expect(valued.you_send[0].context_trade_value).toBe(6_200);
     expect(valued.you_receive[0].context_trade_value).toBe(6_900);
     expect(valued.send_total).not.toBe(71);
+  });
+
+  it("filters excessive KTC League overpay recommendations after valuation", () => {
+    const bad = {
+      ...offer(),
+      send_total: 10_000,
+      receive_total: 5_500,
+      delta: -4_500,
+      valuation_edge: -4_500,
+      valuation_percent_gap: 0.45,
+      fairness: "lopsided" as const,
+    };
+    const good = {
+      ...offer(),
+      send_total: 6_200,
+      receive_total: 6_900,
+      delta: 700,
+      valuation_edge: 700,
+      valuation_percent_gap: 0.1,
+      fairness: "fair" as const,
+    };
+
+    expect(filterAcquisitionRecommendationOffers([bad, good])).toEqual([good]);
   });
 });

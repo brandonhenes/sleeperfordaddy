@@ -22,6 +22,7 @@ import { resolvePlayer } from "./player-resolver.js";
 import { evaluateOpportunityPackage } from "./trade-opportunity-valuation.js";
 import type { ClassStrengthMap } from "./pick-values.js";
 import type { SourceWeights } from "./edge-score.js";
+import { recommendationRejectReason } from "./trade-recommendation-quality.js";
 
 // ─── Constants ───
 
@@ -178,7 +179,7 @@ async function valueAcquisitionOffersForLeague(
   classStrengths?: ClassStrengthMap,
   weights?: SourceWeights
 ): Promise<AcquisitionOffer[]> {
-  return Promise.all(
+  const valued = await Promise.all(
     offers.map((offer) =>
       valueAcquisitionOfferWithKtcLeague(
         offer,
@@ -189,6 +190,20 @@ async function valueAcquisitionOffersForLeague(
         weights
       )
     )
+  );
+
+  return filterAcquisitionRecommendationOffers(valued);
+}
+
+export function filterAcquisitionRecommendationOffers(offers: AcquisitionOffer[]): AcquisitionOffer[] {
+  return offers.filter((offer) =>
+    !recommendationRejectReason({
+      valueEdgeForUser: offer.valuation_edge ?? offer.delta,
+      percentGap: offer.valuation_percent_gap,
+      fairness: offer.fairness,
+      sendAssets: offer.you_send,
+      receiveAssets: offer.you_receive,
+    })
   );
 }
 
