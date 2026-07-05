@@ -1,4 +1,4 @@
-import type { DraftPickContext, PickValueReference } from "../../hooks/use-rookie-draft";
+import type { DraftPickContext, PickValueReference } from "@shared/types";
 
 const TIER_PICK_MAP: Record<string, { round: number; tier: string }[]> = {
   elite: [{ round: 1, tier: "early" }],

@@ -2,6 +2,7 @@ import { db } from "../db/connection.js";
 import { sql } from "drizzle-orm";
 import { getLeagueDrafts, getDraftPicks } from "../sleeper/drafts.js";
 import { getPowerRankings } from "./power-rankings.js";
+import type { LeagueADP } from "../../shared/types.js";
 
 export async function syncLeagueDraftResults(
   username: string,
@@ -90,16 +91,6 @@ async function hasDraftResultsTable(): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-export interface LeagueADP {
-  player_name: string;
-  position: string | null;
-  avg_pick: number;
-  min_pick: number;
-  max_pick: number;
-  times_drafted: number;
-  leagues_available: number;
 }
 
 export async function computeRookieADP(season: string): Promise<LeagueADP[]> {

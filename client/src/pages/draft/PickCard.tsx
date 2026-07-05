@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { PositionBadge } from "../../components/ui";
-import type { DraftPickContext } from "../../hooks/use-rookie-draft";
+import type { DraftPickContext } from "@shared/types";
 
 function NeedGradeBadge({ grade, urgency }: { grade: string; urgency: string }) {
   const colors: Record<string, { bg: string; text: string }> = {

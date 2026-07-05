@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { PlayerLink, PositionBadge } from "../../components/ui";
-import type { HitRateData, LeagueADP } from "../../hooks/use-draft-data";
+import type { HitRateData, LeagueADP } from "@shared/types";
 
 interface AnalyticsViewProps {
   hitRates: HitRateData | undefined;

@@ -1,5 +1,5 @@
 import { PositionBadge } from "../../components/ui";
-import type { ActiveDraftSummary, LiveDraftState } from "../../hooks/use-live-draft";
+import type { ActiveDraftSummary, LiveDraftState } from "@shared/types";
 
 interface LiveDraftViewProps {
   activeDrafts: ActiveDraftSummary[] | undefined;

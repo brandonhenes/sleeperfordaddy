@@ -1,6 +1,6 @@
 import type { Prospect } from "@shared/types";
 import type { ProspectRanking } from "../../hooks/use-prospect-rankings";
-import type { DraftPickContext, PickValueReference } from "../../hooks/use-rookie-draft";
+import type { DraftPickContext, PickValueReference } from "@shared/types";
 import ProspectCard from "./ProspectCard";
 import { TIER_CONFIG, TIER_ORDER } from "./rookie-draft-config";
 import TierPickValueOverlay from "./TierPickValueOverlay";

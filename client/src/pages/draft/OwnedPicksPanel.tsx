@@ -1,4 +1,4 @@
-import type { AggregateNeed, DraftPickContext, RookieDraftContext } from "../../hooks/use-rookie-draft";
+import type { AggregateNeed, DraftPickContext, RookieDraftContext } from "@shared/types";
 import PickCard from "./PickCard";
 
 type OwnedPicksPanelProps = {

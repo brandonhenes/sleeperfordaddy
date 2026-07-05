@@ -11,7 +11,7 @@ import { getMockDraftSetup } from "../services/mock-draft.js";
 import { getActiveDrafts, getLiveDraftState } from "../services/live-draft.js";
 import { getDraftHitRates } from "../services/draft-hit-rates.js";
 import { computeRookieADP } from "../services/sync-league-drafts.js";
-import type { ValueMover } from "../../shared/types.js";
+import type { BoardMovement, ValueMover, ValueSnapshot } from "../../shared/types.js";
 
 const router = Router();
 
@@ -64,7 +64,7 @@ router.get("/api/market/prospects", async (_req, res) => {
 router.get("/api/market/value-movers", async (_req, res) => {
   try {
     const rows = await fetchValueMovers();
-    res.json(rows);
+    res.json(rows as unknown as BoardMovement[]);
   } catch (err) {
     console.error("[market/value-movers] Error:", err);
     res.status(500).json({ message: "Failed to fetch value movers" });
@@ -75,7 +75,7 @@ router.get("/api/market/value-movers", async (_req, res) => {
 router.get("/api/market/movers", async (_req, res) => {
   try {
     const rows = await fetchValueMovers();
-    res.json(rows);
+    res.json(rows as unknown as ValueSnapshot[]);
   } catch (err) {
     console.error("[market/movers] Error:", err);
     res.status(500).json({ message: "Failed to fetch value movers" });

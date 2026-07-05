@@ -1383,6 +1383,202 @@ export interface RosterGradesResult {
   leagues: LeagueGrades[];
 }
 
+// Rookie Draft
+
+export interface PositionNeed {
+  position: string;
+  grade: "elite" | "strong" | "average" | "weak" | "hole";
+  urgency: "A+" | "A" | "B" | "C" | "D";
+  starter_count: number;
+  avg_score: number;
+}
+
+export interface DraftPickContext {
+  league_id: string;
+  league_name: string;
+  league_mode: "sf" | "1qb";
+  scoring_label: string;
+  season: string;
+  round: number;
+  tier: "early" | "mid" | "late";
+  label: string;
+  pick_slot: number | null;
+  edge_score: number;
+  ktc_value: number | null;
+  dp_value: number | null;
+  roster_needs: PositionNeed[];
+}
+
+export interface PickValueReference {
+  season: number;
+  round: number;
+  tier: string;
+  ktc_sf: number;
+  ktc_1qb: number;
+}
+
+export interface AggregateNeed {
+  position: string;
+  leagues_with_hole: number;
+  leagues_with_weak: number;
+  total_leagues: number;
+  overall_urgency: "critical" | "moderate" | "low";
+}
+
+export interface RookieDraftContext {
+  username: string;
+  total_leagues: number;
+  picks_2026: DraftPickContext[];
+  picks_2027: DraftPickContext[];
+  pick_values: PickValueReference[];
+  aggregate_needs: AggregateNeed[];
+}
+
+export interface MockDraftNeed {
+  position: string;
+  urgency: number;
+  grade: string;
+}
+
+export interface MockDraftTeam {
+  roster_id: number;
+  display_name: string;
+  is_user: boolean;
+  archetype: string;
+  draft_position: number;
+  needs: MockDraftNeed[];
+}
+
+export interface MockDraftProspect {
+  player_name: string;
+  position: string;
+  school: string | null;
+  tier: string;
+  positional_rank: number;
+  overall_rank: number;
+  consensus_comp: string | null;
+  age: number | null;
+}
+
+export interface MockDraftSetup {
+  league_id: string;
+  league_name: string;
+  league_mode: "sf" | "1qb";
+  total_rosters: number;
+  draft_rounds: number;
+  scoring_label: string;
+  teams: MockDraftTeam[];
+  prospects: MockDraftProspect[];
+}
+
+export interface MockDraftPick {
+  pick_number: number;
+  round: number;
+  pick_in_round: number;
+  roster_id: number;
+  display_name: string;
+  is_user: boolean;
+  selected_player: string | null;
+  selected_position: string | null;
+  is_auto: boolean;
+  reasoning: string | null;
+}
+
+export interface LiveDraftPickMade {
+  pick_number: number;
+  round: number;
+  pick_in_round: number;
+  player_name: string;
+  player_id: string;
+  position: string | null;
+  roster_id: number;
+  display_name: string;
+  is_user_pick: boolean;
+}
+
+export interface BestAvailableProspect {
+  player_name: string;
+  position: string;
+  tier: string;
+  positional_rank: number;
+  school: string | null;
+  consensus_comp: string | null;
+  fit_for_user: string | null;
+}
+
+export interface ActiveDraftSummary {
+  draft_id: string;
+  league_id: string;
+  league_name: string;
+  status: string;
+  season: string;
+  picks_made: number;
+  total_picks: number;
+}
+
+export interface LiveDraftState {
+  draft_id: string;
+  league_id: string;
+  league_name: string;
+  league_mode: "sf" | "1qb";
+  status: string;
+  total_rounds: number;
+  total_rosters: number;
+  picks_made: LiveDraftPickMade[];
+  current_pick: number;
+  on_the_clock: {
+    roster_id: number;
+    display_name: string;
+    is_user: boolean;
+    needs: { position: string; grade: string }[];
+  } | null;
+  best_available: BestAvailableProspect[];
+  user_recommendation: string | null;
+}
+
+export interface HitRateRow {
+  position: string;
+  round: number;
+  pick_range: string;
+  total_drafted: number;
+  hits: number;
+  hit_rate_pct: number;
+  avg_games: number;
+  avg_career_av: number;
+  notable_hits: string[];
+  notable_busts: string[];
+}
+
+export interface HitRateData {
+  by_position_round: HitRateRow[];
+  by_slot_range: HitRateRow[];
+  overall_by_round: { round: number; hit_rate: number; total: number }[];
+}
+
+export interface LeagueADP {
+  player_name: string;
+  position: string | null;
+  avg_pick: number;
+  min_pick: number;
+  max_pick: number;
+  times_drafted: number;
+  leagues_available: number;
+}
+
+export interface BoardMovement {
+  snapshot_date: string;
+  fp_rank: number | null;
+  tier: string | null;
+}
+
+export interface ValueSnapshot {
+  snapshot_date: string;
+  edge_score: number | null;
+  fc_value: number | null;
+  ktc_value: number | null;
+  dp_value: number | null;
+}
+
 // Trade Intelligence
 
 export interface TradeOutcome {

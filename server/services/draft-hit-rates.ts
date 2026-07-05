@@ -1,24 +1,6 @@
 import { db } from "../db/connection.js";
 import { sql } from "drizzle-orm";
-
-export interface HitRateRow {
-  position: string;
-  round: number;
-  pick_range: string;
-  total_drafted: number;
-  hits: number;
-  hit_rate_pct: number;
-  avg_games: number;
-  avg_career_av: number;
-  notable_hits: string[];
-  notable_busts: string[];
-}
-
-export interface HitRateData {
-  by_position_round: HitRateRow[];
-  by_slot_range: HitRateRow[];
-  overall_by_round: { round: number; hit_rate: number; total: number }[];
-}
+import type { HitRateData, HitRateRow } from "../../shared/types.js";
 
 export async function getDraftHitRates(): Promise<HitRateData> {
   const rows = await db.execute(sql`
