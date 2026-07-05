@@ -499,7 +499,7 @@ describe("Find Trades generator quality", () => {
       }
     );
 
-    expect(calls).toBeLessThanOrEqual(18);
+    expect(calls).toBeLessThanOrEqual(14);
     expect(generated.some((pkg) => pkg.you_send.length + pkg.you_receive.length > 2)).toBe(true);
   });
 

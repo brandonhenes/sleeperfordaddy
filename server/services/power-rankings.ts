@@ -34,6 +34,7 @@ const LEAGUE_SCORING_SEASON = 2025;
 
 const prCache = new Map<string, { data: LeaguePowerRanking[]; expires: number }>();
 const PR_TTL_MS = 5 * 60 * 1000;
+const PR_CACHE_MAX_ENTRIES = 8;
 const PR_DB_ONLY = process.env.POWER_RANKINGS_DB_ONLY === "true";
 
 interface PowerRankingsOptions {
@@ -49,6 +50,24 @@ export function clearPowerRankingsCache(username?: string) {
     }
   } else {
     prCache.clear();
+  }
+}
+
+function setPowerRankingsCache(
+  key: string,
+  data: LeaguePowerRanking[],
+  ttlMs = PR_TTL_MS
+) {
+  prCache.set(key, { data, expires: Date.now() + ttlMs });
+
+  const now = Date.now();
+  for (const [cacheKey, value] of prCache.entries()) {
+    if (value.expires <= now) prCache.delete(cacheKey);
+  }
+  while (prCache.size > PR_CACHE_MAX_ENTRIES) {
+    const oldestKey = prCache.keys().next().value;
+    if (!oldestKey) break;
+    prCache.delete(oldestKey);
   }
 }
 
@@ -92,6 +111,8 @@ export async function getPowerRankings(
   const now = Date.now();
   const hit = prCache.get(cacheKey);
   if (hit && hit.expires > now) {
+    prCache.delete(cacheKey);
+    prCache.set(cacheKey, hit);
     return hit.data;
   }
 
@@ -124,7 +145,7 @@ export async function getPowerRankings(
   if (PR_DB_ONLY || options.forceDbOnly) {
     try {
       const dbOnly = await getPowerRankingsDbOnly(username, userId, leagueIds, valueType, weights);
-      prCache.set(cacheKey, { data: dbOnly, expires: Date.now() + PR_TTL_MS });
+      setPowerRankingsCache(cacheKey, dbOnly);
       return dbOnly;
     } catch (err) {
       console.error("[power-rankings] DB-only path failed, falling back to legacy path", err);
@@ -427,7 +448,7 @@ export async function getPowerRankings(
   }
 
   results.sort((a, b) => a.league_name.localeCompare(b.league_name));
-  prCache.set(cacheKey, { data: results, expires: Date.now() + PR_TTL_MS });
+  setPowerRankingsCache(cacheKey, results);
   return results;
 }
 

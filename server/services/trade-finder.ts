@@ -62,14 +62,32 @@ const MIN_EDGE_SCORE = 42;
 const ANCHOR_EDGE_SCORE = 62;
 const ELITE_EDGE_SCORE = 85;
 const MAJOR_VALUATION_EDGE = MAJOR_RECOMMENDATION_EDGE;
-const TRADE_FINDER_MAX_EVALUATIONS_PER_OPPONENT = 18;
-const TRADE_FINDER_MAX_OPPONENTS = 6;
-const TRADE_FINDER_MAX_PACKAGES_PER_PARTNER = 6;
+const TRADE_FINDER_MAX_EVALUATIONS_PER_OPPONENT = 14;
+const TRADE_FINDER_MAX_OPPONENTS = 5;
+const TRADE_FINDER_MAX_PACKAGES_PER_PARTNER = 5;
 const TRADE_FINDER_MAX_CONSOLIDATION_TEMPLATES = 4;
 const TRADE_FINDER_MAX_PLAYER_PICK_TEMPLATES = 5;
 const TRADE_FINDER_MAX_ROSTER_SPOT_TEMPLATES = 2;
 const TRADE_FINDER_MAX_TIER_DOWN_TEMPLATES = 4;
 const TRADE_FINDER_MAX_RENTAL_TEMPLATES = 3;
+const TRADE_FINDER_MAX_CONCURRENT_VALUATIONS = 4;
+
+let activeTradeFinderValuations = 0;
+const tradeFinderValuationQueue: Array<() => void> = [];
+
+async function withTradeFinderValuationSlot<T>(work: () => Promise<T>): Promise<T> {
+  if (activeTradeFinderValuations >= TRADE_FINDER_MAX_CONCURRENT_VALUATIONS) {
+    await new Promise<void>((resolve) => tradeFinderValuationQueue.push(resolve));
+  }
+
+  activeTradeFinderValuations += 1;
+  try {
+    return await work();
+  } finally {
+    activeTradeFinderValuations = Math.max(0, activeTradeFinderValuations - 1);
+    tradeFinderValuationQueue.shift()?.();
+  }
+}
 
 const ARCHETYPE_WANTS: Record<string, string> = {
   "Dynasty Juggernaut": "depth maintenance",
@@ -1833,13 +1851,15 @@ export async function findTrades(
     );
     const cached = packageScoreCache.get(cacheKey);
     if (cached) return cached;
-    const work = scoreTradeFinderPackage(
-      send,
-      receive,
-      packageLeagueId,
-      packageMode,
-      packageClassStrengths,
-      weights
+    const work = withTradeFinderValuationSlot(() =>
+      scoreTradeFinderPackage(
+        send,
+        receive,
+        packageLeagueId,
+        packageMode,
+        packageClassStrengths,
+        weights
+      )
     );
     packageScoreCache.set(cacheKey, work);
     return work;
