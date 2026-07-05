@@ -1,14 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
+import type { ComparablePlayer } from "@shared/types";
 import { apiFetch } from "../lib/api";
 import { weightQueryParams } from "../lib/weights";
-
-export interface ComparablePlayer {
-  player_name: string;
-  position: string;
-  team: string | null;
-  age: number | null;
-  edge_score: number;
-}
 
 export function useComparables(playerName: string | undefined) {
   const weights = weightQueryParams();

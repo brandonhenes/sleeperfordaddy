@@ -25,14 +25,17 @@ import {
 import { dirColor } from "../lib/position-colors";
 import {
   usePlayer,
-  type PlayerDetail as PD,
-  type PlayerSummary,
-  type Mention,
-  type ProspectInfo,
-  type RecInfo,
-  type OwnershipEntry,
-  type ExposureInfo,
 } from "../hooks/use-player";
+import type {
+  ExposureInfo,
+  Mention,
+  OwnershipEntry,
+  PlayerDetail as PD,
+  PlayerSummary,
+  PlayerTradeComp,
+  ProspectInfo,
+  RecInfo,
+} from "@shared/types";
 import { useComparables } from "../hooks/use-comparables";
 import { useCurrentUsername } from "../hooks/use-current-user";
 
@@ -310,7 +313,7 @@ function RecSection({ rec }: { rec: RecInfo }) {
   );
 }
 
-function TradeComps({ trades }: { trades: { trade_id: string; league_name: string; date: string; gave: string[]; received: string[] }[] }) {
+function TradeComps({ trades }: { trades: PlayerTradeComp[] }) {
   if (trades.length === 0) return null;
   return (
     <div style={{ display: "grid", gap: 8 }}>

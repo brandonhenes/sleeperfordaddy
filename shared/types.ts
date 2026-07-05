@@ -1579,6 +1579,103 @@ export interface ValueSnapshot {
   dp_value: number | null;
 }
 
+// Player Detail
+
+export interface PlayerSummary {
+  player_id: string | null;
+  player_name: string;
+  position: string | null;
+  team: string | null;
+  age: number | null;
+  dynasty_value: number | null;
+  trend_30day: number | null;
+  overall_rank: number | null;
+  edge_score: number;
+  fc_score: number | null;
+  ktc_score: number | null;
+  dp_score: number | null;
+  sources_available: number;
+  source_agreement: "high" | "medium" | "low";
+  age_curve: AgeCurveStatus;
+}
+
+export interface ValuePoint {
+  date: string;
+  value: number;
+}
+
+export interface OwnershipEntry {
+  league_name: string;
+  league_id: string;
+}
+
+export interface ExposureInfo {
+  owned_leagues: number;
+  total_leagues: number;
+  exposure_pct: number;
+}
+
+export interface Mention {
+  mention_date: string;
+  source: string | null;
+  article_title: string | null;
+  sentiment: string | null;
+  key_quote: string | null;
+}
+
+export interface ProspectInfo {
+  school: string | null;
+  tier: string | null;
+  consensus_comp: string | null;
+  key_strengths: string[] | null;
+  draft_capital: string | null;
+  notes: string | null;
+  pffRank?: number | null;
+  pffGrade2025?: number | null;
+  pffWaa2025?: number | null;
+  dolittleScore?: number | null;
+  dolittleGames?: number | null;
+  dolittleConfidence?: "HIGH" | "MED" | "LOW" | null;
+  consensusAdp?: string | null;
+  consensusAdpRank?: number | null;
+  nflTeam?: string | null;
+  nflPick?: number | null;
+}
+
+export interface RecInfo {
+  direction: string;
+  fc_at_rec: number | null;
+  rationale: string | null;
+  rec_date: string;
+}
+
+export interface PlayerTradeComp {
+  trade_id: string;
+  league_name: string;
+  date: string;
+  gave: string[];
+  received: string[];
+}
+
+export interface PlayerDetail {
+  summary: PlayerSummary;
+  valueHistory: ValuePoint[];
+  ownership: OwnershipEntry[];
+  exposure: ExposureInfo;
+  mentions: Mention[];
+  prospect: ProspectInfo | null;
+  recommendation: RecInfo | null;
+  recent_trades: PlayerTradeComp[];
+}
+
+export interface ComparablePlayer {
+  player_name: string;
+  position: string;
+  team: string | null;
+  age: number | null;
+  edge_score: number;
+}
+
 // Trade Intelligence
 
 export interface TradeOutcome {

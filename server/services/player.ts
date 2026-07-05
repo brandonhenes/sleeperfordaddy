@@ -3,104 +3,21 @@ import { sql } from "drizzle-orm";
 import { getDynastyLeagueIdsForUserLatestSeason } from "./dynasty-leagues.js";
 import type { SourceWeights } from "./edge-score.js";
 import { getCompositeValues } from "./composite-values.js";
-import { getAgeCurveStatus, type AgeCurveStatus } from "./age-curves.js";
+import { getAgeCurveStatus } from "./age-curves.js";
 import { resolvePlayer } from "./player-resolver.js";
 import { scoreAgreement } from "../lib/score-agreement.js";
-
-export interface PlayerSummary {
-  player_id: string | null;
-  player_name: string;
-  position: string | null;
-  team: string | null;
-  age: number | null;
-  dynasty_value: number | null;
-  trend_30day: number | null;
-  overall_rank: number | null;
-  edge_score: number;
-  fc_score: number | null;
-  ktc_score: number | null;
-  dp_score: number | null;
-  sources_available: number;
-  source_agreement: "high" | "medium" | "low";
-  age_curve: AgeCurveStatus;
-}
-
-export interface ValuePoint {
-  date: string;
-  value: number;
-}
-
-export interface OwnershipEntry {
-  league_name: string;
-  league_id: string;
-}
-
-export interface ExposureInfo {
-  owned_leagues: number;
-  total_leagues: number;
-  exposure_pct: number;
-}
-
-export interface Mention {
-  mention_date: string;
-  source: string | null;
-  article_title: string | null;
-  sentiment: string | null;
-  key_quote: string | null;
-}
-
-export interface ProspectInfo {
-  school: string | null;
-  tier: string | null;
-  consensus_comp: string | null;
-  key_strengths: string[] | null;
-  draft_capital: string | null;
-  notes: string | null;
-  pffRank?: number | null;
-  pffGrade2025?: number | null;
-  pffWaa2025?: number | null;
-  dolittleScore?: number | null;
-  dolittleGames?: number | null;
-  dolittleConfidence?: "HIGH" | "MED" | "LOW" | null;
-  consensusAdp?: string | null;
-  consensusAdpRank?: number | null;
-  nflTeam?: string | null;
-  nflPick?: number | null;
-}
-
-export interface RecInfo {
-  direction: string;
-  fc_at_rec: number | null;
-  rationale: string | null;
-  rec_date: string;
-}
-
-export interface TradeComp {
-  trade_id: string;
-  league_name: string;
-  date: string;
-  gave: string[];
-  received: string[];
-}
-
-export interface PlayerDetail {
-  summary: PlayerSummary;
-  valueHistory: ValuePoint[];
-  ownership: OwnershipEntry[];
-  exposure: ExposureInfo;
-  mentions: Mention[];
-  prospect: ProspectInfo | null;
-  recommendation: RecInfo | null;
-  recent_trades: TradeComp[];
-}
-
-export interface ComparablePlayer {
-  player_name: string;
-  position: string;
-  team: string | null;
-  age: number | null;
-  edge_score: number;
-}
+import type {
+  ComparablePlayer,
+  ExposureInfo,
+  Mention,
+  OwnershipEntry,
+  PlayerDetail,
+  PlayerSummary,
+  PlayerTradeComp,
+  ProspectInfo,
+  RecInfo,
+  ValuePoint,
+} from "../../shared/types.js";
 
 export async function getPlayerDetail(
   playerName: string,
@@ -253,7 +170,7 @@ export async function getPlayerDetail(
   const recommendation = (recRows as unknown as RecInfo[])[0] ?? null;
 
   // ─── Recent Trades ───
-  let recentTrades: TradeComp[] = [];
+  let recentTrades: PlayerTradeComp[] = [];
   if (pm?.player_id) {
     const tradeRows = await db.execute(sql`
       SELECT ta.trade_id, ta.created_at_ms, l.name AS league_name
