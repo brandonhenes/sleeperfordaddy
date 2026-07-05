@@ -1,15 +1,18 @@
 import { useState } from "react";
 import { useParams } from "wouter";
-import AppShell from "../components/AppShell";
-import { PlayerLink } from "../components/ui";
-import EdgeScoreBadge from "../components/EdgeScoreBadge";
-import { posColor } from "../lib/position-colors";
-import {
-  useFreeAgentGaps,
-  type ArbitrageGap,
-} from "../hooks/use-arbitrage";
+import EdgeScoreBadge from "../EdgeScoreBadge";
+import { PlayerLink } from "../ui";
+import { useFreeAgentGaps, type ArbitrageGap } from "../../hooks/use-arbitrage";
+import { readStoredUsername } from "../../lib/current-user";
+import { posColor } from "../../lib/position-colors";
 
 type SortKey = "score" | "free" | "owned";
+
+const cardStyle = {
+  background: "var(--card)",
+  border: "1px solid var(--border)",
+  borderRadius: 10,
+} as const;
 
 function sortLabel(k: SortKey): string {
   if (k === "score") return "Edge Score";
@@ -41,14 +44,6 @@ function LeagueBadge({ league }: { league: { league_id: string; league_name: str
         color: "var(--blue)",
         textDecoration: "none",
         border: "1px solid rgba(96,165,250,0.2)",
-        cursor: "pointer",
-        transition: "background 0.15s",
-      }}
-      onMouseEnter={(e) => {
-        (e.currentTarget as HTMLElement).style.background = "rgba(96,165,250,0.25)";
-      }}
-      onMouseLeave={(e) => {
-        (e.currentTarget as HTMLElement).style.background = "rgba(96,165,250,0.12)";
       }}
     >
       {league.league_name}
@@ -60,9 +55,7 @@ function GapCard({ gap }: { gap: ArbitrageGap }) {
   return (
     <div
       style={{
-        background: "var(--card)",
-        border: "1px solid var(--border)",
-        borderRadius: 10,
+        ...cardStyle,
         padding: "16px 20px",
         display: "flex",
         flexDirection: "column",
@@ -75,12 +68,10 @@ function GapCard({ gap }: { gap: ArbitrageGap }) {
         <span style={{ fontSize: 12, fontWeight: 600, color: posColor(gap.position) }}>
           {gap.position}
         </span>
-        {gap.team && (
-          <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{gap.team}</span>
-        )}
+        {gap.team && <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{gap.team}</span>}
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", gap: 16, fontSize: 13 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 16, fontSize: 13, flexWrap: "wrap" }}>
         <span style={{ color: "var(--green)", fontWeight: 600 }}>
           Owned in {gap.owned_count} league{gap.owned_count !== 1 ? "s" : ""}
         </span>
@@ -102,7 +93,7 @@ const SORT_OPTIONS: SortKey[] = ["score", "free", "owned"];
 
 function SortBar({ active, onChange }: { active: SortKey; onChange: (k: SortKey) => void }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
       <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 600, letterSpacing: 0.5 }}>
         SORT BY
       </span>
@@ -129,10 +120,35 @@ function SortBar({ active, onChange }: { active: SortKey; onChange: (k: SortKey)
   );
 }
 
-export function ArbitrageContent() {
+function LoadingSkeleton() {
+  return (
+    <>
+      {[1, 2, 3, 4].map((i) => (
+        <div key={i} className="animate-pulse" style={{ ...cardStyle, height: 120, marginTop: 12 }} />
+      ))}
+    </>
+  );
+}
+
+function ErrorCard({ message }: { message: string }) {
+  return (
+    <div style={{ ...cardStyle, padding: 40, textAlign: "center", color: "var(--red)" }}>
+      Error: {message}
+    </div>
+  );
+}
+
+function EmptyCard({ label }: { label: string }) {
+  return (
+    <div style={{ ...cardStyle, padding: 40, textAlign: "center", color: "var(--text-muted)" }}>
+      {label}
+    </div>
+  );
+}
+
+export default function ArbitrageContent({ username: usernameProp }: { username?: string }) {
   const params = useParams<{ username: string }>();
-  const storedUser = typeof window !== "undefined" ? localStorage.getItem("edge_username") ?? "" : "";
-  const username = params.username ?? storedUser;
+  const username = usernameProp ?? params.username ?? readStoredUsername();
   const { data, isLoading, error } = useFreeAgentGaps(username);
   const [sortKey, setSortKey] = useState<SortKey>("score");
 
@@ -141,11 +157,13 @@ export function ArbitrageContent() {
   const gaps = data ? sorted(data, sortKey) : [];
 
   if (error) return <ErrorCard message={(error as Error).message} />;
-  if (gaps.length === 0) return <EmptyCard label="No free agent gaps found - your rosters are fully covered" />;
+  if (gaps.length === 0) {
+    return <EmptyCard label="No free agent gaps found - your rosters are fully covered" />;
+  }
 
   return (
     <>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
         <span style={{ fontSize: 13, color: "var(--text-dim)" }}>
           {gaps.length} player{gaps.length !== 1 ? "s" : ""} with free agent gaps
         </span>
@@ -157,52 +175,5 @@ export function ArbitrageContent() {
         ))}
       </div>
     </>
-  );
-}
-
-export default function Arbitrage() {
-  return (
-    <AppShell>
-      <div style={{ padding: "28px 0 8px" }}>
-        <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>
-          Cross-League Arbitrage
-        </h1>
-        <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 4 }}>
-          Players you own that are free agents in your other leagues
-        </p>
-      </div>
-      <ArbitrageContent />
-    </AppShell>
-  );
-}
-
-const skel = { background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10 } as const;
-
-function LoadingSkeleton() {
-  return (
-    <>
-      <div style={{ padding: "28px 0 8px" }}>
-        <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>Cross-League Arbitrage</h1>
-      </div>
-      {[1, 2, 3, 4].map((i) => (
-        <div key={i} className="animate-pulse" style={{ ...skel, height: 120, marginTop: 12 }} />
-      ))}
-    </>
-  );
-}
-
-function ErrorCard({ message }: { message: string }) {
-  return (
-    <div style={{ ...skel, padding: 40, textAlign: "center", color: "var(--red)" }}>
-      Error: {message}
-    </div>
-  );
-}
-
-function EmptyCard({ label }: { label: string }) {
-  return (
-    <div style={{ ...skel, padding: 40, textAlign: "center", color: "var(--text-muted)" }}>
-      {label}
-    </div>
   );
 }

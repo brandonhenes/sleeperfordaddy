@@ -7,3 +7,5 @@ export { default as PlayerLink } from "./PlayerLink";
 export { default as PickBadge } from "./PickBadge";
 export { default as Card } from "./Card";
 export { default as PageHeader } from "./PageHeader";
+export { default as TabBar } from "./TabBar";
+export type { TabBarItem } from "./TabBar";

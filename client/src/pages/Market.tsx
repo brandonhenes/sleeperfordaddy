@@ -1,20 +1,31 @@
 import { useState } from "react";
-import { useParams } from "wouter";
+import { useLocation, useParams, useSearch } from "wouter";
 import AppShell from "../components/AppShell";
-import FreshnessBar from "../components/FreshnessBar";
 import EdgeScoreBadge from "../components/EdgeScoreBadge";
+import FreshnessBar from "../components/FreshnessBar";
+import ArbitrageContent from "../components/free-agents/ArbitrageContent";
+import WaiverContent from "../components/free-agents/WaiverContent";
 import ValueMoversTab from "../components/market/ValueMoversTab";
+import { PageHeader, TabBar, type TabBarItem } from "../components/ui";
+import { readStoredUsername } from "../lib/current-user";
 import { posColor } from "../lib/position-colors";
 import {
   useMarketSignals,
   type SignalType,
 } from "../hooks/use-market-signals";
 
-type Tab = "movers" | "signals";
+type Tab = "movers" | "signals" | "free-agents";
+type FreeAgentTab = "arbitrage" | "waivers";
 
-const TABS: { key: Tab; label: string }[] = [
-  { key: "movers", label: "Value Movers" },
+const TABS: TabBarItem<Tab>[] = [
+  { key: "movers", label: "Movers" },
   { key: "signals", label: "Signals" },
+  { key: "free-agents", label: "Free Agents" },
+];
+
+const FREE_AGENT_TABS: TabBarItem<FreeAgentTab>[] = [
+  { key: "arbitrage", label: "Cross-League" },
+  { key: "waivers", label: "Waiver Wire" },
 ];
 
 const SIGNAL_STYLES: Record<string, { bg: string; text: string; label: string }> = {
@@ -24,6 +35,20 @@ const SIGNAL_STYLES: Record<string, { bg: string; text: string; label: string }>
   EXPERT_FADE: { bg: "#ea580c", text: "#fff", label: "Expert Fade" },
   CONSENSUS_LOCK: { bg: "#64748b", text: "#fff", label: "Locked Value" },
 };
+
+function parseTab(search: string): Tab {
+  const tab = new URLSearchParams(search).get("tab");
+  return tab === "signals" || tab === "free-agents" ? tab : "movers";
+}
+
+function parseFreeAgentTab(search: string): FreeAgentTab {
+  const tab = new URLSearchParams(search).get("fa");
+  return tab === "waivers" ? "waivers" : "arbitrage";
+}
+
+function pathFromLocation(location: string): string {
+  return location.split("?")[0] || "/market";
+}
 
 function SignalsTab({ username }: { username: string }) {
   const { data, isLoading } = useMarketSignals(username || undefined);
@@ -93,9 +118,9 @@ function SignalsTab({ username }: { username: string }) {
                 padding: "14px 18px",
               }}
             >
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6, flexWrap: "wrap" }}>
                 <EdgeScoreBadge score={sig.edge_score} size="md" />
-                <span style={{ fontWeight: 600, fontSize: 14, flex: 1 }}>{sig.full_name}</span>
+                <span style={{ fontWeight: 600, fontSize: 14, flex: 1, minWidth: 140 }}>{sig.full_name}</span>
                 <span style={{ color: posColor(sig.position), fontWeight: 700, fontSize: 11 }}>
                   {sig.position}
                 </span>
@@ -138,63 +163,78 @@ function SignalsTab({ username }: { username: string }) {
   );
 }
 
-export default function Market() {
-  const [activeTab, setActiveTab] = useState<Tab>("movers");
-  const { username } = useParams<{ username: string }>();
-  const storedUser = typeof window !== "undefined" ? localStorage.getItem("edge_username") ?? "" : "";
-  const effectiveUser = username ?? storedUser;
-
+function FreeAgentsPanel({
+  username,
+  active,
+  onChange,
+}: {
+  username: string;
+  active: FreeAgentTab;
+  onChange: (tab: FreeAgentTab) => void;
+}) {
   return (
-    <AppShell>
-      {/* Header */}
-      <div style={{ padding: "28px 0 8px" }}>
-        <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>
-          Market Intelligence
-        </h1>
-        <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 4 }}>
-          Dynasty Daily's data, interactive
-        </p>
-        <FreshnessBar />
-      </div>
-
-      {/* Tab bar */}
-      <div
-        style={{
-          display: "flex",
-          gap: 0,
-          borderBottom: "1px solid var(--border)",
-          marginBottom: 20,
-        }}
-      >
-        {TABS.map((tab) => (
+    <>
+      <div className="edge-subtabbar" role="tablist" aria-label="Free agent views">
+        {FREE_AGENT_TABS.map((tab) => (
           <button
             key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
-            style={{
-              background: "transparent",
-              border: "none",
-              borderBottom:
-                activeTab === tab.key
-                  ? "2px solid var(--amber)"
-                  : "2px solid transparent",
-              color:
-                activeTab === tab.key ? "var(--amber)" : "var(--text-muted)",
-              padding: "10px 20px",
-              fontSize: 13,
-              fontWeight: 600,
-              cursor: "pointer",
-              letterSpacing: 0.3,
-              transition: "color 0.15s, border-color 0.15s",
-            }}
+            type="button"
+            className={`edge-subtab ${active === tab.key ? "active" : ""}`}
+            onClick={() => onChange(tab.key)}
+            role="tab"
+            aria-selected={active === tab.key}
           >
             {tab.label}
           </button>
         ))}
       </div>
+      {active === "arbitrage" && <ArbitrageContent username={username} />}
+      {active === "waivers" && <WaiverContent username={username} />}
+    </>
+  );
+}
 
-      {/* Tab content */}
+export default function Market() {
+  const [location, setLocation] = useLocation();
+  const search = useSearch();
+  const { username } = useParams<{ username: string }>();
+  const effectiveUser = username ?? readStoredUsername();
+  const activeTab = parseTab(search);
+  const activeFreeAgentTab = parseFreeAgentTab(search);
+
+  function updateTab(tab: Tab) {
+    const params = new URLSearchParams(search);
+    params.set("tab", tab);
+    if (tab !== "free-agents") params.delete("fa");
+    setLocation(`${pathFromLocation(location)}?${params.toString()}`);
+  }
+
+  function updateFreeAgentTab(tab: FreeAgentTab) {
+    const params = new URLSearchParams(search);
+    params.set("tab", "free-agents");
+    params.set("fa", tab);
+    setLocation(`${pathFromLocation(location)}?${params.toString()}`);
+  }
+
+  return (
+    <AppShell>
+      <PageHeader
+        title="Market"
+        subtitle="Movers, signals, and free-agent angles in one place."
+        actions={<FreshnessBar />}
+      />
+
+      <TabBar tabs={TABS} active={activeTab} onChange={updateTab} ariaLabel="Market views" />
+
       {activeTab === "movers" && <ValueMoversTab />}
       {activeTab === "signals" && <SignalsTab username={effectiveUser} />}
+      {activeTab === "free-agents" && (
+        <FreeAgentsPanel
+          username={effectiveUser}
+          active={activeFreeAgentTab}
+          onChange={updateFreeAgentTab}
+        />
+      )}
     </AppShell>
   );
 }

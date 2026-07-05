@@ -96,7 +96,7 @@ const MORE_ITEMS: NavItem[] = [
   },
   {
     label: "Free Agents",
-    href: (username) => userScopedPath("free-agents", username),
+    href: (username) => `${userScopedPath("market", username)}?tab=free-agents`,
     icon: Shuffle,
     active: ["/free-agents", "/arbitrage", "/waivers"],
   },

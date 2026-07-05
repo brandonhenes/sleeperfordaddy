@@ -7,10 +7,8 @@ const Portfolio = lazy(() => import("./pages/Portfolio"));
 const Market = lazy(() => import("./pages/Market"));
 const Action = lazy(() => import("./pages/Action"));
 const PlayerDetail = lazy(() => import("./pages/PlayerDetail"));
-const Arbitrage = lazy(() => import("./pages/Arbitrage"));
 const RosterGrades = lazy(() => import("./pages/RosterGrades"));
 const PowerRankings = lazy(() => import("./pages/PowerRankings"));
-const MarketSignals = lazy(() => import("./pages/MarketSignals"));
 const TradeCalculator = lazy(() => import("./pages/TradeCalculator"));
 const TradeHub = lazy(() => import("./pages/TradeHub"));
 const TradeFinder = lazy(() => import("./pages/TradeFinder"));
@@ -18,11 +16,10 @@ const TradeHistory = lazy(() => import("./pages/TradeHistory"));
 const RookieDraft = lazy(() => import("./pages/RookieDraft"));
 const LeagueHistory = lazy(() => import("./pages/LeagueHistory"));
 const InjuryTracker = lazy(() => import("./pages/InjuryTracker"));
-const WaiverWire = lazy(() => import("./pages/WaiverWire"));
-const FreeAgents = lazy(() => import("./pages/FreeAgents"));
 const Settings = lazy(() => import("./pages/Settings"));
 const HowItWorks = lazy(() => import("./pages/HowItWorks"));
 const StoredUserRedirect = lazy(() => import("./pages/StoredUserRedirect"));
+const LegacyMarketRedirect = lazy(() => import("./pages/LegacyMarketRedirect"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 function RouteFallback() {
@@ -65,7 +62,10 @@ export default function App() {
           <Action />
         </Route>
         <Route path="/arbitrage/:username">
-          <Arbitrage />
+          <LegacyMarketRedirect tab="free-agents" freeAgentTab="arbitrage" />
+        </Route>
+        <Route path="/arbitrage">
+          <LegacyMarketRedirect tab="free-agents" freeAgentTab="arbitrage" />
         </Route>
         <Route path="/grades/:username">
           <RosterGrades />
@@ -77,7 +77,10 @@ export default function App() {
           <StoredUserRedirect to="power" />
         </Route>
         <Route path="/signals/:username">
-          <MarketSignals />
+          <LegacyMarketRedirect tab="signals" />
+        </Route>
+        <Route path="/signals">
+          <LegacyMarketRedirect tab="signals" />
         </Route>
         <Route path="/player/:playerName">
           <PlayerDetail />
@@ -119,16 +122,16 @@ export default function App() {
           <StoredUserRedirect to="injuries" />
         </Route>
         <Route path="/waivers/:username">
-          <WaiverWire />
+          <LegacyMarketRedirect tab="free-agents" freeAgentTab="waivers" />
         </Route>
         <Route path="/waivers">
-          <StoredUserRedirect to="waivers" />
+          <LegacyMarketRedirect tab="free-agents" freeAgentTab="waivers" />
         </Route>
         <Route path="/free-agents/:username">
-          <FreeAgents />
+          <LegacyMarketRedirect tab="free-agents" />
         </Route>
         <Route path="/free-agents">
-          <StoredUserRedirect to="free-agents" />
+          <LegacyMarketRedirect tab="free-agents" />
         </Route>
         <Route path="/settings">
           <Settings />

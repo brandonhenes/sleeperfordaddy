@@ -108,6 +108,60 @@ input {
   flex-wrap: wrap;
 }
 
+.edge-tabbar {
+  display: flex;
+  gap: 0;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+
+.edge-tab {
+  min-height: 42px;
+  flex: 0 0 auto;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  padding: 0 18px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+
+.edge-tab.active {
+  color: var(--amber);
+  border-bottom-color: var(--amber);
+}
+
+.edge-subtabbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.edge-subtab {
+  min-height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--text-muted);
+  padding: 0 12px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.edge-subtab.active {
+  border-color: var(--amber);
+  background: rgba(245, 158, 11, 0.14);
+  color: var(--amber);
+}
+
 .edge-nav {
   position: sticky;
   top: 0;

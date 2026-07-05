@@ -1,12 +1,12 @@
-import { useState, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "wouter";
-import AppShell from "../components/AppShell";
-import EdgeScoreBadge from "../components/EdgeScoreBadge";
-import FreshnessBar from "../components/FreshnessBar";
-import { PlayerLink } from "../components/ui";
-import { posColor } from "../lib/position-colors";
-import { useOverview } from "../hooks/use-sleeper";
-import { useWaiverWire, type WaiverPlayer } from "../hooks/use-waiver-wire";
+import EdgeScoreBadge from "../EdgeScoreBadge";
+import FreshnessBar from "../FreshnessBar";
+import { PlayerLink } from "../ui";
+import { useOverview } from "../../hooks/use-sleeper";
+import { useWaiverWire, type WaiverPlayer } from "../../hooks/use-waiver-wire";
+import { readStoredUsername } from "../../lib/current-user";
+import { posColor } from "../../lib/position-colors";
 
 type PosFilter = "ALL" | "QB" | "RB" | "WR" | "TE";
 
@@ -76,7 +76,7 @@ function WaiverTable({ players, filter }: { players: WaiverPlayer[]; filter: Pos
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
         <thead>
           <tr style={{ borderBottom: "1px solid var(--border)" }}>
-            {["Player", "Pos", "Team", "Age", "Edge", "FC", "KTC", "DP", "Agreement", "Curve", ""].map((h) => (
+            {["Player", "Pos", "Team", "Age", "Edge", "FC", "KTC", "DP", "Agreement", "Curve"].map((h) => (
               <th key={h} style={thStyle}>{h.toUpperCase()}</th>
             ))}
           </tr>
@@ -151,28 +151,30 @@ function WaiverTable({ players, filter }: { players: WaiverPlayer[]; filter: Pos
   );
 }
 
-export function WaiverContent() {
+export default function WaiverContent({ username: usernameProp }: { username?: string }) {
   const params = useParams<{ username: string }>();
-  const storedUser = typeof window !== "undefined" ? localStorage.getItem("edge_username") ?? "" : "";
-  const username = params.username ?? storedUser;
+  const username = usernameProp ?? params.username ?? readStoredUsername();
   const { data: overview, isLoading: overviewLoading } = useOverview(username);
   const [selectedLeagueId, setSelectedLeagueId] = useState("");
   const [posFilter, setPosFilter] = useState<PosFilter>("ALL");
 
-  const leagues: { league_id: string; name: string }[] = [];
-  if (overview?.league_groups) {
-    for (const g of overview.league_groups) {
-      if (g.leagues.length > 0) {
-        leagues.push({ league_id: g.leagues[g.leagues.length - 1], name: g.name });
+  const leagues = useMemo(() => {
+    const rows: { league_id: string; name: string }[] = [];
+    if (overview?.league_groups) {
+      for (const g of overview.league_groups) {
+        if (g.leagues.length > 0) {
+          rows.push({ league_id: g.leagues[g.leagues.length - 1], name: g.name });
+        }
       }
     }
-  }
+    return rows;
+  }, [overview?.league_groups]);
 
   useEffect(() => {
     if (leagues.length > 0 && !selectedLeagueId) {
       setSelectedLeagueId(leagues[0].league_id);
     }
-  }, [leagues.length, selectedLeagueId]);
+  }, [leagues, selectedLeagueId]);
 
   const { data: waiverData, isLoading: waiverLoading } = useWaiverWire(selectedLeagueId);
   const players = waiverData?.players ?? [];
@@ -195,7 +197,7 @@ export function WaiverContent() {
       <FreshnessBar leagueId={selectedLeagueId || undefined} />
       <LeagueSelector leagues={leagues} selected={selectedLeagueId} onChange={setSelectedLeagueId} />
 
-      <div style={{ display: "flex", gap: 6, marginTop: 12 }}>
+      <div style={{ display: "flex", gap: 6, marginTop: 12, flexWrap: "wrap" }}>
         {(["ALL", "QB", "RB", "WR", "TE"] as PosFilter[]).map((pos) => (
           <button
             key={pos}
@@ -244,19 +246,5 @@ export function WaiverContent() {
         )}
       </div>
     </>
-  );
-}
-
-export default function WaiverWire() {
-  return (
-    <AppShell>
-      <div style={{ padding: "28px 0 8px" }}>
-        <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>Waiver Wire</h1>
-        <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 4 }}>
-          Free agents available in your leagues, sorted by Edge Score
-        </p>
-      </div>
-      <WaiverContent />
-    </AppShell>
   );
 }

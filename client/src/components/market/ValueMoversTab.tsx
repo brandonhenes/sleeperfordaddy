@@ -162,8 +162,8 @@ function MovementTable({
           </tr>
         </thead>
         <tbody>
-          {movers.map((mover) => (
-            <tr key={mover.player_id}>
+          {movers.map((mover, index) => (
+            <tr key={`${mover.player_id}-${index}`}>
               <td
                 style={{
                   padding: "10px 12px",
