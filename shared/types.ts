@@ -1364,6 +1364,25 @@ export interface Signal {
   signal_date: string;
 }
 
+export interface PositionGrade {
+  grade: string;
+  starter_value: number;
+  depth: number;
+  flags: string[];
+}
+
+export interface LeagueGrades {
+  league_id: string;
+  league_name: string;
+  total_rosters: number;
+  grades: Record<string, PositionGrade>;
+  overall_grade: string;
+}
+
+export interface RosterGradesResult {
+  leagues: LeagueGrades[];
+}
+
 // Trade Intelligence
 
 export interface TradeOutcome {

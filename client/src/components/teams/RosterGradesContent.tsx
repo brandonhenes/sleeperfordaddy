@@ -1,7 +1,8 @@
 import { useState, useMemo } from "react";
 import { StatCard } from "../ui";
 import { posColor } from "../../lib/position-colors";
-import { useRosterGrades, type LeagueGrades, type PositionGrade } from "../../hooks/use-roster-grades";
+import { useRosterGrades } from "../../hooks/use-roster-grades";
+import type { LeagueGrades, PositionGrade } from "@shared/types";
 
 type SortKey = "overall" | "league";
 const POSITIONS = ["QB", "RB", "WR", "TE"];

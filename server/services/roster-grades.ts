@@ -3,27 +3,9 @@ import { sql } from "drizzle-orm";
 import { getDynastyLeagueIdsForUserLatestSeason } from "./dynasty-leagues.js";
 import { getCompositeValues, type ValueType } from "./composite-values.js";
 import type { SourceWeights } from "./edge-score.js";
+import type { LeagueGrades, PositionGrade, RosterGradesResult } from "../../shared/types.js";
 
 // ─── Types ───
-
-export interface PositionGrade {
-  grade: string;
-  starter_value: number;
-  depth: number;
-  flags: string[];
-}
-
-export interface LeagueGrades {
-  league_id: string;
-  league_name: string;
-  total_rosters: number;
-  grades: Record<string, PositionGrade>;
-  overall_grade: string;
-}
-
-export interface RosterGradesResult {
-  leagues: LeagueGrades[];
-}
 
 // Starter slots per position
 const STARTER_SLOTS: Record<string, number> = { QB: 1, RB: 2, WR: 3, TE: 1 };
