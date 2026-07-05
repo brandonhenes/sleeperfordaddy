@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { useParams } from "wouter";
 import AppShell from "../components/AppShell";
 import FreshnessBar from "../components/FreshnessBar";
+import SyncGate from "../components/SyncGate";
 import {
   Card,
   ErrorState,
@@ -14,6 +14,7 @@ import {
   type ResponsiveTableColumn,
   type SegmentedControlItem,
 } from "../components/ui";
+import { useCurrentUsername } from "../hooks/use-current-user";
 import { useBuyingWindows, useInjuredPlayers } from "../hooks/use-injury-tracker";
 import type { BuyingWindow, InjuredPlayerView } from "@shared/types";
 
@@ -351,7 +352,24 @@ function WindowCard({ window }: { window: BuyingWindow }) {
 }
 
 export default function InjuryTracker() {
-  const { username } = useParams<{ username: string }>();
+  const { username } = useCurrentUsername();
+
+  return (
+    <AppShell>
+      <PageHeader
+        title="Injury Tracker"
+        subtitle="Monitor injuries across your portfolio and find buying windows."
+        actions={<FreshnessBar />}
+      />
+
+      <SyncGate username={username}>
+        <InjuryTrackerReady username={username} />
+      </SyncGate>
+    </AppShell>
+  );
+}
+
+function InjuryTrackerReady({ username }: { username: string }) {
   const [activeTab, setActiveTab] = useState<Tab>("injuries");
   const { data: injuries, isLoading: injuriesLoading, error: injuriesError } = useInjuredPlayers(username ?? "");
   const { data: windows, isLoading: windowsLoading, error: windowsError } = useBuyingWindows(username ?? "");
@@ -372,13 +390,7 @@ export default function InjuryTracker() {
   ];
 
   return (
-    <AppShell>
-      <PageHeader
-        title="Injury Tracker"
-        subtitle="Monitor injuries across your portfolio and find buying windows."
-        actions={<FreshnessBar />}
-      />
-
+    <>
       {activeTab === "injuries" && injuries && injuries.length > 0 && (
         <RiskSummary injuries={injuries} />
       )}
@@ -414,6 +426,6 @@ export default function InjuryTracker() {
           </div>
         )}
       </div>
-    </AppShell>
+    </>
   );
 }

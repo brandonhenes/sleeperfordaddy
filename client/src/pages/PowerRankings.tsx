@@ -1,6 +1,7 @@
 import { useLocation, useSearch } from "wouter";
 import AppShell from "../components/AppShell";
 import FreshnessBar from "../components/FreshnessBar";
+import SyncGate from "../components/SyncGate";
 import LeagueHistoryContent from "../components/teams/LeagueHistoryContent";
 import PowerRankingsContent from "../components/teams/PowerRankingsContent";
 import RosterGradesContent from "../components/teams/RosterGradesContent";
@@ -50,9 +51,11 @@ export default function PowerRankings() {
 
       <TabBar tabs={TABS} active={activeTab} onChange={updateTab} ariaLabel="Team views" />
 
-      {activeTab === "power" && <PowerRankingsContent username={effectiveUser} />}
-      {activeTab === "grades" && <RosterGradesContent username={effectiveUser} />}
-      {activeTab === "history" && <LeagueHistoryContent username={effectiveUser} />}
+      <SyncGate username={effectiveUser}>
+        {activeTab === "power" && <PowerRankingsContent username={effectiveUser} />}
+        {activeTab === "grades" && <RosterGradesContent username={effectiveUser} />}
+        {activeTab === "history" && <LeagueHistoryContent username={effectiveUser} />}
+      </SyncGate>
     </AppShell>
   );
 }
