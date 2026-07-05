@@ -96,6 +96,19 @@ input {
   cursor: pointer;
 }
 
+.edge-secondary-button {
+  min-height: 40px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--dark-base);
+  color: var(--text);
+  padding: 0 16px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
 .edge-state-card {
   display: grid;
   justify-items: center;
