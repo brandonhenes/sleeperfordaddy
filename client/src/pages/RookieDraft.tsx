@@ -9,17 +9,14 @@ import { useActiveDrafts, useLiveDraft } from "../hooks/use-live-draft";
 import { useHitRates, useRookieADP } from "../hooks/use-draft-data";
 import { useLatestProspectRankings, type ProspectRanking } from "../hooks/use-prospect-rankings";
 import { useCurrentUsername } from "../hooks/use-current-user";
-import { PlayerLink } from "../components/ui";
-import { posColor } from "../lib/position-colors";
 import PickCard from "./draft/PickCard";
 import AnalyticsView from "./draft/AnalyticsView";
 import DraftCompareView from "./draft/CompareView";
 import LiveDraftView from "./draft/LiveDraftView";
 import MockDraftView from "./draft/MockDraftView";
-import TierBadge from "./draft/TierBadge";
-import TierPickValueOverlay from "./draft/TierPickValueOverlay";
-import ProspectCard from "./draft/ProspectCard";
 import MyBoardView from "./draft/MyBoardView";
+import BigBoardView from "./draft/BigBoardView";
+import PositionalProspectsView from "./draft/PositionalProspectsView";
 import {
   POS_FILTERS,
   TIER_CONFIG,
@@ -464,94 +461,21 @@ export default function RookieDraft() {
       )}
 
       {viewMode === "board" && (
-        <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 20 }}>
-          {TIER_ORDER.map((tier) => {
-            const prospects = byTier[tier];
-            if (!prospects || prospects.length === 0) return null;
-            const cfg = TIER_CONFIG[tier] ?? TIER_CONFIG.flier;
-
-            return (
-              <div key={tier} style={{ border: `1px solid ${cfg.border}`, borderRadius: 12, overflow: "hidden" }}>
-                <div style={{
-                  background: cfg.headerBg,
-                  padding: "10px 18px",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                  borderBottom: `1px solid ${cfg.border}`,
-                }}>
-                  <span style={{
-                    padding: "3px 10px",
-                    borderRadius: 4,
-                    fontSize: 11,
-                    fontWeight: 800,
-                    letterSpacing: 1,
-                    background: cfg.bg,
-                    color: cfg.text,
-                    border: `1px solid ${cfg.border}`,
-                  }}>
-                    {cfg.label}
-                  </span>
-                  <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                    {prospects.length} prospect{prospects.length !== 1 ? "s" : ""}
-                  </span>
-                  {draftCtx && (
-                    <TierPickValueOverlay
-                      tier={tier}
-                      pickValues={draftCtx.pick_values}
-                      userPicks2026={draftCtx.picks_2026}
-                    />
-                  )}
-                </div>
-
-                <div style={{ background: cfg.bg }}>
-                  {prospects.map((p) => (
-                    <ProspectCard
-                      key={p.player_name}
-                      prospect={p}
-                      overallRank={overallRanks.get(p.player_name) ?? 0}
-                      tierColor={cfg.text}
-                      isComparing={compareList.includes(p.player_name)}
-                      onToggleCompare={() => toggleCompare(p.player_name)}
-                      isWatched={watchlist.has(p.player_name)}
-                      onToggleWatch={() => toggleWatch(p.player_name)}
-                      ranking={rankingsMap.get(p.player_name.toLowerCase())}
-                    />
-                  ))}
-                </div>
-              </div>
-            );
-          })}
-        </div>
+        <BigBoardView
+          byTier={byTier}
+          overallRanks={overallRanks}
+          compareList={compareList}
+          watchlist={watchlist}
+          rankingsMap={rankingsMap}
+          pickValues={draftCtx?.pick_values}
+          userPicks2026={draftCtx?.picks_2026}
+          onToggleCompare={toggleCompare}
+          onToggleWatch={toggleWatch}
+        />
       )}
 
       {viewMode === "positional" && (
-        <div style={{ marginTop: 16, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-          {(["QB", "RB", "WR", "TE"] as const).map((pos) => {
-            const prospects = byPosition[pos] ?? [];
-            if (prospects.length === 0) return null;
-            return (
-              <div key={pos} style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
-                <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontWeight: 800, fontSize: 16, color: posColor(pos) }}>{pos}</span>
-                  <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{prospects.length} prospects</span>
-                </div>
-                {prospects.map((p, i) => (
-                  <div key={p.player_name} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 16px", borderBottom: "1px solid var(--border)", fontSize: 13 }}>
-                    <span className="font-mono" style={{ width: 24, fontWeight: 700, color: "var(--text-muted)", textAlign: "center" }}>
-                      {p.fp_rank ?? p.fantasypros_rank ?? i + 1}
-                    </span>
-                    <div style={{ flex: 1 }}>
-                      <PlayerLink name={p.player_name} style={{ fontSize: 13 }} />
-                      {p.school && <span style={{ fontSize: 11, color: "var(--text-muted)", marginLeft: 6 }}>{p.school}</span>}
-                    </div>
-                    <TierBadge tier={p.tier} />
-                  </div>
-                ))}
-              </div>
-            );
-          })}
-        </div>
+        <PositionalProspectsView byPosition={byPosition} />
       )}
 
       {viewMode === "compare" && compareProspects.length >= 2 && (
