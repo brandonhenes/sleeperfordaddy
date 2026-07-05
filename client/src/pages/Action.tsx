@@ -1,6 +1,6 @@
-import { useParams } from "wouter";
 import AppShell from "../components/AppShell";
 import FreshnessBar from "../components/FreshnessBar";
+import SyncGate from "../components/SyncGate";
 import {
   Card,
   ErrorState,
@@ -15,6 +15,7 @@ import {
   type ResponsiveTableColumn,
 } from "../components/ui";
 import { dirColor } from "../lib/position-colors";
+import { useCurrentUsername } from "../hooks/use-current-user";
 import {
   useSellCandidates,
   useBuyOpportunities,
@@ -202,7 +203,7 @@ function BuyOpportunitiesSection({ username }: { username: string }) {
 }
 
 export default function Action() {
-  const { username } = useParams<{ username: string }>();
+  const { username } = useCurrentUsername();
 
   return (
     <AppShell>
@@ -212,21 +213,23 @@ export default function Action() {
         actions={<FreshnessBar />}
       />
 
-      <SectionHeader
-        num="01"
-        icon="Sell"
-        title="SELL CANDIDATES"
-        subtitle="Trending down or over-exposed - consider moving these"
-      />
-      <SellCandidatesSection username={username ?? ""} />
+      <SyncGate username={username}>
+        <SectionHeader
+          num="01"
+          icon="Sell"
+          title="SELL CANDIDATES"
+          subtitle="Trending down or over-exposed - consider moving these"
+        />
+        <SellCandidatesSection username={username} />
 
-      <SectionHeader
-        num="02"
-        icon="Buy"
-        title="BUY OPPORTUNITIES"
-        subtitle="Newsletter BUY recs you do not own or are underweight on"
-      />
-      <BuyOpportunitiesSection username={username ?? ""} />
+        <SectionHeader
+          num="02"
+          icon="Buy"
+          title="BUY OPPORTUNITIES"
+          subtitle="Newsletter BUY recs you do not own or are underweight on"
+        />
+        <BuyOpportunitiesSection username={username} />
+      </SyncGate>
     </AppShell>
   );
 }
