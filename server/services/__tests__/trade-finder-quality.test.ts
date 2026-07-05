@@ -276,6 +276,15 @@ function profile(overrides: Record<string, unknown>) {
   };
 }
 
+function byPosFromAssets(assets: CoreAsset[]) {
+  return {
+    QB: assets.filter((asset) => asset.position === "QB"),
+    RB: assets.filter((asset) => asset.position === "RB"),
+    WR: assets.filter((asset) => asset.position === "WR"),
+    TE: assets.filter((asset) => asset.position === "TE"),
+  };
+}
+
 describe("Find Trades generator quality", () => {
   it("removes pick-only opportunities when player-based opportunities exist", () => {
     const playerPackages = Array.from({ length: 8 }, (_, index) =>
@@ -387,6 +396,111 @@ describe("Find Trades generator quality", () => {
     expect(generated.some((pkg) => !pkg.is_pick_only)).toBe(true);
     expect(generated.some((pkg) => packageContainsPlayerAndPick(pkg))).toBe(true);
     expect(generated.some((pkg) => pkg.addresses_my_need && pkg.you_receive.some((asset) => asset.position === "WR"))).toBe(true);
+  });
+
+  it("caps expensive shared valuation calls while generating strategic package shapes", async () => {
+    const positions = ["QB", "RB", "WR", "TE"] as const;
+    const userAssets = Array.from({ length: 14 }, (_, index) =>
+      coreAsset({
+        player_id: `user-${index}`,
+        full_name: `User ${index}`,
+        position: positions[index % positions.length],
+        edge_score: 82 - index,
+      })
+    );
+    const oppAssets = Array.from({ length: 14 }, (_, index) =>
+      coreAsset({
+        player_id: `opp-${index}`,
+        full_name: `Opponent ${index}`,
+        position: positions[(index + 1) % positions.length],
+        edge_score: 88 - index,
+      })
+    );
+    const user = profile({
+      roster: {
+        ...profile({}).roster,
+        is_user: true,
+        archetype: "All-In Contender",
+        core_assets: userAssets,
+      },
+      byPos: byPosFromAssets(userAssets),
+      needs: ["WR", "TE"],
+      surplus: byPosFromAssets(userAssets),
+      tradeablePicks: [
+        scoredPick("2027 Mid 1st", 62, 1, 8),
+        scoredPick("2027 Mid 2nd", 42, 2, 20),
+        scoredPick("2027 Mid 3rd", 28, 3, 32),
+      ],
+    });
+    const opp = profile({
+      roster: {
+        ...profile({}).roster,
+        roster_id: 2,
+        display_name: "Opponent",
+        archetype: "Rebuilder",
+        core_assets: oppAssets,
+      },
+      byPos: byPosFromAssets(oppAssets),
+      needs: ["QB", "RB"],
+      surplus: byPosFromAssets(oppAssets),
+      tradeablePicks: [
+        scoredPick("2027 Early 1st", 72, 1, 2),
+        scoredPick("2027 Early 2nd", 48, 2, 14),
+      ],
+    });
+    let calls = 0;
+
+    const generated = await generateTradeFinderPackages(
+      user as never,
+      opp as never,
+      "sf",
+      "league-1",
+      baselineScoring,
+      new Map(),
+      false,
+      undefined,
+      async (send, receive) => {
+        calls += 1;
+        const sendTotal = send.length * 3_000;
+        const receiveTotal = sendTotal + 250;
+        const enrich = (asset: TradePackageAsset, value: number) => ({
+          ...asset,
+          base_market_value: value,
+          league_market_value: value,
+          context_trade_value: value,
+          trade_power: value,
+        });
+        const sendValue = sendTotal / Math.max(send.length, 1);
+        const receiveValue = receiveTotal / Math.max(receive.length, 1);
+        return {
+          sendAssets: send.map((asset) => enrich(asset, sendValue)),
+          receiveAssets: receive.map((asset) => enrich(asset, receiveValue)),
+          sendTotal,
+          receiveTotal,
+          delta: receiveTotal - sendTotal,
+          sendEdge: send.reduce((sum, asset) => sum + asset.edge_score, 0),
+          receiveEdge: receive.reduce((sum, asset) => sum + asset.edge_score, 0),
+          deltaEdge:
+            receive.reduce((sum, asset) => sum + asset.edge_score, 0) -
+            send.reduce((sum, asset) => sum + asset.edge_score, 0),
+          packagePenaltySend: 0,
+          packagePenaltyReceive: 0,
+          sendBaseMarketValue: sendTotal,
+          receiveBaseMarketValue: receiveTotal,
+          sendLeagueMarketValue: sendTotal,
+          receiveLeagueMarketValue: receiveTotal,
+          sendContextTradeValue: sendTotal,
+          receiveContextTradeValue: receiveTotal,
+          percentGap: 0.04,
+          valuationWarnings: [],
+          valuationExplanations: ["Fake shared valuation output."],
+          fairness: "fair" as const,
+        };
+      }
+    );
+
+    expect(calls).toBeLessThanOrEqual(18);
+    expect(generated.some((pkg) => pkg.you_send.length + pkg.you_receive.length > 2)).toBe(true);
   });
 
   it("keeps need-based metadata consistent with package contents", () => {

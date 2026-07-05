@@ -62,6 +62,8 @@ const MIN_EDGE_SCORE = 42;
 const ANCHOR_EDGE_SCORE = 62;
 const ELITE_EDGE_SCORE = 85;
 const MAJOR_VALUATION_EDGE = MAJOR_RECOMMENDATION_EDGE;
+const TRADE_FINDER_MAX_EVALUATIONS_PER_OPPONENT = 18;
+const TRADE_FINDER_MAX_OPPONENTS = 6;
 
 const ARCHETYPE_WANTS: Record<string, string> = {
   "Dynasty Juggernaut": "depth maintenance",
@@ -1072,6 +1074,17 @@ export async function generateTradeFinderPackages(
   scorePackage: TradeFinderPackageScorer = scoreTradeFinderPackage
 ): Promise<TradePackage[]> {
   const packages: TradePackage[] = [];
+  let packageEvaluationsStarted = 0;
+  const scorePackageWithBudget = async (
+    send: TradePackageAsset[],
+    receive: TradePackageAsset[]
+  ): Promise<PackageScore | null> => {
+    if (packageEvaluationsStarted >= TRADE_FINDER_MAX_EVALUATIONS_PER_OPPONENT) {
+      return null;
+    }
+    packageEvaluationsStarted += 1;
+    return scorePackage(send, receive, leagueId, mode, classStrengths);
+  };
   type StrategicPackageInput = {
     type: TradePackage["type"];
     label: string;
@@ -1082,7 +1095,8 @@ export async function generateTradeFinderPackages(
     sweetener_hint?: string | null;
   };
   const addStrategicPackage = async (input: StrategicPackageInput): Promise<boolean> => {
-    const scored = await scorePackage(input.send, input.receive, leagueId, mode, classStrengths);
+    const scored = await scorePackageWithBudget(input.send, input.receive);
+    if (!scored) return false;
     if (scored.sendTotal <= 0 || scored.receiveTotal <= 0) return false;
     packages.push({
       type: input.type,
@@ -1298,7 +1312,8 @@ export async function generateTradeFinderPackages(
 
       const send = [assetFromPlayerWithScoring(userGives, scoring, usage, hasCustom)];
       const receive = [assetFromPlayerWithScoring(oppGives, scoring, usage, hasCustom)];
-      const scored = await scorePackage(send, receive, leagueId, mode, classStrengths);
+      const scored = await scorePackageWithBudget(send, receive);
+      if (!scored) continue;
       if (scored.sendTotal <= 0 || scored.receiveTotal <= 0) continue;
 
       packages.push({
@@ -1364,7 +1379,8 @@ export async function generateTradeFinderPackages(
 
     const send = sendAssets.map((a) => assetFromPlayerWithScoring(a, scoring, usage, hasCustom));
     const receive = [assetFromPlayerWithScoring(target, scoring, usage, hasCustom)];
-    const scored = await scorePackage(send, receive, leagueId, mode, classStrengths);
+    const scored = await scorePackageWithBudget(send, receive);
+    if (!scored) continue;
     if (scored.sendTotal <= 0 || scored.receiveTotal <= 0) continue;
 
     packages.push({
@@ -1418,7 +1434,8 @@ export async function generateTradeFinderPackages(
           assetFromPick(pick),
         ];
         const receive = [assetFromPlayerWithScoring(target, scoring, usage, hasCustom)];
-        const scored = await scorePackage(send, receive, leagueId, mode, classStrengths);
+        const scored = await scorePackageWithBudget(send, receive);
+        if (!scored) continue;
         if (scored.sendTotal <= 0 || scored.receiveTotal <= 0) {
           continue;
         }
@@ -1485,7 +1502,8 @@ export async function generateTradeFinderPackages(
         assetFromPlayerWithScoring(anchor, scoring, usage, hasCustom),
         assetFromPick(pick),
       ];
-      const scored = await scorePackage(send, receive, leagueId, mode, classStrengths);
+      const scored = await scorePackageWithBudget(send, receive);
+      if (!scored) continue;
       if (scored.sendTotal <= 0 || scored.receiveTotal <= 0) {
         continue;
       }
@@ -1557,7 +1575,8 @@ export async function generateTradeFinderPackages(
       }
 
       const receive = [assetFromPlayerWithScoring(target, scoring, usage, hasCustom)];
-      const scored = await scorePackage(send, receive, leagueId, mode, classStrengths);
+      const scored = await scorePackageWithBudget(send, receive);
+      if (!scored) continue;
       if (scored.sendTotal <= 0 || scored.receiveTotal <= 0) continue;
 
       const isDupe = packages.some(
@@ -1628,7 +1647,8 @@ export async function generateTradeFinderPackages(
             continue;
           }
 
-          const scored = await scorePackage(send, receive, leagueId, mode, classStrengths);
+          const scored = await scorePackageWithBudget(send, receive);
+          if (!scored) continue;
           if (scored.sendTotal <= 0 || scored.receiveTotal <= 0) {
             continue;
           }
@@ -1756,7 +1776,7 @@ export async function findTrades(
       return { opp, score, reason };
     })
     .sort((a, b) => b.score - a.score)
-    .slice(0, 8);
+    .slice(0, TRADE_FINDER_MAX_OPPONENTS);
 
   const suggestions: TradeSuggestion[] = [];
 

@@ -5,6 +5,7 @@ import { weightQueryParams } from "../lib/weights";
 import type { TradeSuggestion, ShopPlayerResult } from "@shared/types";
 
 const SHOP_PLAYER_REQUEST_TIMEOUT_MS = 30_000;
+const TRADE_FINDER_REQUEST_TIMEOUT_MS = 30_000;
 
 function tradeToolQueryParams(): string {
   const params = `${classStrengthQueryParams()}${weightQueryParams()}`;
@@ -20,11 +21,28 @@ export function useTradeSuggestions(username: string, leagueId: string) {
   const suffix = tradeToolQueryParams();
   return useQuery<TradeSuggestion[]>({
     queryKey: ["trade-finder", username, leagueId, suffix],
-    queryFn: () =>
-      apiFetch(
-        `/api/trade/find/${encodeURIComponent(username)}/${encodeURIComponent(leagueId)}${suffix}`
-      ),
+    queryFn: async () => {
+      const controller = new AbortController();
+      const timeout = window.setTimeout(
+        () => controller.abort(),
+        TRADE_FINDER_REQUEST_TIMEOUT_MS
+      );
+      try {
+        return await apiFetch(
+          `/api/trade/find/${encodeURIComponent(username)}/${encodeURIComponent(leagueId)}${suffix}`,
+          { signal: controller.signal }
+        );
+      } catch (error) {
+        if ((error as Error).name === "AbortError") {
+          throw new Error("Trade Finder timed out while building package ideas. Retry after the league finishes loading.");
+        }
+        throw error;
+      } finally {
+        window.clearTimeout(timeout);
+      }
+    },
     enabled: !!username && !!leagueId,
+    retry: 1,
   });
 }
 
