@@ -5,7 +5,9 @@ import { weightQueryParams } from "../lib/weights";
 import type { TradeSuggestion, ShopPlayerResult } from "@shared/types";
 
 const SHOP_PLAYER_REQUEST_TIMEOUT_MS = 30_000;
-const TRADE_FINDER_REQUEST_TIMEOUT_MS = 30_000;
+const TRADE_FINDER_REQUEST_TIMEOUT_MS = 60_000;
+const TRADE_FINDER_TIMEOUT_MESSAGE =
+  "Trade Finder timed out while building package ideas. Retry after this league finishes loading.";
 
 function tradeToolQueryParams(): string {
   const params = `${classStrengthQueryParams()}${weightQueryParams()}`;
@@ -34,7 +36,7 @@ export function useTradeSuggestions(username: string, leagueId: string) {
         );
       } catch (error) {
         if ((error as Error).name === "AbortError") {
-          throw new Error("Trade Finder timed out while building package ideas. Retry after the league finishes loading.");
+          throw new Error(TRADE_FINDER_TIMEOUT_MESSAGE);
         }
         throw error;
       } finally {
@@ -42,7 +44,9 @@ export function useTradeSuggestions(username: string, leagueId: string) {
       }
     },
     enabled: !!username && !!leagueId,
-    retry: 1,
+    retry: (failureCount, error) =>
+      !String((error as Error).message ?? "").includes("timed out") &&
+      failureCount < 1,
   });
 }
 

@@ -71,9 +71,13 @@ const TRADE_FINDER_MAX_ROSTER_SPOT_TEMPLATES = 2;
 const TRADE_FINDER_MAX_TIER_DOWN_TEMPLATES = 4;
 const TRADE_FINDER_MAX_RENTAL_TEMPLATES = 3;
 const TRADE_FINDER_MAX_CONCURRENT_VALUATIONS = 4;
+const TRADE_FINDER_RESULT_TTL_MS = 60_000;
+const TRADE_FINDER_RESULT_CACHE_MAX_ENTRIES = 20;
 
 let activeTradeFinderValuations = 0;
 const tradeFinderValuationQueue: Array<() => void> = [];
+const tradeFinderResultCache = new Map<string, { data: TradeSuggestion[]; expires: number }>();
+const tradeFinderInFlight = new Map<string, Promise<TradeSuggestion[]>>();
 
 async function withTradeFinderValuationSlot<T>(work: () => Promise<T>): Promise<T> {
   if (activeTradeFinderValuations >= TRADE_FINDER_MAX_CONCURRENT_VALUATIONS) {
@@ -86,6 +90,50 @@ async function withTradeFinderValuationSlot<T>(work: () => Promise<T>): Promise<
   } finally {
     activeTradeFinderValuations = Math.max(0, activeTradeFinderValuations - 1);
     tradeFinderValuationQueue.shift()?.();
+  }
+}
+
+function tradeFinderResultCacheKey(
+  username: string,
+  leagueId: string,
+  classStrengths?: ClassStrengthMap,
+  weights?: SourceWeights
+): string {
+  return [
+    username.toLowerCase(),
+    leagueId,
+    sourceWeightsKey(weights),
+    classStrengthsKey(classStrengths),
+  ].join("|");
+}
+
+function getCachedTradeFinderResult(key: string): TradeSuggestion[] | null {
+  const now = Date.now();
+  const hit = tradeFinderResultCache.get(key);
+  if (!hit) return null;
+  if (hit.expires <= now) {
+    tradeFinderResultCache.delete(key);
+    return null;
+  }
+  tradeFinderResultCache.delete(key);
+  tradeFinderResultCache.set(key, hit);
+  return hit.data;
+}
+
+function setCachedTradeFinderResult(key: string, data: TradeSuggestion[]) {
+  tradeFinderResultCache.set(key, {
+    data,
+    expires: Date.now() + TRADE_FINDER_RESULT_TTL_MS,
+  });
+
+  const now = Date.now();
+  for (const [cacheKey, value] of tradeFinderResultCache.entries()) {
+    if (value.expires <= now) tradeFinderResultCache.delete(cacheKey);
+  }
+  while (tradeFinderResultCache.size > TRADE_FINDER_RESULT_CACHE_MAX_ENTRIES) {
+    const oldestKey = tradeFinderResultCache.keys().next().value;
+    if (!oldestKey) break;
+    tradeFinderResultCache.delete(oldestKey);
   }
 }
 
@@ -1771,6 +1819,31 @@ export async function generateTradeFinderPackages(
 // Main
 
 export async function findTrades(
+  username: string,
+  leagueId: string,
+  classStrengths?: ClassStrengthMap,
+  weights?: SourceWeights
+): Promise<TradeSuggestion[]> {
+  const cacheKey = tradeFinderResultCacheKey(username, leagueId, classStrengths, weights);
+  const cached = getCachedTradeFinderResult(cacheKey);
+  if (cached) return cached;
+
+  const inFlight = tradeFinderInFlight.get(cacheKey);
+  if (inFlight) return inFlight;
+
+  const work = findTradesUncached(username, leagueId, classStrengths, weights)
+    .then((data) => {
+      setCachedTradeFinderResult(cacheKey, data);
+      return data;
+    })
+    .finally(() => {
+      tradeFinderInFlight.delete(cacheKey);
+    });
+  tradeFinderInFlight.set(cacheKey, work);
+  return work;
+}
+
+async function findTradesUncached(
   username: string,
   leagueId: string,
   classStrengths?: ClassStrengthMap,
