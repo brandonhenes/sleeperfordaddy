@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Card } from "./ui";
 import {
   classStrengthSeasons,
   DEFAULT_CLASS_STRENGTHS,
@@ -6,13 +7,6 @@ import {
   saveClassStrengths,
   type ClassStrengthSettings as ClassStrengthValues,
 } from "../lib/pick-strengths";
-
-const cardStyle = {
-  background: "var(--card)",
-  border: "1px solid var(--border)",
-  borderRadius: 10,
-  padding: 20,
-} as const;
 
 function seasonLabel(season: string, index: number): string {
   if (index === classStrengthSeasons().length - 1) return `${season}+`;
@@ -27,10 +21,8 @@ export default function ClassStrengthSettings() {
   }, [values]);
 
   return (
-    <div style={{ ...cardStyle, marginTop: 12 }}>
-      <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-muted)", letterSpacing: 0.5, marginBottom: 16 }}>
-        ROOKIE CLASS STRENGTH
-      </div>
+    <Card className="mt-3">
+      <div className="label mb-4">Rookie Class Strength</div>
       <div style={{ display: "grid", gap: 16 }}>
         {classStrengthSeasons().map((season, index) => {
           const value = values[season] ?? DEFAULT_CLASS_STRENGTHS[season];
@@ -65,6 +57,6 @@ export default function ClassStrengthSettings() {
       <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 12, lineHeight: 1.6 }}>
         Pick values = Base x Future Year Discount x Class Strength. The future discount drops 0.1 per year (2027 = 0.9, 2028 = 0.8, 2029 = 0.7). Class strength is your adjustment on top of that.
       </div>
-    </div>
+    </Card>
   );
 }

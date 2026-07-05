@@ -196,7 +196,7 @@ export default function NavBar({ username, avatarId }: NavBarProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const moreRef = useRef<HTMLDivElement>(null);
-  const initial = username.charAt(0).toUpperCase();
+  const initial = username ? username.charAt(0).toUpperCase() : "?";
 
   useEffect(() => {
     setMobileMenuOpen(false);

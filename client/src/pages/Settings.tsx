@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import AppShell from "../components/AppShell";
 import ClassStrengthSettings from "../components/ClassStrengthSettings";
+import { Card, PageHeader, SegmentedControl } from "../components/ui";
 import { useCurrentUsername } from "../hooks/use-current-user";
 import { useSettings } from "../hooks/use-settings";
 import {
@@ -19,13 +20,6 @@ const PRESETS: { label: string; desc: string; weights: SourceWeights }[] = [
   { label: "Market-First", desc: "Emphasize market sentiment", weights: { fc: 45, ktc: 45, dp: 10 } },
   { label: "Model-First", desc: "Emphasize DynastyProcess model scores", weights: { fc: 15, ktc: 15, dp: 70 } },
 ];
-
-const cardStyle = {
-  background: "var(--card)",
-  border: "1px solid var(--border)",
-  borderRadius: 10,
-  padding: 20,
-} as const;
 
 export default function Settings() {
   const { username } = useCurrentUsername();
@@ -81,53 +75,42 @@ export default function Settings() {
       && Math.abs(weights.dp - preset.dp) < 0.01;
   }
 
+  const activePreset = PRESETS.find((preset) => isPreset(preset.weights))?.label ?? null;
+
+  function applyPreset(label: string) {
+    const preset = PRESETS.find((item) => item.label === label);
+    if (preset) setWeights({ ...preset.weights });
+  }
+
   return (
     <AppShell>
-      <div style={{ padding: "28px 0 8px" }}>
-        <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>Settings</h1>
-        <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 4 }}>
-          Save your Edge Score blend and apply it across live score views
-        </p>
-      </div>
+      <PageHeader
+        title="Settings"
+        subtitle="Save your Edge Score blend and apply it across live score views"
+      />
 
       {!username && (
-        <div style={{ ...cardStyle, marginTop: 16, color: "var(--text-dim)", fontSize: 12 }}>
+        <Card className="mt-4 text-xs text-[var(--text-dim)]">
           No username is currently loaded. These weights will be used locally until you open a user-specific page.
-        </div>
+        </Card>
       )}
 
-      <div style={{ ...cardStyle, marginTop: 16 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-muted)", letterSpacing: 0.5, marginBottom: 12 }}>
-          PRESETS
-        </div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {PRESETS.map((preset) => (
-            <button
-              key={preset.label}
-              onClick={() => setWeights({ ...preset.weights })}
-              style={{
-                background: isPreset(preset.weights) ? "var(--amber)" : "var(--dark-base)",
-                color: isPreset(preset.weights) ? "var(--dark-base)" : "var(--text-dim)",
-                border: `1px solid ${isPreset(preset.weights) ? "var(--amber)" : "var(--border)"}`,
-                borderRadius: 8,
-                padding: "10px 18px",
-                cursor: "pointer",
-                fontSize: 13,
-                fontWeight: 600,
-                fontFamily: "inherit",
-              }}
-            >
-              <div>{preset.label}</div>
-              <div style={{ fontSize: 10, fontWeight: 400, opacity: 0.7, marginTop: 2 }}>{preset.desc}</div>
-            </button>
-          ))}
-        </div>
-      </div>
+      <Card className="mt-4">
+        <div className="label mb-3">Presets</div>
+        <SegmentedControl
+          items={PRESETS.map((preset) => ({
+            key: preset.label,
+            label: preset.label,
+            description: preset.desc,
+          }))}
+          value={activePreset}
+          onChange={applyPreset}
+          ariaLabel="Source weight presets"
+        />
+      </Card>
 
-      <div style={{ ...cardStyle, marginTop: 12 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-muted)", letterSpacing: 0.5, marginBottom: 16 }}>
-          CUSTOM WEIGHTS
-        </div>
+      <Card className="mt-3">
+        <div className="label mb-4">Custom Weights</div>
         {([
           { key: "fc" as const, label: "FantasyCalc", color: "#3b82f6" },
           { key: "ktc" as const, label: "KeepTradeCut", color: "#22c55e" },
@@ -155,12 +138,10 @@ export default function Settings() {
         <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 8 }}>
           Weights are normalized when computing Edge Scores, so the blend still works if the sliders do not total 100.
         </div>
-      </div>
+      </Card>
 
-      <div style={{ ...cardStyle, marginTop: 12 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-muted)", letterSpacing: 0.5, marginBottom: 12 }}>
-          CURRENT MIX
-        </div>
+      <Card className="mt-3">
+        <div className="label mb-3">Current Mix</div>
         <div style={{ display: "flex", gap: 16 }}>
           {([
             { key: "fc" as const, label: "FC", color: "#3b82f6" },
@@ -173,14 +154,14 @@ export default function Settings() {
             </div>
           ))}
         </div>
-      </div>
+      </Card>
 
-      <div style={{ ...cardStyle, marginTop: 12 }}>
+      <Card className="mt-3">
         <div style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.6 }}>
           {isSaving ? "Saving weights..." : "Weights are saved per user and used by the major live Edge Score views."}
           {isDefaultSourceWeights(weights) ? " Default blend is FC 35 / KTC 20 / DP 45." : ""}
         </div>
-      </div>
+      </Card>
 
       <ClassStrengthSettings />
     </AppShell>
