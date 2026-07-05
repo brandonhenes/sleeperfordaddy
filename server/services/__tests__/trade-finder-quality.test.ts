@@ -355,13 +355,13 @@ describe("Find Trades generator quality", () => {
   it("generates player-based and player-plus-pick opportunities when valid player assets exist", async () => {
     const userQb = coreAsset({ player_id: "user-qb", full_name: "User QB", position: "QB", edge_score: 72 });
     const userRb = coreAsset({ player_id: "user-rb", full_name: "User RB", position: "RB", edge_score: 69 });
-    const oppWr = coreAsset({ player_id: "opp-wr", full_name: "Opp WR", position: "WR", edge_score: 70 });
+    const oppWr = coreAsset({ player_id: "opp-wr", full_name: "Opp WR", position: "WR", edge_score: 88 });
     const user = profile({
       roster: { ...profile({}).roster, is_user: true, archetype: "Competitor", core_assets: [userQb, userRb] },
       byPos: { QB: [userQb], RB: [userRb], WR: [], TE: [] },
       needs: ["WR"],
       surplus: { QB: [userQb], RB: [userRb], WR: [], TE: [] },
-      tradeablePicks: [scoredPick("2027 2.05", 42, 2, 17)],
+      tradeablePicks: [scoredPick("2027 3.05", 15, 3, 29)],
     });
     const opp = profile({
       roster: { ...profile({}).roster, roster_id: 2, display_name: "Opponent", archetype: "Rebuilder", core_assets: [oppWr] },
@@ -484,6 +484,60 @@ describe("Find Trades generator quality", () => {
     expect(shouldSurfaceTradeFinderPackage(annotated)).toBe(true);
     expect(annotated.quality_tier).toBe("low_confidence");
     expect(dedupeAndRankTradeFinderPackages([annotated], 4)).toEqual([annotated]);
+  });
+
+  it("rejects excessive overpays even when they fit needs and look easy to accept", () => {
+    const annotated = annotateTradeFinderPackage(
+      packageFrom(
+        [player("Christian McCaffrey", "RB", 84), player("Kyle Pitts", "TE", 83)],
+        [player("A.J. Brown", "WR", 84)],
+        {
+          fairness: "lopsided",
+          acceptance: {
+            probability: 90,
+            label: "Likely",
+            accept_reasons: ["Massive overpay in their favor. They'll take this immediately."],
+            reject_reasons: ["Juggernauts rarely need to trade"],
+          },
+          why_you_do_it: "Consolidate depth into a WR starter upgrade",
+          why_they_accept: "Massive overpay in their favor.",
+        }
+      ),
+      { userNeeds: ["WR"], opponentNeeds: ["RB", "TE"], userArchetype: "Competitor", opponentArchetype: "Dynasty Juggernaut" }
+    );
+
+    expect(annotated.addresses_my_need).toBe(true);
+    expect(annotated.addresses_their_need).toBe(true);
+    expect(annotated.quality_tier).toBe("low_confidence");
+    expect(annotated.package_quality_label).toBe("poor");
+    expect(annotated.ranking_components?.acceptance_likelihood).toBeLessThanOrEqual(28);
+    expect(annotated.risk_reason).toContain("excessive overpay");
+    expect(shouldSurfaceTradeFinderPackage(annotated)).toBe(false);
+    expect(dedupeAndRankTradeFinderPackages([annotated], 4)).toEqual([]);
+  });
+
+  it("downgrades acceptance when the only accept signal is your overpay", () => {
+    const annotated = annotateTradeFinderPackage(
+      packageFrom(
+        [player("Send RB", "RB", 70)],
+        [player("Receive WR", "WR", 60)],
+        {
+          fairness: "lopsided",
+          acceptance: {
+            probability: 90,
+            label: "Likely",
+            accept_reasons: ["Massive overpay in their favor. They'll take this immediately."],
+            reject_reasons: [],
+          },
+        }
+      ),
+      { userNeeds: ["WR"], opponentNeeds: ["RB"], userArchetype: "Competitor", opponentArchetype: "Competitor" }
+    );
+
+    expect(shouldSurfaceTradeFinderPackage(annotated)).toBe(true);
+    expect(annotated.package_quality_label).toBe("speculative");
+    expect(annotated.quality_tier).toBe("low_confidence");
+    expect(annotated.ranking_components?.acceptance_likelihood).toBeLessThanOrEqual(28);
   });
 
   it("rejects superstar-for-junk packages", () => {
