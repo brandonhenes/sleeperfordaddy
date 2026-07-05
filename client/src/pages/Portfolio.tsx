@@ -3,21 +3,48 @@ import { useParams } from "wouter";
 import AppShell from "../components/AppShell";
 import FreshnessBar from "../components/FreshnessBar";
 import ExposureTable from "../components/ExposureTable";
-import { StatCard, SectionHeader } from "../components/ui";
+import {
+  Card,
+  ErrorState,
+  LoadingSkeleton,
+  PageHeader,
+  PositionBadge,
+  SegmentedControl,
+  StatCard,
+  SectionHeader,
+  type SegmentedControlItem,
+} from "../components/ui";
 import EdgeScoreBadge from "../components/EdgeScoreBadge";
-import { posColor } from "../lib/position-colors";
 import { usePortfolio } from "../hooks/use-portfolio";
 
 type SortKey = "exposure" | "edge" | "name" | "portfolio_value" | "disagreement";
 const POS_FILTERS = ["ALL", "QB", "RB", "WR", "TE"] as const;
+type PosFilter = (typeof POS_FILTERS)[number];
+type AgeCurveFilter = "ALL" | "Ascent" | "Prime" | "Decline" | "Cliff";
+
+const AGE_FILTERS: SegmentedControlItem<AgeCurveFilter>[] = [
+  { key: "ALL", label: "All Ages" },
+  { key: "Ascent", label: "Ascent" },
+  { key: "Prime", label: "Prime" },
+  { key: "Decline", label: "Decline" },
+  { key: "Cliff", label: "Cliff" },
+];
+
+const SORT_OPTIONS: SegmentedControlItem<SortKey>[] = [
+  { key: "exposure", label: "Exposure" },
+  { key: "edge", label: "Edge Score" },
+  { key: "portfolio_value", label: "Portfolio Value" },
+  { key: "disagreement", label: "Disagreement" },
+  { key: "name", label: "Name" },
+];
 
 export default function Portfolio() {
   const { username } = useParams<{ username: string }>();
   const { data, isLoading, error } = usePortfolio(username);
   const [sortBy, setSortBy] = useState<SortKey>("exposure");
-  const [posFilter, setPosFilter] = useState<string>("ALL");
+  const [posFilter, setPosFilter] = useState<PosFilter>("ALL");
   const [searchQuery, setSearchQuery] = useState("");
-  const [ageCurveFilter, setAgeCurveFilter] = useState<string>("ALL");
+  const [ageCurveFilter, setAgeCurveFilter] = useState<AgeCurveFilter>("ALL");
   const [exposureThreshold, setExposureThreshold] = useState(0);
 
   const filtered = useMemo(() => {
@@ -46,14 +73,27 @@ export default function Portfolio() {
     return items;
   }, [data, sortBy, posFilter, ageCurveFilter, searchQuery, exposureThreshold]);
 
-  if (isLoading) return <AppShell><LoadingSkeleton /></AppShell>;
+  if (isLoading) {
+    return (
+      <AppShell>
+        <PageHeader
+          title="My Portfolio"
+          subtitle="Loading player exposure across your leagues."
+          actions={<FreshnessBar />}
+        />
+        <LoadingSkeleton label="Loading portfolio" rows={6} />
+      </AppShell>
+    );
+  }
+
   if (error || !data) {
     return (
       <AppShell>
-        <div style={{ padding: "28px 0 8px" }}>
-          <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>My Portfolio</h1>
-        </div>
-        <EmptyCard label={error ? (error as Error).message : "No portfolio data found. Try syncing first."} />
+        <PageHeader title="My Portfolio" actions={<FreshnessBar />} />
+        <ErrorState
+          title="Could not load portfolio"
+          message={error ? (error as Error).message : "No portfolio data found. Try syncing first."}
+        />
       </AppShell>
     );
   }
@@ -62,13 +102,11 @@ export default function Portfolio() {
 
   return (
     <AppShell>
-      <div style={{ padding: "28px 0 8px" }}>
-        <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>My Portfolio</h1>
-        <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 4 }}>
-          {stats.total_players} players across {stats.total_leagues} leagues
-        </p>
-        <FreshnessBar />
-      </div>
+      <PageHeader
+        title="My Portfolio"
+        subtitle={`${stats.total_players} players across ${stats.total_leagues} leagues`}
+        actions={<FreshnessBar />}
+      />
 
       <div style={{ display: "flex", gap: 16, marginTop: 16, flexWrap: "wrap" }}>
         <StatCard
@@ -103,22 +141,19 @@ export default function Portfolio() {
       {stats.position_counts.length > 0 && (
         <div style={{ display: "flex", gap: 12, marginTop: 16, flexWrap: "wrap" }}>
           {stats.position_counts.map((pc) => (
-            <div
+            <Card
               key={pc.position}
               style={{
-                background: "var(--card)",
-                border: "1px solid var(--border)",
-                borderRadius: 8,
                 padding: "10px 16px",
                 display: "flex",
                 alignItems: "center",
                 gap: 10,
               }}
             >
-              <span style={{ fontWeight: 700, fontSize: 13, color: posColor(pc.position) }}>{pc.position}</span>
+              <PositionBadge position={pc.position} />
               <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{pc.count} players</span>
               <EdgeScoreBadge score={pc.avg_score} />
-            </div>
+            </Card>
           ))}
         </div>
       )}
@@ -136,12 +171,9 @@ export default function Portfolio() {
             {tiers.map((t) => {
               const count = data.players.filter((p) => p.edge_score >= t.min && p.edge_score <= t.max).length;
               return (
-                <div
+                <Card
                   key={t.label}
                   style={{
-                    background: "var(--card)",
-                    border: "1px solid var(--border)",
-                    borderRadius: 8,
                     padding: "10px 16px",
                     display: "flex",
                     alignItems: "center",
@@ -163,7 +195,7 @@ export default function Portfolio() {
                   <span className="font-mono" style={{ fontSize: 16, fontWeight: 700, marginLeft: "auto" }}>
                     {count}
                   </span>
-                </div>
+                </Card>
               );
             })}
           </div>
@@ -208,16 +240,23 @@ export default function Portfolio() {
               title="AGE DISTRIBUTION"
               subtitle="Age vs portfolio value (bubble size = leagues owned)"
             />
-            <div
+            <Card
               style={{
-                background: "var(--card)",
-                border: "1px solid var(--border)",
-                borderRadius: 10,
                 padding: 16,
-                overflowX: "auto",
               }}
             >
-              <svg width={W} height={H} style={{ display: "block", margin: "0 auto" }}>
+              <svg
+                viewBox={`0 0 ${W} ${H}`}
+                role="img"
+                aria-label="Age distribution by portfolio value"
+                style={{
+                  display: "block",
+                  width: "100%",
+                  height: "auto",
+                  maxWidth: W,
+                  margin: "0 auto",
+                }}
+              >
                 {Array.from({ length: 5 }, (_, i) => {
                   const y = PAD.top + (plotH / 4) * i;
                   return (
@@ -288,7 +327,7 @@ export default function Portfolio() {
                   </div>
                 ))}
               </div>
-            </div>
+            </Card>
           </div>
         );
       })()}
@@ -299,7 +338,7 @@ export default function Portfolio() {
         subtitle="Every player you own, with Edge Scores from FC + KTC + FP"
       />
 
-      <div style={{ marginBottom: 12 }}>
+      <Card style={{ display: "grid", gap: 14, marginBottom: 16 }}>
         <input
           type="text"
           placeholder="Search players..."
@@ -317,88 +356,29 @@ export default function Portfolio() {
             outline: "none",
           }}
         />
-      </div>
 
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-        {POS_FILTERS.map((pos) => (
-          <button
-            key={pos}
-            onClick={() => setPosFilter(pos)}
-            style={{
-              background: posFilter === pos ? "var(--amber)" : "var(--card)",
-              color: posFilter === pos ? "var(--dark-base)" : "var(--text-dim)",
-              border: `1px solid ${posFilter === pos ? "var(--amber)" : "var(--border)"}`,
-              borderRadius: 6,
-              padding: "6px 14px",
-              fontSize: 12,
-              fontWeight: 600,
-              cursor: "pointer",
-              letterSpacing: 0.5,
-            }}
-          >
-            {pos}
-          </button>
-        ))}
+        <SegmentedControl
+          items={POS_FILTERS.map((pos) => ({ key: pos, label: pos }))}
+          value={posFilter}
+          onChange={setPosFilter}
+          ariaLabel="Position filter"
+        />
 
-        <span style={{ width: 1, height: 20, background: "var(--border)", margin: "0 4px" }} />
+        <SegmentedControl
+          items={AGE_FILTERS}
+          value={ageCurveFilter}
+          onChange={setAgeCurveFilter}
+          ariaLabel="Age curve filter"
+        />
 
-        {["ALL", "Ascent", "Prime", "Decline", "Cliff"].map((zone) => (
-          <button
-            key={zone}
-            onClick={() => setAgeCurveFilter(zone)}
-            style={{
-              background: ageCurveFilter === zone ? "var(--border)" : "transparent",
-              color: zone === "ALL"
-                ? "var(--text-dim)"
-                : zone === "Ascent"
-                ? "#22c55e"
-                : zone === "Prime"
-                ? "#f59e0b"
-                : zone === "Decline"
-                ? "#f97316"
-                : "#ef4444",
-              border: `1px solid ${ageCurveFilter === zone ? "var(--text-muted)" : "var(--border)"}`,
-              borderRadius: 6,
-              padding: "6px 10px",
-              fontSize: 11,
-              fontWeight: 600,
-              cursor: "pointer",
-            }}
-          >
-            {zone === "ALL" ? "All Ages" : zone}
-          </button>
-        ))}
-      </div>
+        <SegmentedControl
+          items={SORT_OPTIONS}
+          value={sortBy}
+          onChange={setSortBy}
+          ariaLabel="Exposure sort"
+        />
 
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
-        <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Sort:</span>
-        {([
-          ["exposure", "Exposure"],
-          ["edge", "Edge Score"],
-          ["portfolio_value", "Portfolio Value"],
-          ["disagreement", "Disagreement"],
-          ["name", "Name"],
-        ] as [SortKey, string][]).map(([key, label]) => (
-          <button
-            key={key}
-            onClick={() => setSortBy(key)}
-            style={{
-              background: sortBy === key ? "var(--border)" : "none",
-              color: "var(--text-dim)",
-              border: "none",
-              borderRadius: 4,
-              padding: "4px 10px",
-              fontSize: 11,
-              fontWeight: 600,
-              cursor: "pointer",
-              fontFamily: "inherit",
-            }}
-          >
-            {label}
-          </button>
-        ))}
-
-        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
             Min exposure: {exposureThreshold}%
           </span>
@@ -412,7 +392,7 @@ export default function Portfolio() {
             style={{ width: 100, cursor: "pointer" }}
           />
         </div>
-      </div>
+      </Card>
 
       <div style={{ margin: "0 0 10px", fontSize: 13, color: "var(--text-dim)" }}>
         {filtered.length} player{filtered.length !== 1 ? "s" : ""}
@@ -420,31 +400,5 @@ export default function Portfolio() {
 
       <ExposureTable players={filtered} />
     </AppShell>
-  );
-}
-
-function LoadingSkeleton() {
-  const skel = { background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10 } as const;
-  return (
-    <>
-      <div style={{ padding: "28px 0 8px" }}>
-        <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>My Portfolio</h1>
-        <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 4 }}>Loading...</p>
-      </div>
-      <div style={{ display: "flex", gap: 16, marginTop: 16, flexWrap: "wrap" }}>
-        {[1, 2, 3, 4, 5, 6].map((i) => (
-          <div key={i} className="animate-pulse" style={{ ...skel, flex: 1, minWidth: 140, height: 100 }} />
-        ))}
-      </div>
-      <div className="animate-pulse" style={{ ...skel, height: 400, marginTop: 32 }} />
-    </>
-  );
-}
-
-function EmptyCard({ label }: { label: string }) {
-  return (
-    <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: 40, textAlign: "center", color: "var(--text-muted)" }}>
-      {label}
-    </div>
   );
 }
