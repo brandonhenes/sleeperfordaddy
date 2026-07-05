@@ -6,9 +6,18 @@ import FreshnessBar from "../components/FreshnessBar";
 import ArbitrageContent from "../components/free-agents/ArbitrageContent";
 import WaiverContent from "../components/free-agents/WaiverContent";
 import ValueMoversTab from "../components/market/ValueMoversTab";
-import { PageHeader, TabBar, type TabBarItem } from "../components/ui";
+import {
+  Card,
+  ErrorState,
+  LoadingSkeleton,
+  PageHeader,
+  PositionBadge,
+  SegmentedControl,
+  TabBar,
+  type SegmentedControlItem,
+  type TabBarItem,
+} from "../components/ui";
 import { useCurrentUsername } from "../hooks/use-current-user";
-import { posColor } from "../lib/position-colors";
 import {
   useMarketSignals,
   type SignalType,
@@ -51,7 +60,7 @@ function pathFromLocation(location: string): string {
 }
 
 function SignalsTab({ username }: { username: string }) {
-  const { data, isLoading } = useMarketSignals(username || undefined);
+  const { data, isLoading, error } = useMarketSignals(username || undefined);
   const [sigFilter, setSigFilter] = useState<SignalType | null>(null);
 
   const signals = (data ?? []).filter((s) => !sigFilter || s.signal === sigFilter);
@@ -61,69 +70,49 @@ function SignalsTab({ username }: { username: string }) {
     expert: (data ?? []).filter((s) => s.signal === "EXPERT_BUY").length,
     locked: (data ?? []).filter((s) => s.signal === "CONSENSUS_LOCK").length,
   };
+  const signalFilters: SegmentedControlItem<SignalType>[] = [
+    { key: "SMART_MONEY_BUY", label: "Smart Money", description: counts.smartMoney },
+    { key: "HYPE_SELL", label: "Hype Sell", description: counts.hype },
+    { key: "EXPERT_BUY", label: "Expert Buy", description: counts.expert },
+    { key: "CONSENSUS_LOCK", label: "Locked", description: counts.locked },
+  ];
 
   if (isLoading) {
+    return <LoadingSkeleton label="Loading market signals" rows={4} />;
+  }
+
+  if (error) {
     return (
-      <div style={{ padding: 40, textAlign: "center", color: "var(--text-muted)" }}>
-        Loading signals...
-      </div>
+      <ErrorState
+        title="Could not load market signals"
+        message={(error as Error).message}
+      />
     );
   }
 
   return (
     <div>
-      <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
-        {[
-          { key: "SMART_MONEY_BUY" as SignalType, label: "Smart Money", count: counts.smartMoney, color: "#16a34a" },
-          { key: "HYPE_SELL" as SignalType, label: "Hype Sell", count: counts.hype, color: "#dc2626" },
-          { key: "EXPERT_BUY" as SignalType, label: "Expert Buy", count: counts.expert, color: "#7c3aed" },
-          { key: "CONSENSUS_LOCK" as SignalType, label: "Locked", count: counts.locked, color: "#64748b" },
-        ].map((s) => (
-          <button
-            key={s.key}
-            onClick={() => setSigFilter(sigFilter === s.key ? null : s.key)}
-            style={{
-              background: "var(--card)",
-              border: sigFilter === s.key ? `2px solid ${s.color}` : "1px solid var(--border)",
-              borderRadius: 10,
-              padding: "14px 18px",
-              flex: 1,
-              minWidth: 120,
-              cursor: "pointer",
-              textAlign: "left",
-              fontFamily: "inherit",
-            }}
-          >
-            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>{s.label}</div>
-            <div className="font-mono" style={{ fontSize: 22, fontWeight: 800, color: s.color }}>
-              {s.count}
-            </div>
-          </button>
-        ))}
-      </div>
+      <SegmentedControl
+        items={signalFilters}
+        value={sigFilter}
+        onChange={(next) => setSigFilter((current) => current === next ? null : next)}
+        ariaLabel="Signal filter"
+      />
 
-      <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 10 }}>
+      <div style={{ fontSize: 12, color: "var(--text-dim)", margin: "14px 0 10px" }}>
         {signals.length} signal{signals.length !== 1 ? "s" : ""}
       </div>
       <div style={{ display: "grid", gap: 10 }}>
         {signals.map((sig) => {
           const style = SIGNAL_STYLES[sig.signal] ?? SIGNAL_STYLES.CONSENSUS_LOCK;
           return (
-            <div
+            <Card
               key={sig.player_id}
-              style={{
-                background: "var(--card)",
-                border: "1px solid var(--border)",
-                borderRadius: 10,
-                padding: "14px 18px",
-              }}
             >
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6, flexWrap: "wrap" }}>
                 <EdgeScoreBadge score={sig.edge_score} size="md" />
                 <span style={{ fontWeight: 600, fontSize: 14, flex: 1, minWidth: 140 }}>{sig.full_name}</span>
-                <span style={{ color: posColor(sig.position), fontWeight: 700, fontSize: 11 }}>
-                  {sig.position}
-                </span>
+                <PositionBadge position={sig.position} />
                 <span
                   className="font-mono"
                   style={{
@@ -141,23 +130,14 @@ function SignalsTab({ username }: { username: string }) {
               <div style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.5 }}>
                 {sig.reason}
               </div>
-            </div>
+            </Card>
           );
         })}
       </div>
       {signals.length === 0 && (
-        <div
-          style={{
-            background: "var(--card)",
-            border: "1px solid var(--border)",
-            borderRadius: 10,
-            padding: 40,
-            textAlign: "center",
-            color: "var(--text-muted)",
-          }}
-        >
-          No signals found
-        </div>
+        <Card className="edge-state-card">
+          <p>No signals found.</p>
+        </Card>
       )}
     </div>
   );

@@ -1,7 +1,15 @@
 import { useState } from "react";
 import { useMovers, type ValueMover } from "../../hooks/use-market";
-import { posColor } from "../../lib/position-colors";
-import { PlayerLink } from "../ui";
+import {
+  Card,
+  ErrorState,
+  LoadingSkeleton,
+  PlayerLink,
+  PositionBadge,
+  ResponsiveTable,
+  SegmentedControl,
+  type ResponsiveTableColumn,
+} from "../ui";
 
 const WINDOWS = [7, 14, 21, 28] as const;
 const POSITIONS = ["ALL", "QB", "RB", "WR", "TE"] as const;
@@ -56,7 +64,7 @@ function deltaColor(value: number | null): string {
   return value > 0 ? "var(--green)" : "var(--red)";
 }
 
-function DeltaCell({
+function DeltaValue({
   value,
   percent,
 }: {
@@ -66,15 +74,7 @@ function DeltaCell({
   const color = deltaColor(value);
 
   return (
-    <td
-      style={{
-        padding: "10px 12px",
-        textAlign: "right",
-        borderTop: "1px solid var(--border)",
-        background: "rgba(245, 158, 11, 0.08)",
-        minWidth: 100,
-      }}
-    >
+    <div style={{ textAlign: "right" }}>
       <div
         className="font-mono"
         style={{ fontSize: 12, fontWeight: 700, color }}
@@ -82,7 +82,7 @@ function DeltaCell({
         {formatSignedValue(value)}
       </div>
       <div style={{ fontSize: 10, color }}>{formatPercent(percent)}</div>
-    </td>
+    </div>
   );
 }
 
@@ -93,129 +93,51 @@ function MovementTable({
   movers: ValueMover[];
   windowDays: WindowDays;
 }) {
+  const columns: ResponsiveTableColumn<ValueMover>[] = [
+    {
+      key: "player",
+      header: "Player",
+      render: (mover) => <PlayerLink name={mover.player_name} style={{ fontSize: 13 }} />,
+    },
+    {
+      key: "position",
+      header: "Pos",
+      render: (mover) => <PositionBadge position={mover.position} />,
+    },
+    {
+      key: "team",
+      header: "Team",
+      render: (mover) => <span style={{ color: "var(--text-dim)" }}>{mover.team ?? "-"}</span>,
+    },
+    {
+      key: "value",
+      header: "FC Value",
+      align: "right",
+      render: (mover) => (
+        <span className="font-mono" style={{ fontWeight: 700 }}>
+          {formatValue(mover.fc_value_now)}
+        </span>
+      ),
+    },
+    {
+      key: "delta",
+      header: `${windowDays}D Change`,
+      align: "right",
+      render: (mover) => (
+        <DeltaValue
+          value={getDelta(mover, windowDays)}
+          percent={getPercentChange(mover, windowDays)}
+        />
+      ),
+    },
+  ];
+
   return (
-    <div style={{ overflowX: "auto" }}>
-      <table style={{ width: "100%", borderCollapse: "collapse" }}>
-        <thead>
-          <tr style={{ background: "var(--dark-base)" }}>
-            <th
-              style={{
-                textAlign: "left",
-                padding: "10px 12px",
-                fontSize: 11,
-                color: "var(--text-muted)",
-                letterSpacing: 0.5,
-                minWidth: 140,
-              }}
-            >
-              PLAYER
-            </th>
-            <th
-              style={{
-                textAlign: "left",
-                padding: "10px 12px",
-                fontSize: 11,
-                color: "var(--text-muted)",
-                letterSpacing: 0.5,
-                minWidth: 50,
-              }}
-            >
-              POS
-            </th>
-            <th
-              style={{
-                textAlign: "left",
-                padding: "10px 12px",
-                fontSize: 11,
-                color: "var(--text-muted)",
-                letterSpacing: 0.5,
-                minWidth: 50,
-              }}
-            >
-              TEAM
-            </th>
-            <th
-              style={{
-                textAlign: "right",
-                padding: "10px 12px",
-                fontSize: 11,
-                color: "var(--text-muted)",
-                letterSpacing: 0.5,
-                minWidth: 80,
-              }}
-            >
-              FC VALUE
-            </th>
-            <th
-              style={{
-                textAlign: "right",
-                padding: "10px 12px",
-                fontSize: 11,
-                color: "var(--amber)",
-                letterSpacing: 0.5,
-                background: "rgba(245, 158, 11, 0.08)",
-                minWidth: 100,
-              }}
-            >
-              {windowDays}D CHANGE
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {movers.map((mover, index) => (
-            <tr key={`${mover.player_id}-${index}`}>
-              <td
-                style={{
-                  padding: "10px 12px",
-                  borderTop: "1px solid var(--border)",
-                  minWidth: 140,
-                }}
-              >
-                <PlayerLink name={mover.player_name} style={{ fontSize: 13 }} />
-              </td>
-              <td
-                style={{
-                  padding: "10px 12px",
-                  borderTop: "1px solid var(--border)",
-                  fontSize: 11,
-                  fontWeight: 700,
-                  color: posColor(mover.position ?? ""),
-                }}
-              >
-                {mover.position ?? "-"}
-              </td>
-              <td
-                style={{
-                  padding: "10px 12px",
-                  borderTop: "1px solid var(--border)",
-                  fontSize: 12,
-                  color: "var(--text-dim)",
-                }}
-              >
-                {mover.team ?? "-"}
-              </td>
-              <td
-                className="font-mono"
-                style={{
-                  padding: "10px 12px",
-                  textAlign: "right",
-                  borderTop: "1px solid var(--border)",
-                  fontSize: 13,
-                  fontWeight: 700,
-                  minWidth: 80,
-                }}
-              >
-                {formatValue(mover.fc_value_now)}
-              </td>
-              <DeltaCell
-                value={getDelta(mover, windowDays)}
-                percent={getPercentChange(mover, windowDays)}
-              />
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <ResponsiveTable
+      rows={movers}
+      columns={columns}
+      getRowKey={(mover, index) => `${mover.player_id}-${index}`}
+    />
   );
 }
 
@@ -231,14 +153,12 @@ function MovementPanel({
   accentColor: string;
 }) {
   return (
-    <div
+    <Card
       style={{
         flex: 1,
         minWidth: 320,
-        background: "var(--card)",
-        border: "1px solid var(--border)",
-        borderRadius: 12,
         overflow: "hidden",
+        padding: 0,
       }}
     >
       <div
@@ -277,7 +197,7 @@ function MovementPanel({
       ) : (
         <MovementTable movers={movers} windowDays={windowDays} />
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -287,36 +207,15 @@ export default function ValueMoversTab() {
   const [positionFilter, setPositionFilter] = useState<PositionFilter>("ALL");
 
   if (isLoading) {
-    return (
-      <div
-        style={{
-          background: "var(--card)",
-          border: "1px solid var(--border)",
-          borderRadius: 12,
-          padding: 40,
-          textAlign: "center",
-          color: "var(--text-muted)",
-        }}
-      >
-        Loading value movers...
-      </div>
-    );
+    return <LoadingSkeleton label="Loading value movers" rows={4} />;
   }
 
   if (error) {
     return (
-      <div
-        style={{
-          background: "var(--card)",
-          border: "1px solid var(--border)",
-          borderRadius: 12,
-          padding: 40,
-          textAlign: "center",
-          color: "var(--red)",
-        }}
-      >
-        Error: {(error as Error).message}
-      </div>
+      <ErrorState
+        title="Could not load value movers"
+        message={(error as Error).message}
+      />
     );
   }
 
@@ -350,63 +249,23 @@ export default function ValueMoversTab() {
             Focused on real dynasty value swings instead of edge-score noise.
           </div>
         </div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {WINDOWS.map((days) => (
-            <button
-              key={days}
-              type="button"
-              onClick={() => setWindowDays(days)}
-              style={{
-                padding: "8px 12px",
-                borderRadius: 999,
-                border:
-                  days === windowDays
-                    ? "1px solid var(--amber)"
-                    : "1px solid var(--border)",
-                background:
-                  days === windowDays
-                    ? "rgba(245, 158, 11, 0.14)"
-                    : "var(--card)",
-                color: days === windowDays ? "var(--amber)" : "var(--text-muted)",
-                fontSize: 12,
-                fontWeight: 700,
-                cursor: "pointer",
-                fontFamily: "inherit",
-              }}
-            >
-              {days}D
-            </button>
-          ))}
+        <div style={{ minWidth: 250 }}>
+          <SegmentedControl
+            items={WINDOWS.map((days) => ({ key: String(days), label: `${days}D` }))}
+            value={String(windowDays)}
+            onChange={(value) => setWindowDays(Number(value) as WindowDays)}
+            ariaLabel="Mover window"
+          />
         </div>
       </div>
 
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        {POSITIONS.map((position) => (
-          <button
-            key={position}
-            type="button"
-            onClick={() => setPositionFilter(position)}
-            style={{
-              padding: "8px 12px",
-              borderRadius: 999,
-              border:
-                position === positionFilter
-                  ? "1px solid var(--amber)"
-                  : "1px solid var(--border)",
-              background:
-                position === positionFilter
-                  ? "rgba(245, 158, 11, 0.14)"
-                  : "var(--card)",
-              color: position === positionFilter ? "var(--amber)" : "var(--text-muted)",
-              fontSize: 12,
-              fontWeight: 700,
-              cursor: "pointer",
-              fontFamily: "inherit",
-            }}
-          >
-            {position}
-          </button>
-        ))}
+      <div>
+        <SegmentedControl
+          items={POSITIONS.map((position) => ({ key: position, label: position }))}
+          value={positionFilter}
+          onChange={setPositionFilter}
+          ariaLabel="Mover position filter"
+        />
       </div>
 
       <div
