@@ -5,7 +5,7 @@ import FreshnessBar from "../components/FreshnessBar";
 import { PlayerLink } from "../components/ui";
 import { posColor } from "../lib/position-colors";
 import { useInjuredPlayers, useBuyingWindows } from "../hooks/use-injury-tracker";
-import type { InjuredPlayerView, BuyingWindow } from "../../../shared/types";
+import type { InjuredPlayerView, BuyingWindow } from "@shared/types";
 
 type Tab = "injuries" | "buying";
 

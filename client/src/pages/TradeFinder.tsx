@@ -39,7 +39,7 @@ import type {
   EvaluatedAsset,
   OpponentProfile,
   TradeHealthWarning,
-} from "../../../shared/types";
+} from "@shared/types";
 
 interface LeaguePicksResponse {
   picks: PickValue[];

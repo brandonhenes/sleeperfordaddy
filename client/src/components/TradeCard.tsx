@@ -2,7 +2,7 @@ import type {
   TradeAssetWithPlayer,
   TradeOutcome,
   TradeOutcomeSeason,
-} from "../../../shared/types";
+} from "@shared/types";
 import { posColor } from "../lib/position-colors";
 import VerdictBadge from "./VerdictBadge";
 import WinImpactBar from "./WinImpactBar";

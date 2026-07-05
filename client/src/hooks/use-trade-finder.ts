@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "../lib/api";
 import { classStrengthQueryParams } from "../lib/pick-strengths";
 import { weightQueryParams } from "../lib/weights";
-import type { TradeSuggestion, ShopPlayerResult } from "../../../shared/types";
+import type { TradeSuggestion, ShopPlayerResult } from "@shared/types";
 
 const SHOP_PLAYER_REQUEST_TIMEOUT_MS = 30_000;
 

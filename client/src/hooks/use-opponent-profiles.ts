@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "../lib/api";
-import type { ExploitAngle, OpponentProfilesResponse } from "../../../shared/types";
+import type { ExploitAngle, OpponentProfilesResponse } from "@shared/types";
 
 interface RefreshProfilesInput {
   leagueId: string;

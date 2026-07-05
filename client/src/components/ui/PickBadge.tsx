@@ -1,4 +1,4 @@
-import type { PickValue, TradePickBreakdown } from "../../../../shared/types";
+import type { PickValue, TradePickBreakdown } from "@shared/types";
 
 type PickLike = PickValue | TradePickBreakdown;
 

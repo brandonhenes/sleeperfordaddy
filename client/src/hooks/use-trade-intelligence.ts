@@ -6,7 +6,7 @@ import type {
   TradeIntelligenceTradeDetailResponse,
   TradeIntelligenceLeaderboardResponse,
   TradeIntelligenceUserTradesResponse,
-} from "../../../shared/types";
+} from "@shared/types";
 
 export function useTradeIntelligenceChains(
   username: string | undefined,

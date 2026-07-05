@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "../lib/api";
 import { classStrengthQueryParams } from "../lib/pick-strengths";
 import { weightQueryParams } from "../lib/weights";
-import type { AcquisitionResult } from "../../../shared/types";
+import type { AcquisitionResult } from "@shared/types";
 
 function acquisitionQueryParams(): string {
   const params = `${classStrengthQueryParams()}${weightQueryParams()}`;

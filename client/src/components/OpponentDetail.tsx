@@ -1,4 +1,4 @@
-import type { ExploitAngle, OpponentProfile } from "../../../shared/types";
+import type { ExploitAngle, OpponentProfile } from "@shared/types";
 
 function humanize(value: string): string {
   return value

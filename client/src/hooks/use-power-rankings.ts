@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import type { TradePickBreakdown } from "../../../shared/types";
+import type { TradePickBreakdown } from "@shared/types";
 import { apiFetch } from "../lib/api";
 import { weightQueryParams } from "../lib/weights";
 

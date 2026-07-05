@@ -16,7 +16,7 @@ import type {
   LeagueHistoryData,
   LeagueHistorySeason,
   LeagueGroup,
-} from "../../../../shared/types";
+} from "@shared/types";
 
 // ─── Constants ───
 

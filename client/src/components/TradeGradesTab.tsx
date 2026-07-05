@@ -11,7 +11,7 @@ import type {
   TradeIntelligenceRoster,
   TradeOutcome,
   TradeOutcomeSeason,
-} from "../../../shared/types";
+} from "@shared/types";
 
 const cardStyle = {
   background: "var(--card)",

@@ -28,7 +28,7 @@ import type {
   TradeHealthWarning,
   TradeValuationProfile,
   TradeValuationWarning,
-} from "../../../shared/types";
+} from "@shared/types";
 
 type Side = "send" | "receive";
 type PickTier = "early" | "mid" | "late";

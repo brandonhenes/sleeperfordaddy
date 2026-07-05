@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import EmptyState from "./EmptyState";
 import { SectionHeader } from "./ui";
 import { useTradeIntelligenceLeaderboard } from "../hooks/use-trade-intelligence";
-import type { OwnerProfile } from "../../../shared/types";
+import type { OwnerProfile } from "@shared/types";
 
 type LeaderboardSortKey =
   | "display_name"

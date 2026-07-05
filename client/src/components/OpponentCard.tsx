@@ -1,4 +1,4 @@
-import type { OpponentProfile } from "../../../shared/types";
+import type { OpponentProfile } from "@shared/types";
 
 const ACTIVITY_STYLES: Record<OpponentProfile["activityLevel"], { bg: string; color: string }> = {
   hyperactive: { bg: "rgba(34,197,94,0.18)", color: "#4ade80" },

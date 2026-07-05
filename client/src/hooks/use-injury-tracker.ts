@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "../lib/api";
-import type { InjuredPlayerView, BuyingWindow } from "../../../shared/types";
+import type { InjuredPlayerView, BuyingWindow } from "@shared/types";
 
 export function useInjuredPlayers(username: string) {
   return useQuery<InjuredPlayerView[]>({

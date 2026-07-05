@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "../lib/api";
-import type { TradeAgingRow, TradeHistoryResponse } from "../../../shared/types";
+import type { TradeAgingRow, TradeHistoryResponse } from "@shared/types";
 
 export function useTradeHistory(username: string | undefined) {
   return useQuery<TradeHistoryResponse>({
