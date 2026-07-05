@@ -12,9 +12,17 @@ import AppShell from "../components/AppShell";
 import { useCurrentUser } from "../components/CurrentUserContext";
 import EdgeScoreBadge from "../components/EdgeScoreBadge";
 import ShareButton from "../components/ShareButton";
-import { TrendArrow, SectionHeader } from "../components/ui";
-import { PlayerLink } from "../components/ui";
-import { posColor, dirColor } from "../lib/position-colors";
+import {
+  Card,
+  ErrorState,
+  LoadingSkeleton as UiLoadingSkeleton,
+  PageHeader,
+  PlayerLink,
+  PositionBadge,
+  SectionHeader,
+  TrendArrow,
+} from "../components/ui";
+import { dirColor } from "../lib/position-colors";
 import {
   usePlayer,
   type PlayerDetail as PD,
@@ -28,21 +36,15 @@ import {
 import { useComparables } from "../hooks/use-comparables";
 import { useCurrentUsername } from "../hooks/use-current-user";
 
-// ─── Zone Colors ───
-
 const ZONE_COLORS: Record<string, string> = {
   Prime: "#f59e0b", Ascent: "#22c55e", Decline: "#f97316", Cliff: "#ef4444", Unknown: "#94a3b8",
 };
-
-// ─── Agreement ───
 
 function agreementColor(agr: "high" | "medium" | "low"): string {
   if (agr === "high") return "#22c55e";
   if (agr === "medium") return "#f59e0b";
   return "#ef4444";
 }
-
-// ─── Source Bar ───
 
 function SourceBar({ label, score, max }: { label: string; score: number | null; max: number }) {
   const pct = score != null ? Math.max(2, (score / max) * 100) : 0;
@@ -62,31 +64,19 @@ function SourceBar({ label, score, max }: { label: string; score: number | null;
   );
 }
 
-// ─── Header ───
-
 function PlayerHeader({ summary }: { summary: PlayerSummary }) {
   const ac = summary.age_curve;
-  return (
-    <div style={{ padding: "28px 0 8px" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-        <h1 style={{ fontSize: 26, fontWeight: 800, margin: 0 }}>{summary.player_name}</h1>
-        {summary.position && (
-          <span style={{ fontSize: 14, fontWeight: 700, color: posColor(summary.position) }}>
-            {summary.position}
-          </span>
-        )}
-        {summary.team && (
-          <span style={{ fontSize: 13, color: "var(--text-muted)" }}>{summary.team}</span>
-        )}
-        {summary.age != null && (
-          <span style={{ fontSize: 12, fontWeight: 600, color: ZONE_COLORS[ac.zone] ?? "#94a3b8" }}>
-            Age {summary.age} &middot; {ac.zone}
-          </span>
-        )}
-      </div>
+  const subtitle = [
+    summary.position,
+    summary.team,
+    summary.age != null ? `Age ${summary.age} - ${ac.zone}` : null,
+  ].filter(Boolean).join(" | ");
 
-      {/* Edge Score + Source Breakdown */}
-      <div style={{ display: "flex", gap: 20, marginTop: 16, flexWrap: "wrap", alignItems: "flex-start" }}>
+  return (
+    <>
+      <PageHeader title={summary.player_name} subtitle={subtitle} />
+
+      <Card style={{ display: "flex", gap: 20, flexWrap: "wrap", alignItems: "flex-start" }}>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
           <EdgeScoreBadge score={summary.edge_score} size="md" />
           <span style={{ fontSize: 10, fontWeight: 700, color: agreementColor(summary.source_agreement) }}>
@@ -98,6 +88,15 @@ function PlayerHeader({ summary }: { summary: PlayerSummary }) {
         </div>
 
         <div style={{ flex: 1, minWidth: 200, maxWidth: 400, display: "grid", gap: 6 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            {summary.position && <PositionBadge position={summary.position} />}
+            {summary.team && <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{summary.team}</span>}
+            {summary.age != null && (
+              <span style={{ fontSize: 12, fontWeight: 700, color: ZONE_COLORS[ac.zone] ?? "#94a3b8" }}>
+                Age {summary.age} - {ac.zone}
+              </span>
+            )}
+          </div>
           <SourceBar label="FC" score={summary.fc_score} max={99} />
           <SourceBar label="KTC" score={summary.ktc_score} max={99} />
           <SourceBar label="FP" score={summary.dp_score} max={99} />
@@ -118,16 +117,14 @@ function PlayerHeader({ summary }: { summary: PlayerSummary }) {
             )}
           </div>
         </div>
-      </div>
-    </div>
+      </Card>
+    </>
   );
 }
 
-// ─── Exposure ───
-
 function ExposureSection({ exposure, ownership, username }: { exposure: ExposureInfo; ownership: OwnershipEntry[]; username: string }) {
   return (
-    <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: "16px 20px" }}>
+    <Card>
       <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 10 }}>
         You own this player in{" "}
         <span style={{ color: "var(--amber)", fontWeight: 800 }}>{exposure.owned_leagues}</span>
@@ -149,10 +146,7 @@ function ExposureSection({ exposure, ownership, username }: { exposure: Exposure
                 border: "1px solid rgba(96,165,250,0.2)",
                 textDecoration: "none",
                 cursor: "pointer",
-                transition: "background 0.15s",
               }}
-              onMouseEnter={(e) => { (e.target as HTMLElement).style.background = "rgba(96,165,250,0.25)"; }}
-              onMouseLeave={(e) => { (e.target as HTMLElement).style.background = "rgba(96,165,250,0.12)"; }}
             >
               {l.league_name}
             </Link>
@@ -161,11 +155,9 @@ function ExposureSection({ exposure, ownership, username }: { exposure: Exposure
       ) : (
         <div style={{ fontSize: 13, color: "var(--text-muted)" }}>Not on any of your rosters</div>
       )}
-    </div>
+    </Card>
   );
 }
-
-// ─── Value Chart ───
 
 function ValueChart({ data }: { data: PD["valueHistory"] }) {
   if (data.length === 0) return null;
@@ -175,7 +167,7 @@ function ValueChart({ data }: { data: PD["valueHistory"] }) {
   }));
 
   return (
-    <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: "16px 12px 8px" }}>
+    <Card style={{ padding: "16px 12px 8px" }}>
       <ResponsiveContainer width="100%" height={220}>
         <LineChart data={formatted}>
           <CartesianGrid stroke="rgba(51,65,85,0.2)" strokeDasharray="3 3" />
@@ -189,17 +181,15 @@ function ValueChart({ data }: { data: PD["valueHistory"] }) {
           <Line type="monotone" dataKey="value" stroke="var(--amber)" strokeWidth={2} dot={false} />
         </LineChart>
       </ResponsiveContainer>
-    </div>
+    </Card>
   );
 }
-
-// ─── Mentions ───
 
 function MentionCard({ m }: { m: Mention }) {
   const sentimentColor =
     m.sentiment === "positive" ? "var(--green)" : m.sentiment === "negative" ? "var(--red)" : "var(--text-muted)";
   return (
-    <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)" }}>
+    <Card>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         {m.source && <span style={{ fontSize: 11, fontWeight: 700, color: "var(--blue)" }}>{m.source}</span>}
         {m.sentiment && (
@@ -219,14 +209,20 @@ function MentionCard({ m }: { m: Mention }) {
           &ldquo;{m.key_quote}&rdquo;
         </p>
       )}
-    </div>
+    </Card>
   );
 }
 
 function MentionsSection({ mentions }: { mentions: Mention[] }) {
-  if (mentions.length === 0) return <EmptyCard label="No newsletter mentions yet" />;
+  if (mentions.length === 0) {
+    return (
+      <Card className="edge-state-card">
+        <p>No newsletter mentions yet.</p>
+      </Card>
+    );
+  }
   return (
-    <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
+    <div style={{ display: "grid", gap: 10 }}>
       {mentions.map((m, i) => (
         <MentionCard key={`${m.mention_date}-${i}`} m={m} />
       ))}
@@ -234,11 +230,9 @@ function MentionsSection({ mentions }: { mentions: Mention[] }) {
   );
 }
 
-// ─── Prospect Profile ───
-
 function ProspectSection({ prospect: p }: { prospect: ProspectInfo }) {
   return (
-    <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: "16px 20px" }}>
+    <Card>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 24px" }}>
         {p.school && <Field label="School" value={p.school} />}
         {p.tier && <Field label="Tier" value={p.tier.toUpperCase()} />}
@@ -270,7 +264,7 @@ function ProspectSection({ prospect: p }: { prospect: ProspectInfo }) {
           {p.notes}
         </p>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -285,12 +279,10 @@ function Field({ label, value }: { label: string; value: string }) {
   );
 }
 
-// ─── Recommendation ───
-
 function RecSection({ rec }: { rec: RecInfo }) {
   const color = dirColor(rec.direction);
   return (
-    <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: "16px 20px" }}>
+    <Card>
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
         <span
           style={{
@@ -314,25 +306,17 @@ function RecSection({ rec }: { rec: RecInfo }) {
           {rec.rationale}
         </p>
       )}
-    </div>
+    </Card>
   );
 }
-
-// ─── Trade Comps ───
 
 function TradeComps({ trades }: { trades: { trade_id: string; league_name: string; date: string; gave: string[]; received: string[] }[] }) {
   if (trades.length === 0) return null;
   return (
     <div style={{ display: "grid", gap: 8 }}>
       {trades.map((t) => (
-        <div
+        <Card
           key={t.trade_id}
-          style={{
-            background: "var(--card)",
-            border: "1px solid var(--border)",
-            borderRadius: 10,
-            padding: "12px 16px",
-          }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
             <span style={{ fontSize: 12, fontWeight: 600 }}>{t.league_name}</span>
@@ -354,13 +338,11 @@ function TradeComps({ trades }: { trades: { trade_id: string; league_name: strin
               {t.received.length === 0 && <div style={{ color: "var(--text-muted)" }}>-</div>}
             </div>
           </div>
-        </div>
+        </Card>
       ))}
     </div>
   );
 }
-
-// ─── Quick Actions ───
 
 function QuickActions({ playerName, playerId }: { playerName: string; playerId: string | null }) {
   const { username } = useCurrentUser();
@@ -369,10 +351,11 @@ function QuickActions({ playerName, playerId }: { playerName: string; playerId: 
       {username && (
         <Link href={`/trade-finder/${encodeURIComponent(username)}?mode=shop&player=${encodeURIComponent(playerId ?? "")}`}>
           <button
+            className="edge-primary-button"
             style={{
-              background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8,
-              padding: "10px 16px", color: "var(--text)", fontSize: 13, fontWeight: 600,
-              cursor: "pointer", fontFamily: "inherit",
+              background: "var(--card)",
+              border: "1px solid var(--border)",
+              color: "var(--text)",
             }}
           >
             Find trades involving {playerName}
@@ -380,21 +363,13 @@ function QuickActions({ playerName, playerId }: { playerName: string; playerId: 
         </Link>
       )}
       <Link href="/trade-calculator">
-        <button
-          style={{
-            background: "var(--amber)", border: "none", borderRadius: 8,
-            padding: "10px 16px", color: "var(--dark-base)", fontSize: 13, fontWeight: 700,
-            cursor: "pointer", fontFamily: "inherit",
-          }}
-        >
+        <button className="edge-primary-button">
           Open Trade Calculator
         </button>
       </Link>
     </div>
   );
 }
-
-// ─── Page ───
 
 export default function PlayerDetail() {
   const { playerName } = useParams<{ playerName: string }>();
@@ -403,14 +378,23 @@ export default function PlayerDetail() {
   const { data, isLoading, error } = usePlayer(decoded, username);
   const { data: comparables } = useComparables(decoded);
 
-  if (isLoading) return <AppShell><LoadingSkeleton name={decoded} /></AppShell>;
+  if (isLoading) {
+    return (
+      <AppShell>
+        <PageHeader title={decoded ?? "Player"} subtitle="Loading player profile." />
+        <UiLoadingSkeleton label="Loading player profile" rows={5} />
+      </AppShell>
+    );
+  }
+
   if (error || !data) {
     return (
       <AppShell>
-        <div style={{ padding: "28px 0 8px" }}>
-          <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>{decoded ?? "Player"}</h1>
-        </div>
-        <EmptyCard label={error ? (error as Error).message : "Player not found"} />
+        <PageHeader title={decoded ?? "Player"} />
+        <ErrorState
+          title="Could not load player"
+          message={error ? (error as Error).message : "Player not found"}
+        />
       </AppShell>
     );
   }
@@ -425,19 +409,19 @@ export default function PlayerDetail() {
         <ShareButton textSummary={shareText} />
       </div>
 
-      <SectionHeader icon="📊" title="EXPOSURE" subtitle="Your ownership across leagues" />
+      <SectionHeader icon="Own" title="EXPOSURE" subtitle="Your ownership across leagues" />
       <ExposureSection exposure={data.exposure} ownership={data.ownership} username={username} />
 
-      <SectionHeader icon="📈" title="VALUE HISTORY" subtitle="FantasyCalc dynasty value (90 days)" />
+      <SectionHeader icon="Val" title="VALUE HISTORY" subtitle="FantasyCalc dynasty value (90 days)" />
       <ValueChart data={data.valueHistory} />
 
-      <SectionHeader icon="🎯" title="QUICK ACTIONS" subtitle="" />
+      <SectionHeader icon="Go" title="QUICK ACTIONS" subtitle="" />
       <QuickActions playerName={data.summary.player_name} playerId={data.summary.player_id} />
 
       {comparables && comparables.length > 0 && (
         <>
-          <SectionHeader icon="👥" title="SIMILAR PLAYERS" subtitle="Comparable edge scores at same position" />
-          <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
+          <SectionHeader icon="Sim" title="SIMILAR PLAYERS" subtitle="Comparable edge scores at same position" />
+          <Card style={{ padding: 0, overflow: "hidden" }}>
             {comparables.map((c) => (
               <div
                 key={c.player_name}
@@ -452,63 +436,40 @@ export default function PlayerDetail() {
               >
                 <EdgeScoreBadge score={c.edge_score} size="sm" />
                 <PlayerLink name={c.player_name} style={{ flex: 1 }} />
-                <span style={{ color: posColor(c.position), fontWeight: 700, fontSize: 11 }}>{c.position}</span>
+                <PositionBadge position={c.position} />
                 {c.team && <span style={{ color: "var(--text-muted)", fontSize: 11 }}>{c.team}</span>}
                 {c.age != null && <span style={{ color: "var(--text-dim)", fontSize: 11 }}>Age {c.age}</span>}
               </div>
             ))}
-          </div>
+          </Card>
         </>
       )}
 
       {data.recent_trades && data.recent_trades.length > 0 && (
         <>
-          <SectionHeader icon="🔀" title="RECENT TRADES" subtitle="Completed trades involving this player" />
+          <SectionHeader icon="Trd" title="RECENT TRADES" subtitle="Completed trades involving this player" />
           <TradeComps trades={data.recent_trades} />
         </>
       )}
 
       {data.mentions.length > 0 && (
         <>
-          <SectionHeader icon="📰" title="NEWSLETTER INTEL" subtitle="Recent mentions" />
+          <SectionHeader icon="News" title="NEWSLETTER INTEL" subtitle="Recent mentions" />
           <MentionsSection mentions={data.mentions} />
         </>
       )}
       {data.prospect && (
         <>
-          <SectionHeader icon="🎓" title="PROSPECT PROFILE" subtitle="Draft scouting report" />
+          <SectionHeader icon="Pros" title="PROSPECT PROFILE" subtitle="Draft scouting report" />
           <ProspectSection prospect={data.prospect} />
         </>
       )}
       {data.recommendation && (
         <>
-          <SectionHeader icon="🎯" title="CURRENT REC" subtitle="Latest recommendation" />
+          <SectionHeader icon="Rec" title="CURRENT REC" subtitle="Latest recommendation" />
           <RecSection rec={data.recommendation} />
         </>
       )}
     </AppShell>
-  );
-}
-
-const skel = { background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10 } as const;
-
-function LoadingSkeleton({ name }: { name: string | undefined }) {
-  return (
-    <>
-      <div style={{ padding: "28px 0 8px" }}>
-        <h1 style={{ fontSize: 26, fontWeight: 800, margin: 0 }}>{name ?? "Loading..."}</h1>
-      </div>
-      {[1, 2, 3].map((i) => (
-        <div key={i} className="animate-pulse" style={{ ...skel, height: i === 1 ? 220 : 120, marginTop: 24 }} />
-      ))}
-    </>
-  );
-}
-
-function EmptyCard({ label }: { label: string }) {
-  return (
-    <div style={{ ...skel, padding: 40, textAlign: "center", color: "var(--text-muted)" }}>
-      {label}
-    </div>
   );
 }
