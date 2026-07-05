@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import AppShell from "../components/AppShell";
-import FreshnessBar from "../components/FreshnessBar";
 import { useEvaluateTrade } from "../hooks/use-trade-calculator";
 import {
   usePowerRankings,
@@ -20,6 +19,8 @@ import { AcceptanceBadge, EvalBar, TradePanel } from "./trade-calculator/TradeSu
 import VacuumSearchColumn from "./trade-calculator/VacuumSearchColumn";
 import { PICK_YEARS, pickDisplay, pickSlotLabel, pickToAsset } from "./trade-calculator/picks";
 import { buildTradeMessage } from "./trade-calculator/trade-message";
+import TradeCalculatorHeader from "./trade-calculator/TradeCalculatorHeader";
+import LeagueOpponentSelectors from "./trade-calculator/LeagueOpponentSelectors";
 import type {
   AcceptanceAssetView,
   OpponentContextResponse,
@@ -27,16 +28,6 @@ import type {
   SearchAsset,
   Side,
 } from "./trade-calculator/types";
-
-const VALUATION_PROFILE_OPTIONS: Array<{
-  value: TradeValuationProfile;
-  label: string;
-  desc: string;
-}> = [
-  { value: "ktc_league", label: "KTC League", desc: "KTC values with this league's scoring context" },
-  { value: "composite", label: "Composite", desc: "Current FC/KTC/DP league-aware model" },
-  { value: "ktc", label: "KTC", desc: "Raw KTC values plus package context" },
-];
 
 function assetKey(a: TradeAssetInput): string {
   if (a.type === "player") {
@@ -266,70 +257,23 @@ export default function TradeCalculator() {
 
   return (
     <AppShell>
-      <div style={{ padding: "28px 0 8px" }}>
-        <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>Trade Calculator</h1>
-        <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 4 }}>Click your roster and your opponent roster. Evaluation and acceptance update live.</p>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 10 }}>
-          <button
-            type="button"
-            onClick={() => setShowRedraft((current) => !current)}
-            style={{
-              borderRadius: 999,
-              padding: "7px 12px",
-              border: `1px solid ${showRedraft ? "#60a5fa" : "var(--border)"}`,
-              background: showRedraft ? "rgba(96,165,250,0.14)" : "transparent",
-              color: showRedraft ? "#93c5fd" : "var(--text-muted)",
-              fontSize: 12,
-              fontWeight: 700,
-              cursor: "pointer",
-              fontFamily: "inherit",
-            }}
-          >
-            {showRedraft ? "Redraft On" : "Redraft Off"}
-          </button>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {VALUATION_PROFILE_OPTIONS.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                onClick={() => setValuationMode(option.value)}
-                title={option.desc}
-                style={{
-                  borderRadius: 999,
-                  padding: "7px 12px",
-                  border: `1px solid ${valuationMode === option.value ? "var(--amber)" : "var(--border)"}`,
-                  background: valuationMode === option.value ? "rgba(245,158,11,0.12)" : "transparent",
-                  color: valuationMode === option.value ? "var(--amber)" : "var(--text-muted)",
-                  fontSize: 12,
-                  fontWeight: 700,
-                  cursor: "pointer",
-                  fontFamily: "inherit",
-                }}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-        </div>
-        <FreshnessBar leagueId={selectedLeague || undefined} />
-      </div>
+      <TradeCalculatorHeader
+        showRedraft={showRedraft}
+        onToggleRedraft={() => setShowRedraft((current) => !current)}
+        valuationMode={valuationMode}
+        onValuationModeChange={setValuationMode}
+        selectedLeague={selectedLeague}
+      />
 
-      <div style={{ display: "grid", gridTemplateColumns: isCompactLeagueLayout ? "1fr" : "1fr 1fr", gap: 10 }}>
-        <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 12px" }}>
-          <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6, fontWeight: 700 }}>LEAGUE</div>
-          <select value={selectedLeague} onChange={(e) => setSelectedLeague(e.target.value)} style={{ width: "100%", background: "var(--dark-base)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text)", padding: "8px 10px", fontFamily: "inherit", fontSize: 13 }}>
-            <option value="">No league selected (vacuum mode)</option>
-            {leagues.map((l) => <option key={l.league_id} value={l.league_id}>{l.league_name} ({l.mode.toUpperCase()}{l.scoring_label ? ` · ${l.scoring_label}` : ""})</option>)}
-          </select>
-        </div>
-        <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 12px" }}>
-          <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6, fontWeight: 700 }}>OPPONENT</div>
-          <select value={selectedOpponent ?? ""} onChange={(e) => setSelectedOpponent(e.target.value ? Number(e.target.value) : null)} disabled={!selectedLeague || opponents.length === 0} style={{ width: "100%", background: "var(--dark-base)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text)", padding: "8px 10px", fontFamily: "inherit", fontSize: 13, opacity: !selectedLeague ? 0.6 : 1 }}>
-            <option value="">{selectedLeague ? "Select opponent..." : "Select a league first"}</option>
-            {opponents.map((o) => <option key={o.roster_id} value={o.roster_id}>{o.display_name}{o.team_name ? ` (${o.team_name})` : ""} | {o.archetype}</option>)}
-          </select>
-        </div>
-      </div>
+      <LeagueOpponentSelectors
+        leagues={leagues}
+        selectedLeague={selectedLeague}
+        onSelectedLeagueChange={setSelectedLeague}
+        opponents={opponents}
+        selectedOpponent={selectedOpponent}
+        onSelectedOpponentChange={setSelectedOpponent}
+        isCompact={isCompactLeagueLayout}
+      />
 
       {!selectedLeague && (
         <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: leagueColumns, gap: 12, alignItems: "start" }}>
