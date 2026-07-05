@@ -6,8 +6,9 @@ import type { TradeBoardLine, TradeSuggestion, ShopPlayerResult } from "@shared/
 
 const SHOP_PLAYER_REQUEST_TIMEOUT_MS = 30_000;
 const TRADE_FINDER_REQUEST_TIMEOUT_MS = 60_000;
-const TRADE_FINDER_STALE_MS = 5 * 60_000;
-const TRADE_BOARD_STALE_MS = 10 * 60_000;
+const TRADE_FINDER_STALE_MS = 15 * 60_000;
+const TRADE_BOARD_STALE_MS = 15 * 60_000;
+const SHOP_PLAYER_STALE_MS = 10 * 60_000;
 const TRADE_FINDER_TIMEOUT_MESSAGE =
   "Trade Finder timed out while building package ideas. Retry after this league finishes loading.";
 
@@ -110,6 +111,10 @@ export function useShopPlayer(
       }
     },
     enabled: !!username && !!playerId,
+    staleTime: SHOP_PLAYER_STALE_MS,
+    gcTime: SHOP_PLAYER_STALE_MS * 3,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
     retry: 1,
   });
 }
