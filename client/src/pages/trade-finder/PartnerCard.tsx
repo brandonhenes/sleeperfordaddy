@@ -164,8 +164,18 @@ function PackageView({ pkg }: { pkg: TradePackage }) {
 
   return (
     <div>
-      {(oppLabel || tierLabel || qualityLabel || pkg.is_pick_only != null) && (
+      {(oppLabel || tierLabel || qualityLabel || pkg.strategy_label || pkg.is_pick_only != null) && (
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+          {pkg.strategy_label && (
+            <span style={{ fontSize: 10, fontWeight: 800, color: "#3b82f6", border: "1px solid rgba(59,130,246,0.35)", borderRadius: 999, padding: "3px 8px", textTransform: "uppercase", letterSpacing: 0.4 }}>
+              {pkg.strategy_label}
+            </span>
+          )}
+          {pkg.strategy_fit && (
+            <span style={{ fontSize: 10, fontWeight: 800, color: pkg.strategy_fit === "strong" ? "var(--green)" : pkg.strategy_fit === "reasonable" ? "var(--amber)" : pkg.strategy_fit === "thin" ? "var(--text-muted)" : "var(--red)", border: "1px solid var(--border)", borderRadius: 999, padding: "3px 8px", textTransform: "uppercase", letterSpacing: 0.4 }}>
+              {humanize(pkg.strategy_fit)} Thesis
+            </span>
+          )}
           {oppLabel && (
             <span style={{ fontSize: 10, fontWeight: 800, color: "var(--amber)", border: "1px solid rgba(61,139,253,0.35)", borderRadius: 999, padding: "3px 8px", textTransform: "uppercase", letterSpacing: 0.4 }}>
               {oppLabel}
@@ -228,6 +238,18 @@ function PackageView({ pkg }: { pkg: TradePackage }) {
       </div>
 
       <TradeHealthList warnings={pkg.healthCheck} />
+
+      {pkg.trade_thesis && (
+        <div style={{ marginTop: 10, background: "rgba(61,139,253,0.08)", border: "1px solid rgba(61,139,253,0.22)", borderRadius: 8, padding: "10px 12px", fontSize: 12, color: "var(--text-dim)", lineHeight: 1.5 }}>
+          <div style={{ fontSize: 10, fontWeight: 800, color: "#3b82f6", letterSpacing: 0.5, marginBottom: 4 }}>TRADE THESIS</div>
+          <div>{pkg.trade_thesis}</div>
+          {pkg.strategy_warnings && pkg.strategy_warnings.length > 0 && (
+            <div style={{ marginTop: 6, color: "var(--amber)", fontSize: 11 }}>
+              {pkg.strategy_warnings.slice(0, 2).join(" | ")}
+            </div>
+          )}
+        </div>
+      )}
 
       {pkg.acceptance && (
         <div style={{ marginTop: 10, background: "var(--dark-base)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 12px" }}>

@@ -535,7 +535,7 @@ describe("Find Trades generator quality", () => {
     );
 
     expect(shouldSurfaceTradeFinderPackage(annotated)).toBe(true);
-    expect(annotated.package_quality_label).toBe("speculative");
+    expect(annotated.package_quality_label).toBe("poor");
     expect(annotated.quality_tier).toBe("low_confidence");
     expect(annotated.ranking_components?.acceptance_likelihood).toBeLessThanOrEqual(28);
   });
@@ -636,6 +636,26 @@ describe("Find Trades generator quality", () => {
     expect(annotated.ranking_components?.valuation_edge).toEqual(expect.any(Number));
     expect(annotated.ranking_components?.acceptance_likelihood).toEqual(expect.any(Number));
     expect(annotated.ranking_components?.valuation_edge).not.toBe(annotated.ranking_components?.acceptance_likelihood);
+  });
+
+  it("adds strategy thesis metadata to ranked Find Trades packages", () => {
+    const annotated = annotateTradeFinderPackage(
+      packageFrom(
+        [player("Useful WR", "WR", 70), player("Useful RB", "RB", 66)],
+        [player("Anchor TE", "TE", 84)]
+      ),
+      {
+        userNeeds: ["TE"],
+        opponentNeeds: ["WR", "RB"],
+        userArchetype: "All-In Contender",
+        opponentArchetype: "Rebuilder",
+        mode: "sf",
+      }
+    );
+
+    expect(annotated.strategy_type).toBe("consolidation");
+    expect(annotated.trade_thesis).toContain("Consolidation");
+    expect(annotated.ranking_components?.strategy_fit).toEqual(expect.any(Number));
   });
 
   it("preserves the empty/no-opportunity state only when no valid fallback packages exist", () => {

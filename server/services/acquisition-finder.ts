@@ -23,6 +23,10 @@ import { evaluateOpportunityPackage } from "./trade-opportunity-valuation.js";
 import type { ClassStrengthMap } from "./pick-values.js";
 import type { SourceWeights } from "./edge-score.js";
 import { recommendationRejectReason } from "./trade-recommendation-quality.js";
+import {
+  applyTradeStrategyMetadata,
+  classifyTradeStrategy,
+} from "./trade-strategy-thesis.js";
 
 // ─── Constants ───
 
@@ -110,13 +114,19 @@ function valueSweetenerHint(offer: AcquisitionOffer): string | null {
   return offer.sweetener_hint;
 }
 
+interface AcquisitionStrategyContext {
+  userArchetype?: string;
+  ownerArchetype?: string;
+}
+
 export async function valueAcquisitionOfferWithKtcLeague(
   offer: AcquisitionOffer,
   leagueId: string,
   mode: "sf" | "1qb",
   classStrengths?: ClassStrengthMap,
   evaluatePackage = evaluateOpportunityPackage,
-  weights?: SourceWeights
+  weights?: SourceWeights,
+  strategyContext: AcquisitionStrategyContext = {}
 ): Promise<AcquisitionOffer> {
   try {
     const valuation = await evaluatePackage({
@@ -150,8 +160,23 @@ export async function valueAcquisitionOfferWithKtcLeague(
       valuation_warnings: valuation.warnings,
       valuation_explanations: valuation.valuationExplanations,
     };
+    const strategy = classifyTradeStrategy({
+      sendAssets: valued.you_send,
+      receiveAssets: valued.you_receive,
+      userArchetype: strategyContext.userArchetype,
+      opponentArchetype: strategyContext.ownerArchetype,
+      valueEdgeForUser: valued.valuation_edge ?? valued.delta,
+      percentGap: valued.valuation_percent_gap,
+      fairness: valued.fairness,
+      addressesMyNeed: true,
+      addressesTheirNeed: valued.their_perspective.needs_addressed.length > 0,
+      acceptanceProbability: valued.acceptance_likelihood,
+      managerSignals: [valued.their_perspective.verdict].filter(Boolean),
+      mode,
+      pickOnlyMaterial: false,
+    });
     return {
-      ...valued,
+      ...applyTradeStrategyMetadata(valued, strategy),
       sweetener_hint: valueSweetenerHint(valued),
     };
   } catch (err) {
@@ -161,14 +186,29 @@ export async function valueAcquisitionOfferWithKtcLeague(
       side: null,
       message: "KTC League valuation could not finish for this package; showing the generated starting point.",
     };
-    return {
+    const fallbackStrategy = classifyTradeStrategy({
+      sendAssets: offer.you_send,
+      receiveAssets: offer.you_receive,
+      userArchetype: strategyContext.userArchetype,
+      opponentArchetype: strategyContext.ownerArchetype,
+      valueEdgeForUser: offer.valuation_edge ?? offer.delta,
+      percentGap: offer.valuation_percent_gap,
+      fairness: offer.fairness,
+      addressesMyNeed: true,
+      addressesTheirNeed: offer.their_perspective.needs_addressed.length > 0,
+      acceptanceProbability: offer.acceptance_likelihood,
+      managerSignals: [offer.their_perspective.verdict].filter(Boolean),
+      mode,
+      pickOnlyMaterial: false,
+    });
+    return applyTradeStrategyMetadata({
       ...offer,
       valuation_warnings: [...(offer.valuation_warnings ?? []), warning],
       valuation_explanations: [
         ...(offer.valuation_explanations ?? []),
         err instanceof Error ? `KTC League valuation failed: ${err.message}` : "KTC League valuation failed.",
       ],
-    };
+    }, fallbackStrategy);
   }
 }
 
@@ -177,7 +217,8 @@ async function valueAcquisitionOffersForLeague(
   leagueId: string,
   mode: "sf" | "1qb",
   classStrengths?: ClassStrengthMap,
-  weights?: SourceWeights
+  weights?: SourceWeights,
+  strategyContext: AcquisitionStrategyContext = {}
 ): Promise<AcquisitionOffer[]> {
   const valued = await Promise.all(
     offers.map((offer) =>
@@ -187,12 +228,17 @@ async function valueAcquisitionOffersForLeague(
         mode,
         classStrengths,
         evaluateOpportunityPackage,
-        weights
+        weights,
+        strategyContext
       )
     )
   );
 
-  return filterAcquisitionRecommendationOffers(valued);
+  return filterAcquisitionRecommendationOffers(valued).sort(
+    (a, b) =>
+      (b.strategy_score ?? 0) - (a.strategy_score ?? 0) ||
+      b.acceptance_likelihood - a.acceptance_likelihood
+  );
 }
 
 export function filterAcquisitionRecommendationOffers(offers: AcquisitionOffer[]): AcquisitionOffer[] {
@@ -203,7 +249,8 @@ export function filterAcquisitionRecommendationOffers(offers: AcquisitionOffer[]
       fairness: offer.fairness,
       sendAssets: offer.you_send,
       receiveAssets: offer.you_receive,
-    })
+    }) &&
+    !(offer.strategy_fit === "bad" && (offer.valuation_edge ?? offer.delta) < 1_500)
   );
 }
 
@@ -847,7 +894,11 @@ export async function findAcquisitionPackages(
       league.league_id,
       league.mode,
       classStrengths,
-      weights
+      weights,
+      {
+        userArchetype: userRoster.archetype,
+        ownerArchetype: ownerRoster.archetype,
+      }
     );
 
     // Get trade comps for this league

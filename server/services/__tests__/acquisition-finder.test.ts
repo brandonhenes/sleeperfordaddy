@@ -129,6 +129,8 @@ describe("acquisition finder valuation bridge", () => {
     expect(valued.you_send[0].context_trade_value).toBe(6_200);
     expect(valued.you_receive[0].context_trade_value).toBe(6_900);
     expect(valued.send_total).not.toBe(71);
+    expect(valued.strategy_label).toBeTruthy();
+    expect(valued.trade_thesis).toContain(valued.strategy_label ?? "");
   });
 
   it("filters excessive KTC League overpay recommendations after valuation", () => {

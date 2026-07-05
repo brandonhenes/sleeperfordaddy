@@ -1,6 +1,6 @@
 import { useState } from "react";
 import VerdictBadge from "../../components/VerdictBadge";
-import { fairnessLabel, formatTradeValue } from "../../lib/format";
+import { fairnessLabel, formatTradeValue, humanize } from "../../lib/format";
 import type { AcquisitionOpportunity } from "@shared/types";
 
 function DifficultyBadge({ difficulty }: { difficulty: AcquisitionOpportunity["difficulty"] }) {
@@ -94,6 +94,33 @@ export default function AcquisitionCard({ opportunity }: { opportunity: Acquisit
                   ({fairnessLabel(offer.fairness)})
                 </span>
               </div>
+
+              {(offer.strategy_label || offer.strategy_fit) && (
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "center", marginTop: 8 }}>
+                  {offer.strategy_label && (
+                    <span style={{ fontSize: 10, fontWeight: 800, color: "#3b82f6", border: "1px solid rgba(59,130,246,0.35)", borderRadius: 999, padding: "3px 8px", textTransform: "uppercase", letterSpacing: 0.4 }}>
+                      {offer.strategy_label}
+                    </span>
+                  )}
+                  {offer.strategy_fit && (
+                    <span style={{ fontSize: 10, fontWeight: 800, color: offer.strategy_fit === "strong" ? "var(--green)" : offer.strategy_fit === "reasonable" ? "var(--amber)" : offer.strategy_fit === "thin" ? "var(--text-muted)" : "var(--red)", border: "1px solid var(--border)", borderRadius: 999, padding: "3px 8px", textTransform: "uppercase", letterSpacing: 0.4 }}>
+                      {humanize(offer.strategy_fit)} Thesis
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {offer.trade_thesis && (
+                <div style={{ marginTop: 10, background: "rgba(61,139,253,0.08)", border: "1px solid rgba(61,139,253,0.22)", borderRadius: 8, padding: "10px 12px", fontSize: 12, color: "var(--text-dim)", lineHeight: 1.5 }}>
+                  <div style={{ fontSize: 10, fontWeight: 800, color: "#3b82f6", letterSpacing: 0.5, marginBottom: 4 }}>TRADE THESIS</div>
+                  <div>{offer.trade_thesis}</div>
+                  {offer.strategy_warnings && offer.strategy_warnings.length > 0 && (
+                    <div style={{ marginTop: 6, color: "var(--amber)", fontSize: 11 }}>
+                      {offer.strategy_warnings.slice(0, 2).join(" | ")}
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 12 }}>
                 <VerdictBadge verdict={offer.their_perspective.verdict} />

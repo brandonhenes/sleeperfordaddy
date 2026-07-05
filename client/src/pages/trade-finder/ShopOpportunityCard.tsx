@@ -2,6 +2,7 @@ import { useState } from "react";
 import { PickBadge, PlayerLink, PositionBadge } from "../../components/ui";
 import type { EvaluatedAsset, ShopOpportunity } from "@shared/types";
 import { TradeHealthList } from "./PartnerCard";
+import { humanize } from "../../lib/format";
 
 function AssetChip({ asset }: { asset: EvaluatedAsset }) {
   const isPick = asset.position == null;
@@ -51,6 +52,16 @@ export default function ShopOpportunityCard({ opp }: { opp: ShopOpportunity }) {
           <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 3, background: "rgba(61,139,253,0.1)", color: "var(--amber)" }}>
             {opp.path_label}
           </span>
+          {opp.strategy_label && (
+            <span style={{ fontSize: 9, fontWeight: 800, padding: "2px 6px", borderRadius: 3, background: "rgba(59,130,246,0.12)", color: "#3b82f6", textTransform: "uppercase" }}>
+              {opp.strategy_label}
+            </span>
+          )}
+          {opp.strategy_fit && (
+            <span style={{ fontSize: 9, fontWeight: 800, padding: "2px 6px", borderRadius: 3, background: "rgba(255,255,255,0.05)", color: opp.strategy_fit === "strong" ? "var(--green)" : opp.strategy_fit === "reasonable" ? "var(--amber)" : opp.strategy_fit === "thin" ? "var(--text-muted)" : "var(--red)", textTransform: "uppercase" }}>
+              {humanize(opp.strategy_fit)}
+            </span>
+          )}
           <span style={{ fontSize: 10, fontWeight: 600, color: "var(--text-muted)", padding: "2px 6px", background: "rgba(255,255,255,0.05)", borderRadius: 4 }}>
             {opp.from_archetype}
           </span>
@@ -78,6 +89,18 @@ export default function ShopOpportunityCard({ opp }: { opp: ShopOpportunity }) {
           ))}
         </div>
       </div>
+
+      {opp.trade_thesis && (
+        <div style={{ marginBottom: 10, padding: 10, background: "rgba(61,139,253,0.08)", border: "1px solid rgba(61,139,253,0.22)", borderRadius: 8, fontSize: 11, color: "var(--text-dim)", lineHeight: 1.5, overflowWrap: "anywhere" }}>
+          <div style={{ fontSize: 10, fontWeight: 800, color: "#3b82f6", letterSpacing: 0.5, marginBottom: 4 }}>TRADE THESIS</div>
+          <div>{opp.trade_thesis}</div>
+          {opp.strategy_warnings && opp.strategy_warnings.length > 0 && (
+            <div style={{ marginTop: 6, color: "var(--amber)", fontSize: 10 }}>
+              {opp.strategy_warnings.slice(0, 2).join(" | ")}
+            </div>
+          )}
+        </div>
+      )}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(220px, 100%), 1fr))", gap: 8, padding: 10, background: "rgba(255,255,255,0.02)", borderRadius: 8, fontSize: 11, color: "var(--text-dim)", lineHeight: 1.5, overflowWrap: "anywhere" }}>
         <div style={{ minWidth: 0 }}>

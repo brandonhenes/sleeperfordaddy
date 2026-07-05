@@ -25,6 +25,10 @@ import {
   recommendationAcceptanceProbability,
   recommendationRejectReason,
 } from "./trade-recommendation-quality.js";
+import {
+  applyTradeStrategyMetadata,
+  classifyTradeStrategy,
+} from "./trade-strategy-thesis.js";
 
 const POSITIONS = ["QB", "RB", "WR", "TE"];
 const MIN_STARTERS: Record<string, number> = { QB: 1, RB: 2, WR: 2, TE: 1 };
@@ -913,6 +917,7 @@ export async function shopPlayer(
       if (shopRequestEvaluationCapReached(evaluationBudget)) break;
       if (shopLeagueEvaluationCapReached(evaluationBudget, league.league_id)) break;
       const oppNeeds = computeNeeds(opp, leagueMedians);
+      const userNeeds = computeNeeds(userRoster, leagueMedians);
       const topPlayerIdsByPos = computeTopPlayerIdsByPos(opp);
       const behavior: ManagerBehavior | null = behaviors.get(opp.roster_id) ?? null;
       const ctx: PackageContext = {
@@ -965,6 +970,10 @@ export async function shopPlayer(
           receiveAssets: pkg.you_receive,
         });
         const fillsNeed = pkg.you_send.some((a) => a.position && oppNeeds.includes(a.position));
+        const addressesMyNeed =
+          pkg.you_receive.some((a) => a.position && userNeeds.includes(a.position)) ||
+          (["Rebuilder", "Productive Struggle", "Dead Zone"].includes(userRoster.archetype) &&
+            pkg.you_receive.some((a) => a.asset_type === "pick" || a.position == null));
         const healthCheck = tradeHealthCheck(
           pkg.you_send,
           pkg.you_receive,
@@ -985,14 +994,46 @@ export async function shopPlayer(
         })) {
           continue;
         }
+        const strategy = classifyTradeStrategy({
+          sendAssets: pkg.you_send,
+          receiveAssets: pkg.you_receive,
+          userArchetype: userRoster.archetype,
+          opponentArchetype: opp.archetype,
+          valueEdgeForUser: -pkg.delta,
+          percentGap: pkg.percentGap,
+          fairness: pkg.fairness,
+          addressesMyNeed,
+          addressesTheirNeed: fillsNeed,
+          acceptanceProbability: acceptanceScore,
+          managerSignals: [
+            ...(behavior?.bias_flags ?? []),
+            behavior?.preferred_structure ?? "",
+          ].filter(Boolean),
+          healthWarnings: healthCheck,
+          mode: league.mode,
+          pickOnlyMaterial: false,
+        });
+        if (strategy.strategy_fit === "bad" && -pkg.delta < 1_500) {
+          continue;
+        }
+        const valuationScore =
+          pkg.fairness === "fair"
+            ? 78
+            : pkg.fairness === "slight_edge"
+              ? 60
+              : -pkg.delta > 0
+                ? 42
+                : 18;
         const score = Math.round(
-          motivation.score * 0.2 +
-          acceptanceScore * 0.4 +
-          (pkg.fairness === "fair" ? 30 : pkg.fairness === "slight_edge" ? 15 : 0) * 0.2 +
-          (fillsNeed ? 20 : 0) * 0.2
+          motivation.score * 0.18 +
+          acceptanceScore * 0.18 +
+          valuationScore * 0.2 +
+          strategy.strategy_score * 0.34 +
+          (fillsNeed ? 6 : 0) +
+          (addressesMyNeed ? 4 : 0)
         );
 
-        allOpportunities.push({
+        allOpportunities.push(applyTradeStrategyMetadata({
           league_id: league.league_id,
           league_name: league.league_name,
           league_mode: league.mode,
@@ -1029,7 +1070,7 @@ export async function shopPlayer(
             reject_reasons: ["No acceptance signal available"],
           },
           healthCheck,
-        });
+        }, strategy));
       }
     }
 

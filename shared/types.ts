@@ -556,6 +556,22 @@ export type TradeOpportunityType =
 
 export type TradePackageQualityLabel = "premium" | "solid" | "speculative" | "poor";
 export type TradePackageQualityTier = "strong" | "speculative" | "low_confidence";
+export type TradeStrategyType =
+  | "consolidation"
+  | "tier_down"
+  | "buy_low"
+  | "sell_high"
+  | "win_now_buy"
+  | "rebuild_sell"
+  | "productive_struggle"
+  | "pick_arbitrage"
+  | "position_arbitrage"
+  | "roster_fit_trade"
+  | "roster_spot_arbitrage"
+  | "manager_exploit"
+  | "liquidity_upgrade"
+  | "market_value";
+export type TradeStrategyFit = "strong" | "reasonable" | "thin" | "bad";
 
 export interface TradePackageRankingComponents {
   valuation_edge: number;
@@ -563,6 +579,7 @@ export interface TradePackageRankingComponents {
   opponent_need: number;
   acceptance_likelihood: number;
   package_quality: number;
+  strategy_fit?: number;
   liquidity: number;
   risk: number;
   diversity: number;
@@ -576,6 +593,12 @@ export interface TradePackage {
   opportunity_type?: TradeOpportunityType;
   package_quality_label?: TradePackageQualityLabel;
   quality_tier?: TradePackageQualityTier;
+  strategy_type?: TradeStrategyType;
+  strategy_label?: string;
+  strategy_fit?: TradeStrategyFit;
+  strategy_score?: number;
+  trade_thesis?: string;
+  strategy_warnings?: string[];
   is_pick_only?: boolean;
   has_anchor_asset?: boolean;
   addresses_my_need?: boolean;
@@ -834,6 +857,12 @@ export interface AcquisitionOffer {
   type: "balanced" | "consolidation" | "picks_heavy" | "overpay";
   label: string;
   acceptance_likelihood: number; // 0-100
+  strategy_type?: TradeStrategyType;
+  strategy_label?: string;
+  strategy_fit?: TradeStrategyFit;
+  strategy_score?: number;
+  trade_thesis?: string;
+  strategy_warnings?: string[];
   you_send: TradePackageAsset[];
   you_receive: TradePackageAsset[]; // just the target player
   send_total: number;
@@ -923,6 +952,12 @@ export interface ShopOpportunity {
   opportunity_score: number;
   path: "even_swap" | "they_add_pick" | "you_upgrade" | "sell_for_pieces";
   path_label: string;
+  strategy_type?: TradeStrategyType;
+  strategy_label?: string;
+  strategy_fit?: TradeStrategyFit;
+  strategy_score?: number;
+  trade_thesis?: string;
+  strategy_warnings?: string[];
   you_send: EvaluatedAsset[];
   you_receive: EvaluatedAsset[];
   from_team: string;

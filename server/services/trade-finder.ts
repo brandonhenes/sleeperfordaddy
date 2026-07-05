@@ -47,6 +47,10 @@ import {
   recommendationPercentGapFraction,
   recommendationRejectReason,
 } from "./trade-recommendation-quality.js";
+import {
+  applyTradeStrategyMetadata,
+  classifyTradeStrategy,
+} from "./trade-strategy-thesis.js";
 
 // Constants
 
@@ -434,6 +438,10 @@ function qualityScore(pkg: TradePackage): number {
   if (pkg.has_anchor_asset) score += 18;
   if (pkg.addresses_my_need) score += 14;
   if (pkg.addresses_their_need) score += 14;
+  if ((pkg.strategy_score ?? 0) >= 74) score += 8;
+  if (pkg.strategy_fit === "thin") score -= 8;
+  if (pkg.strategy_fit === "bad") score -= 24;
+  if ((pkg.strategy_warnings?.length ?? 0) > 0) score -= Math.min(14, (pkg.strategy_warnings?.length ?? 0) * 5);
   if (!pkg.addresses_my_need && !pkg.addresses_their_need) {
     score -= majorValuationEdge(pkg) ? 10 : 24;
   }
@@ -477,17 +485,20 @@ function qualityLabel(score: number): TradePackageQualityLabel {
 function qualityTier(pkg: TradePackage, quality: number): TradePackageQualityTier {
   const pickOnly = isPickOnlyTradePackage(pkg);
   if (pkg.fairness === "lopsided") return "low_confidence";
+  if (pkg.strategy_fit === "bad") return "low_confidence";
   const needFit = Boolean(pkg.addresses_my_need && pkg.addresses_their_need);
   const partialFit = Boolean(pkg.addresses_my_need || pkg.addresses_their_need);
   const acceptanceOkay = !pkg.acceptance || pkg.acceptance.probability >= 40;
   const valuationOkay =
     pkg.fairness === "fair" ||
     (pkg.fairness === "slight_edge" && (pkg.valuation_edge ?? pkg.delta) >= -500);
+  const strategyOkay = (pkg.strategy_score ?? 50) >= 56;
+  const strategyStrong = (pkg.strategy_score ?? 0) >= 72;
 
-  if (!pickOnly && needFit && quality >= 72 && acceptanceOkay && valuationOkay) {
+  if (!pickOnly && (needFit || strategyStrong) && quality >= 72 && acceptanceOkay && valuationOkay) {
     return "strong";
   }
-  if (!pickOnly && (partialFit || majorValuationEdge(pkg)) && quality >= 42) {
+  if (!pickOnly && (partialFit || majorValuationEdge(pkg) || strategyOkay) && quality >= 42) {
     return "speculative";
   }
   return "low_confidence";
@@ -539,15 +550,17 @@ function rankingComponents(pkg: TradePackage, quality: number): TradePackageRank
       ? 35
       : 76;
   const diversity = pkg.opportunity_type === "pick_swap" ? 20 : 70;
+  const strategyFit = pkg.strategy_score ?? 45;
   const total =
     valuationEdge * 0.22 +
-    rosterFit * 0.2 +
-    opponentNeed * 0.18 +
-    acceptance * 0.14 +
-    quality * 0.16 +
-    liquidity * 0.04 +
+    strategyFit * 0.22 +
+    rosterFit * 0.1 +
+    opponentNeed * 0.1 +
+    acceptance * 0.12 +
+    quality * 0.14 +
+    liquidity * 0.05 +
     risk * 0.04 +
-    diversity * 0.02;
+    diversity * 0.01;
 
   return {
     valuation_edge: Math.round(valuationEdge),
@@ -555,6 +568,7 @@ function rankingComponents(pkg: TradePackage, quality: number): TradePackageRank
     opponent_need: Math.round(opponentNeed),
     acceptance_likelihood: Math.round(acceptance),
     package_quality: Math.round(quality),
+    strategy_fit: Math.round(strategyFit),
     liquidity: Math.round(liquidity),
     risk: Math.round(risk),
     diversity: Math.round(diversity),
@@ -567,6 +581,8 @@ export interface TradeFinderQualityContext {
   opponentNeeds: readonly string[];
   userArchetype: string;
   opponentArchetype: string;
+  mode?: "sf" | "1qb";
+  managerSignals?: string[];
 }
 
 export function annotateTradeFinderPackage(
@@ -601,9 +617,24 @@ export function annotateTradeFinderPackage(
       : "Opponent fit is weaker because the package does not solve a clear need.",
     risk_reason: qualityReason(provisional),
   };
-  return withQualityMetadata({
-    ...withType,
+  const strategy = classifyTradeStrategy({
+    sendAssets: withType.you_send,
+    receiveAssets: withType.you_receive,
+    userArchetype: context.userArchetype,
+    opponentArchetype: context.opponentArchetype,
+    valueEdgeForUser: valuationEdgeForUser(withType),
+    percentGap: withType.valuation_percent_gap,
+    fairness: withType.fairness,
+    addressesMyNeed,
+    addressesTheirNeed,
+    acceptanceProbability: withType.acceptance?.probability,
+    managerSignals: context.managerSignals,
+    healthWarnings: withType.healthCheck,
+    mode: context.mode,
+    pickOnlyMaterial: pickOnly ? isMaterialPickOnlyTrade(withType) : false,
   });
+
+  return withQualityMetadata(applyTradeStrategyMetadata(withType, strategy));
 }
 
 export function shouldSurfaceTradeFinderPackage(pkg: TradePackage): boolean {
@@ -619,19 +650,6 @@ function withQualityMetadata(pkg: TradePackage): TradePackage {
     ranking_components: rankingComponents(pkg, quality),
   };
   return withComponents;
-}
-
-function withAcceptanceMetadata(pkg: TradePackage): TradePackage {
-  const acceptanceReason =
-    pkg.acceptance?.accept_reasons[0] ??
-    pkg.acceptance?.reject_reasons[0] ??
-    pkg.acceptance_reason ??
-    null;
-
-  return withQualityMetadata({
-    ...pkg,
-    acceptance_reason: acceptanceReason ?? undefined,
-  });
 }
 
 export function dedupeAndRankTradeFinderPackages(
@@ -1424,6 +1442,7 @@ export async function generateTradeFinderPackages(
     opponentNeeds: opp.needs,
     userArchetype: user.roster.archetype,
     opponentArchetype: opp.roster.archetype,
+    mode,
   };
   const qualified = packages
     .map((pkg) => annotateTradeFinderPackage(pkg, context))
@@ -1526,8 +1545,25 @@ export async function findTrades(
           weights
         )
     );
+    const qualityContext: TradeFinderQualityContext = {
+      userNeeds: userProfile.needs,
+      opponentNeeds: opp.needs,
+      userArchetype: userProfile.roster.archetype,
+      opponentArchetype: opp.roster.archetype,
+      mode,
+      managerSignals: [
+        ...(opp.behavior?.bias_flags ?? []),
+        opp.behavior?.preferred_structure ?? "",
+      ].filter(Boolean),
+    };
     const evaluatedPackages = applyAcceptanceAndBehavior(basePackages, userProfile, opp)
-      .map(withAcceptanceMetadata)
+      .map((pkg) => ({
+        ...pkg,
+        acceptance_reason:
+          pkg.acceptance?.accept_reasons[0] ??
+          pkg.acceptance?.reject_reasons[0] ??
+          pkg.acceptance_reason,
+      }))
       .map((pkg) => ({
         ...pkg,
         healthCheck: tradeHealthCheck(
@@ -1537,7 +1573,9 @@ export async function findTrades(
           pkg.fairness
         ),
       }))
-      .filter((pkg) => !pkg.healthCheck.some((warning) => warning.type === "block"));
+      .filter((pkg) => !pkg.healthCheck.some((warning) => warning.type === "block"))
+      .map((pkg) => annotateTradeFinderPackage(pkg, qualityContext))
+      .filter(shouldSurfaceTradeFinderPackage);
     const packages = dedupeAndRankTradeFinderPackages(evaluatedPackages, 4);
     if (packages.length === 0) continue;
 
