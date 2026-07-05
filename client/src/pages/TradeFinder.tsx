@@ -20,7 +20,10 @@ import { apiFetch } from "../lib/api";
 import { formatDateTime } from "../lib/format";
 import { classStrengthQueryParams } from "../lib/pick-strengths";
 import { buildTradeFinderUrl, parseTradeFinderQuery } from "../lib/trade-finder-url";
-import AcquisitionCard from "./trade-finder/AcquisitionCard";
+import AcquisitionPanel, {
+  type AcquisitionSearchResult,
+  type SelectedAcquisitionTarget,
+} from "./trade-finder/AcquisitionPanel";
 import PartnerCard from "./trade-finder/PartnerCard";
 import PickInventoryPanel, { type LeaguePicksResponse } from "./trade-finder/PickInventoryPanel";
 import ShopPlayerPanel, { type ShopPathFilter } from "./trade-finder/ShopPlayerPanel";
@@ -97,7 +100,7 @@ function TradeFinderReady({ username }: { username: string }) {
   const [selectedLeague, setSelectedLeague] = useState<string>("");
   const [mode, setMode] = useState<"find" | "acquire" | "shop" | "scout">("find");
   const [targetSearch, setTargetSearch] = useState("");
-  const [selectedTarget, setSelectedTarget] = useState<{ name: string; id: string } | null>(null);
+  const [selectedTarget, setSelectedTarget] = useState<SelectedAcquisitionTarget | null>(null);
   const [selectedPlayer, setSelectedPlayer] = useState("");
   const [shopAmbition, setShopAmbition] = useState(2);
   const [showShopRedraft, setShowShopRedraft] = useState(false);
@@ -132,7 +135,7 @@ function TradeFinderReady({ username }: { username: string }) {
     mode === "scout" ? selectedScoutRosterId : null
   );
 
-  const { data: targetResults = [] } = useQuery<{ player_id: string; label: string; position: string; team: string | null }[]>({
+  const { data: targetResults = [] } = useQuery<AcquisitionSearchResult[]>({
     queryKey: ["acquire-search", targetSearch],
     enabled: mode === "acquire" && targetSearch.trim().length >= 2,
     queryFn: () => apiFetch(`/api/trade/assets?q=${encodeURIComponent(targetSearch.trim())}&limit=8`),
@@ -344,33 +347,15 @@ function TradeFinderReady({ username }: { username: string }) {
       )}
 
       {mode === "acquire" && (
-        <div>
-          <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: 16, marginTop: 8 }}>
-            <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)", letterSpacing: 0.5 }}>WHO DO YOU WANT?</label>
-            <input value={targetSearch} onChange={(e) => { setTargetSearch(e.target.value); setSelectedTarget(null); }} placeholder="Search for a player..." style={{ display: "block", width: "100%", marginTop: 8, padding: "10px 12px", background: "var(--dark-base)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text)", fontSize: 14, fontFamily: "inherit", boxSizing: "border-box" }} />
-            {targetResults.length > 0 && !selectedTarget && (
-              <div style={{ marginTop: 8, display: "grid", gap: 4, maxHeight: 240, overflowY: "auto" }}>
-                {targetResults.map((r) => (
-                  <button key={r.player_id} onClick={() => { setSelectedTarget({ name: r.label, id: r.player_id }); setTargetSearch(r.label); }} style={{ display: "flex", alignItems: "center", gap: 8, border: "1px solid var(--border)", borderRadius: 8, padding: "8px 10px", background: "none", color: "var(--text)", cursor: "pointer", fontFamily: "inherit", fontSize: 13, textAlign: "left", width: "100%" }}>
-                    <span style={{ fontWeight: 700, fontSize: 11, width: 24 }}>{r.position}</span>
-                    <span style={{ flex: 1 }}>{r.label}</span>
-                    {r.team && <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{r.team}</span>}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {acquisitionLoading && selectedTarget && <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: "48px 24px", marginTop: 16, textAlign: "center" }}><span className="animate-pulse" style={{ color: "var(--amber)", fontSize: 14 }}>Analyzing acquisition options across all leagues...</span></div>}
-
-          {acquisitionData && !acquisitionLoading && (
-            <div style={{ marginTop: 16 }}>
-              <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: "14px 18px", marginBottom: 16, fontSize: 13, color: "var(--text-dim)", lineHeight: 1.6 }}>{acquisitionData.summary}</div>
-              {acquisitionData.opportunities.length === 0 && <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: "48px 24px", textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>This player is not owned by anyone else in your leagues (or you own them in every league).</div>}
-              {acquisitionData.opportunities.map((opp) => <AcquisitionCard key={opp.league_id} opportunity={opp} />)}
-            </div>
-          )}
-        </div>
+        <AcquisitionPanel
+          targetSearch={targetSearch}
+          setTargetSearch={setTargetSearch}
+          selectedTarget={selectedTarget}
+          setSelectedTarget={setSelectedTarget}
+          targetResults={targetResults}
+          acquisitionData={acquisitionData}
+          acquisitionLoading={acquisitionLoading}
+        />
       )}
 
       {mode === "shop" && (
