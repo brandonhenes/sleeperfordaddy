@@ -2,6 +2,7 @@ import { Router } from "express";
 import { sql } from "drizzle-orm";
 import { db } from "../db/connection.js";
 import { DEFAULT_SOURCE_WEIGHTS } from "../services/edge-score.js";
+import type { UserSettings } from "../../shared/types.js";
 
 const router = Router();
 
@@ -32,11 +33,7 @@ router.get("/api/settings/:username", async (req, res) => {
       LIMIT 1
     `);
 
-    const row = (rows as unknown as Array<{
-      fc_weight: number;
-      ktc_weight: number;
-      dp_weight: number;
-    }>)[0];
+    const row = (rows as unknown as UserSettings[])[0];
 
     res.json(row ?? {
       fc_weight: DEFAULT_SOURCE_WEIGHTS.fc,

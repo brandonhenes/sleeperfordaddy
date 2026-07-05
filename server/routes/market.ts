@@ -11,7 +11,13 @@ import { getMockDraftSetup } from "../services/mock-draft.js";
 import { getActiveDrafts, getLiveDraftState } from "../services/live-draft.js";
 import { getDraftHitRates } from "../services/draft-hit-rates.js";
 import { computeRookieADP } from "../services/sync-league-drafts.js";
-import type { BoardMovement, ValueMover, ValueSnapshot } from "../../shared/types.js";
+import type {
+  BoardMovement,
+  ProspectHistoryPoint,
+  ProspectRanking,
+  ValueMover,
+  ValueSnapshot,
+} from "../../shared/types.js";
 
 const router = Router();
 
@@ -174,7 +180,7 @@ router.get("/api/rookie-draft/board-movement/:playerName", async (req, res) => {
       WHERE LOWER(player_name) = LOWER(${decodeURIComponent(req.params.playerName)})
       ORDER BY snapshot_date ASC
     `);
-    res.json(rows);
+    res.json(rows as unknown as ProspectHistoryPoint[]);
   } catch (err) {
     console.error("[board-movement] Error:", err);
     res.status(500).json({ message: "Internal server error" });
@@ -197,7 +203,7 @@ router.get("/api/rookie-draft/value-tracker/:playerName", async (req, res) => {
       WHERE player_id = ${playerId}
       ORDER BY snapshot_date ASC
     `);
-    res.json(rows);
+    res.json(rows as unknown as ProspectRanking[]);
   } catch (err) {
     console.error("[value-tracker] Error:", err);
     res.status(500).json({ message: "Internal server error" });

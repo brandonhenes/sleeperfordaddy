@@ -1,29 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
+import type { ProspectHistoryPoint, ProspectRanking } from "@shared/types";
 import { apiFetch } from "../lib/api";
-
-export interface ProspectRanking {
-  player_name: string;
-  position: string | null;
-  dp_value_sf: number | null;
-  dp_value_1qb: number | null;
-  dp_ecr_sf: number | null;
-  fp_ecr_sf: number | null;
-  fp_ecr_best: number | null;
-  fp_ecr_worst: number | null;
-  fp_ecr_sd: number | null;
-}
-
-export interface ProspectHistoryPoint {
-  snapshot_date: string;
-  dp_value_sf: number | null;
-  dp_value_1qb: number | null;
-  dp_ecr_sf: number | null;
-  dp_ecr_1qb: number | null;
-  fp_ecr_sf: number | null;
-  fp_ecr_best: number | null;
-  fp_ecr_worst: number | null;
-  fp_ecr_sd: number | null;
-}
 
 export function useLatestProspectRankings() {
   return useQuery<ProspectRanking[]>({

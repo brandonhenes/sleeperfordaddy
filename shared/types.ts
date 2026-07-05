@@ -1676,6 +1676,48 @@ export interface ComparablePlayer {
   edge_score: number;
 }
 
+// Small route responses
+
+export interface Notification {
+  id: string;
+  type: "arbitrage" | "disagreement" | "injury" | "buying_window";
+  title: string;
+  message: string;
+  player_name: string;
+  position: string;
+  severity: "high" | "medium" | "low";
+}
+
+export interface UserSettings {
+  fc_weight: number;
+  ktc_weight: number;
+  dp_weight: number;
+}
+
+export interface ProspectRanking {
+  player_name: string;
+  position: string | null;
+  dp_value_sf: number | null;
+  dp_value_1qb: number | null;
+  dp_ecr_sf: number | null;
+  fp_ecr_sf: number | null;
+  fp_ecr_best: number | null;
+  fp_ecr_worst: number | null;
+  fp_ecr_sd: number | null;
+}
+
+export interface ProspectHistoryPoint {
+  snapshot_date: string;
+  dp_value_sf: number | null;
+  dp_value_1qb: number | null;
+  dp_ecr_sf: number | null;
+  dp_ecr_1qb: number | null;
+  fp_ecr_sf: number | null;
+  fp_ecr_best: number | null;
+  fp_ecr_worst: number | null;
+  fp_ecr_sd: number | null;
+}
+
 // Trade Intelligence
 
 export interface TradeOutcome {

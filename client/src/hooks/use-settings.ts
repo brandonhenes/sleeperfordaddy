@@ -1,12 +1,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
+import type { UserSettings } from "@shared/types";
 import { apiFetch } from "../lib/api";
 import { queryClient } from "../lib/queryClient";
-
-export interface UserSettings {
-  fc_weight: number;
-  ktc_weight: number;
-  dp_weight: number;
-}
 
 export function useSettings(username: string) {
   const query = useQuery<UserSettings>({

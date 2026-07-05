@@ -1,16 +1,7 @@
 import { getFreeAgentGaps } from "./arbitrage.js";
 import { getInjuredPlayers } from "./injury-tracker.js";
 import { getBuyingWindows } from "./injury-tracker.js";
-
-export interface Notification {
-  id: string;
-  type: "arbitrage" | "disagreement" | "injury" | "buying_window";
-  title: string;
-  message: string;
-  player_name: string;
-  position: string;
-  severity: "high" | "medium" | "low";
-}
+import type { Notification } from "../../shared/types.js";
 
 export async function getNotifications(username: string): Promise<Notification[]> {
   const results: Notification[] = [];

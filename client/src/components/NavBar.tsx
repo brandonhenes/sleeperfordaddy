@@ -22,7 +22,8 @@ import {
 import { Link, useLocation } from "wouter";
 import { avatarUrl } from "../lib/utils";
 import { userScopedPath } from "../lib/current-user";
-import { useNotifications, type Notification } from "../hooks/use-notifications";
+import { useNotifications } from "../hooks/use-notifications";
+import type { Notification } from "@shared/types";
 
 interface NavBarProps {
   username: string;

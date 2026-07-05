@@ -1,5 +1,5 @@
 import type { Prospect } from "@shared/types";
-import type { ProspectRanking } from "../../hooks/use-prospect-rankings";
+import type { ProspectRanking } from "@shared/types";
 import type { DraftPickContext, PickValueReference } from "@shared/types";
 import ProspectCard from "./ProspectCard";
 import { TIER_CONFIG, TIER_ORDER } from "./rookie-draft-config";
