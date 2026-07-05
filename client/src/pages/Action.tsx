@@ -1,7 +1,20 @@
 import { useParams } from "wouter";
 import AppShell from "../components/AppShell";
-import { SectionHeader, Tag, TrendArrow, PlayerLink } from "../components/ui";
-import { posColor, dirColor } from "../lib/position-colors";
+import FreshnessBar from "../components/FreshnessBar";
+import {
+  Card,
+  ErrorState,
+  LoadingSkeleton,
+  PageHeader,
+  PlayerLink,
+  PositionBadge,
+  ResponsiveTable,
+  SectionHeader,
+  Tag,
+  TrendArrow,
+  type ResponsiveTableColumn,
+} from "../components/ui";
+import { dirColor } from "../lib/position-colors";
 import {
   useSellCandidates,
   useBuyOpportunities,
@@ -9,73 +22,87 @@ import {
   type BuyOpportunity,
 } from "../hooks/use-action";
 
-function SellRow({ player: p }: { player: SellCandidate }) {
-  const exposure =
-    p.total_leagues > 0
-      ? ((p.league_count / p.total_leagues) * 100).toFixed(0)
-      : "0";
-
-  return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        padding: "12px 16px",
-        borderBottom: "1px solid var(--border)",
-        gap: 12,
-      }}
-    >
-      {p.composite_tag && <Tag tag={p.composite_tag} />}
-      <span style={{ minWidth: 140 }}>
-        <PlayerLink name={p.player_name} />
-      </span>
-      <span
-        style={{ fontSize: 12, fontWeight: 600, color: posColor(p.position ?? "") }}
-      >
-        {p.position}
-      </span>
-      <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{p.team}</span>
-      <span
-        className="font-mono"
-        style={{ fontSize: 12, color: "var(--text-dim)", marginLeft: "auto" }}
-      >
-        {p.league_count}/{p.total_leagues} ({exposure}%)
-      </span>
-      <span
-        className="font-mono"
-        style={{ fontSize: 13, color: "var(--amber)", minWidth: 60, textAlign: "right" }}
-      >
-        {p.edge_score != null ? p.edge_score.toFixed(1) : "-"}
-      </span>
-      <span style={{ minWidth: 80, textAlign: "right" }}>
-        <TrendArrow value={p.trend_30day} />
-      </span>
-    </div>
-  );
+function exposureLabel(player: SellCandidate): string {
+  const exposure = player.total_leagues > 0
+    ? ((player.league_count / player.total_leagues) * 100).toFixed(0)
+    : "0";
+  return `${player.league_count}/${player.total_leagues} (${exposure}%)`;
 }
 
 function SellCandidatesSection({ username }: { username: string }) {
   const { data, isLoading, error } = useSellCandidates(username);
+  const columns: ResponsiveTableColumn<SellCandidate>[] = [
+    {
+      key: "player",
+      header: "Player",
+      render: (player) => <PlayerLink name={player.player_name} />,
+    },
+    {
+      key: "position",
+      header: "Pos",
+      render: (player) => <PositionBadge position={player.position} />,
+    },
+    {
+      key: "team",
+      header: "Team",
+      render: (player) => <span style={{ color: "var(--text-muted)" }}>{player.team ?? "-"}</span>,
+    },
+    {
+      key: "signal",
+      header: "Signal",
+      render: (player) => player.composite_tag ? <Tag tag={player.composite_tag} /> : <span>-</span>,
+    },
+    {
+      key: "exposure",
+      header: "Exposure",
+      align: "right",
+      render: (player) => (
+        <span className="font-mono" style={{ fontSize: 12, color: "var(--text-dim)" }}>
+          {exposureLabel(player)}
+        </span>
+      ),
+    },
+    {
+      key: "edge",
+      header: "Edge",
+      align: "right",
+      render: (player) => (
+        <span className="font-mono" style={{ fontSize: 13, color: "var(--amber)", fontWeight: 800 }}>
+          {player.edge_score != null ? player.edge_score.toFixed(1) : "-"}
+        </span>
+      ),
+    },
+    {
+      key: "trend",
+      header: "30D",
+      align: "right",
+      render: (player) => <TrendArrow value={player.trend_30day} />,
+    },
+  ];
 
-  if (isLoading) return <SkeletonCard />;
-  if (error) return <ErrorCard message={(error as Error).message} />;
+  if (isLoading) return <LoadingSkeleton label="Loading sell candidates" rows={4} />;
+  if (error) {
+    return (
+      <ErrorState
+        title="Could not load sell candidates"
+        message={(error as Error).message}
+      />
+    );
+  }
   if (!data || data.length === 0) {
-    return <EmptyCard label="No sell candidates - your portfolio looks clean" />;
+    return (
+      <Card className="edge-state-card">
+        <p>No sell candidates. Your portfolio looks clean.</p>
+      </Card>
+    );
   }
 
   return (
-    <div
-      style={{
-        background: "var(--card)",
-        border: "1px solid var(--border)",
-        borderRadius: 10,
-        overflow: "hidden",
-      }}
-    >
-      {data.map((p, i) => (
-        <SellRow key={`${p.player_name}-${i}`} player={p} />
-      ))}
-    </div>
+    <ResponsiveTable
+      rows={data}
+      columns={columns}
+      getRowKey={(player, index) => `${player.player_name}-${index}`}
+    />
   );
 }
 
@@ -87,12 +114,8 @@ function BuyCard({ opp: o }: { opp: BuyOpportunity }) {
       : `Own in ${o.owned_leagues}/${o.total_leagues} leagues`;
 
   return (
-    <div
+    <Card
       style={{
-        background: "var(--card)",
-        border: "1px solid var(--border)",
-        borderRadius: 10,
-        padding: "16px 20px",
         display: "flex",
         flexDirection: "column",
         gap: 8,
@@ -102,9 +125,9 @@ function BuyCard({ opp: o }: { opp: BuyOpportunity }) {
         <span
           style={{
             padding: "3px 10px",
-            borderRadius: 4,
+            borderRadius: 6,
             fontSize: 11,
-            fontWeight: 700,
+            fontWeight: 800,
             letterSpacing: 0.8,
             background: `color-mix(in srgb, ${color} 15%, transparent)`,
             color,
@@ -113,11 +136,7 @@ function BuyCard({ opp: o }: { opp: BuyOpportunity }) {
           BUY
         </span>
         <PlayerLink name={o.player_name} style={{ fontSize: 15 }} />
-        {o.position && (
-          <span style={{ fontSize: 12, fontWeight: 600, color: posColor(o.position) }}>
-            {o.position}
-          </span>
-        )}
+        {o.position && <PositionBadge position={o.position} />}
         {o.team && (
           <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{o.team}</span>
         )}
@@ -149,17 +168,28 @@ function BuyCard({ opp: o }: { opp: BuyOpportunity }) {
           {o.rationale}
         </p>
       )}
-    </div>
+    </Card>
   );
 }
 
 function BuyOpportunitiesSection({ username }: { username: string }) {
   const { data, isLoading, error } = useBuyOpportunities(username);
 
-  if (isLoading) return <SkeletonCard />;
-  if (error) return <ErrorCard message={(error as Error).message} />;
+  if (isLoading) return <LoadingSkeleton label="Loading buy opportunities" rows={4} />;
+  if (error) {
+    return (
+      <ErrorState
+        title="Could not load buy opportunities"
+        message={(error as Error).message}
+      />
+    );
+  }
   if (!data || data.length === 0) {
-    return <EmptyCard label="No buy recommendations right now" />;
+    return (
+      <Card className="edge-state-card">
+        <p>No buy recommendations right now.</p>
+      </Card>
+    );
   }
 
   return (
@@ -176,14 +206,11 @@ export default function Action() {
 
   return (
     <AppShell>
-      <div style={{ padding: "28px 0 8px" }}>
-        <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>
-          Action Engine
-        </h1>
-        <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 4 }}>
-          Sell high, buy low - matched to your portfolio
-        </p>
-      </div>
+      <PageHeader
+        title="Action Engine"
+        subtitle="Sell high, buy low - matched to your portfolio."
+        actions={<FreshnessBar />}
+      />
 
       <SectionHeader
         num="01"
@@ -201,53 +228,5 @@ export default function Action() {
       />
       <BuyOpportunitiesSection username={username ?? ""} />
     </AppShell>
-  );
-}
-
-function SkeletonCard() {
-  return (
-    <div
-      className="animate-pulse"
-      style={{
-        background: "var(--card)",
-        border: "1px solid var(--border)",
-        borderRadius: 10,
-        height: 200,
-      }}
-    />
-  );
-}
-
-function ErrorCard({ message }: { message: string }) {
-  return (
-    <div
-      style={{
-        background: "var(--card)",
-        border: "1px solid var(--border)",
-        borderRadius: 10,
-        padding: 40,
-        textAlign: "center",
-        color: "var(--red)",
-      }}
-    >
-      Error: {message}
-    </div>
-  );
-}
-
-function EmptyCard({ label }: { label: string }) {
-  return (
-    <div
-      style={{
-        background: "var(--card)",
-        border: "1px solid var(--border)",
-        borderRadius: 10,
-        padding: 40,
-        textAlign: "center",
-        color: "var(--text-muted)",
-      }}
-    >
-      {label}
-    </div>
   );
 }
