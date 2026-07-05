@@ -2,14 +2,13 @@ import { useState, useMemo } from "react";
 import AppShell from "../components/AppShell";
 import FreshnessBar from "../components/FreshnessBar";
 import { useProspects, type Prospect } from "../hooks/use-market";
-import { useRookieDraftContext, type DraftPickContext, type AggregateNeed } from "../hooks/use-rookie-draft";
+import { useRookieDraftContext } from "../hooks/use-rookie-draft";
 import { usePowerRankings } from "../hooks/use-power-rankings";
 import { useMockDraftSetup, type MockDraftPick } from "../hooks/use-mock-draft";
 import { useActiveDrafts, useLiveDraft } from "../hooks/use-live-draft";
 import { useHitRates, useRookieADP } from "../hooks/use-draft-data";
 import { useLatestProspectRankings, type ProspectRanking } from "../hooks/use-prospect-rankings";
 import { useCurrentUsername } from "../hooks/use-current-user";
-import PickCard from "./draft/PickCard";
 import AnalyticsView from "./draft/AnalyticsView";
 import DraftCompareView from "./draft/CompareView";
 import LiveDraftView from "./draft/LiveDraftView";
@@ -18,8 +17,10 @@ import MyBoardView from "./draft/MyBoardView";
 import BigBoardView from "./draft/BigBoardView";
 import PositionalProspectsView from "./draft/PositionalProspectsView";
 import CompareTray from "./draft/CompareTray";
+import DraftHubControls, { type DraftViewMode } from "./draft/DraftHubControls";
+import RankingDisagreementsPanel from "./draft/RankingDisagreementsPanel";
+import OwnedPicksPanel from "./draft/OwnedPicksPanel";
 import {
-  POS_FILTERS,
   TIER_CONFIG,
   TIER_ORDER,
   MYBOARD_KEY,
@@ -37,7 +38,7 @@ export default function RookieDraft() {
   const { username } = useCurrentUsername();
   const { data: draftCtx } = useRookieDraftContext(username);
   const [posFilter, setPosFilter] = useState<string>("ALL");
-  const [viewMode, setViewMode] = useState<"board" | "positional" | "compare" | "myboard" | "mock" | "live" | "analytics">("board");
+  const [viewMode, setViewMode] = useState<DraftViewMode>("board");
   const [compareList, setCompareList] = useState<string[]>([]);
   const [watchlist, setWatchlist] = useState<Set<string>>(loadWatchlist);
   const [showWatchlistOnly, setShowWatchlistOnly] = useState(false);
@@ -295,111 +296,21 @@ export default function RookieDraft() {
         <FreshnessBar />
       </div>
 
-      <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
-        <div style={{ display: "flex", gap: 0, border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden", marginRight: 12 }}>
-          {([
-            { key: "board" as const, label: "Big Board" },
-            { key: "positional" as const, label: "By Position" },
-            { key: "myboard" as const, label: "My Board" },
-            { key: "mock" as const, label: "Mock Draft" },
-            { key: "live" as const, label: "Live" },
-            { key: "analytics" as const, label: "Analytics" },
-          ]).map((m) => (
-            <button
-              key={m.key}
-              onClick={() => setViewMode(m.key)}
-              style={{
-                background: viewMode === m.key ? "var(--amber)" : "var(--card)",
-                color: viewMode === m.key ? "var(--dark-base)" : "var(--text-muted)",
-                border: "none",
-                padding: "7px 16px",
-                fontSize: 12,
-                fontWeight: 600,
-                cursor: "pointer",
-                fontFamily: "inherit",
-              }}
-            >
-              {m.label}
-            </button>
-          ))}
-        </div>
+      <DraftHubControls
+        viewMode={viewMode}
+        onSetViewMode={setViewMode}
+        posFilter={posFilter}
+        onSetPosFilter={setPosFilter}
+        showWatchlistOnly={showWatchlistOnly}
+        onToggleWatchlistOnly={() => setShowWatchlistOnly((current) => !current)}
+        watchlistCount={watchlist.size}
+      />
 
-        {(viewMode === "board" || viewMode === "positional") && (
-          <>
-            {viewMode === "board" && POS_FILTERS.map((pos) => (
-              <button
-                key={pos}
-                onClick={() => setPosFilter(pos)}
-                style={{
-                  background: posFilter === pos ? "var(--amber)" : "var(--card)",
-                  color: posFilter === pos ? "var(--dark-base)" : "var(--text-dim)",
-                  border: `1px solid ${posFilter === pos ? "var(--amber)" : "var(--border)"}`,
-                  borderRadius: 6,
-                  padding: "6px 14px",
-                  fontSize: 12,
-                  fontWeight: 600,
-                  cursor: "pointer",
-                  letterSpacing: 0.5,
-                }}
-              >
-                {pos}
-              </button>
-            ))}
-            <button
-              onClick={() => setShowWatchlistOnly(!showWatchlistOnly)}
-              style={{
-                background: showWatchlistOnly ? "#f59e0b" : "var(--card)",
-                color: showWatchlistOnly ? "var(--dark-base)" : "var(--text-dim)",
-                border: `1px solid ${showWatchlistOnly ? "#f59e0b" : "var(--border)"}`,
-                borderRadius: 6,
-                padding: "6px 14px",
-                fontSize: 12,
-                fontWeight: 600,
-                cursor: "pointer",
-                marginLeft: 8,
-              }}
-            >
-              {"\u2605"} Watchlist ({watchlist.size})
-            </button>
-          </>
-        )}
-      </div>
-
-      {viewMode === "board" && disagreements.length > 0 && (
-        <div style={{
-          background: "var(--card)", border: "1px solid var(--border)",
-          borderRadius: 10, padding: "14px 18px", marginTop: 12,
-        }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-muted)", letterSpacing: 0.5, marginBottom: 10 }}>
-            RANKING DISAGREEMENTS ({disagreements.length})
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
-            {[
-              { title: "SLEEPER", arrow: "↑", color: "#22c55e", bg: "rgba(34,197,94,0.08)", border: "rgba(34,197,94,0.25)", items: sleeperDisagreements, label: "PFF/market data suggests undervalued" },
-              { title: "FADING", arrow: "↓", color: "#ef4444", bg: "rgba(239,68,68,0.08)", border: "rgba(239,68,68,0.25)", items: fadingDisagreements, label: "PFF/market data suggests overvalued" },
-            ].filter((section) => section.items.length > 0).map((section) => (
-              <div key={section.title} style={{ background: "var(--dark-base)", border: `1px solid ${section.border}`, borderRadius: 8, padding: "10px 12px" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8, color: section.color, fontSize: 11, fontWeight: 700 }}>
-                  <span>{section.arrow}</span>
-                  <span>{section.title}</span>
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {section.items.map((prospect) => (
-                    <div key={prospect.player_name} style={{ background: section.bg, border: `1px solid ${section.border}`, borderRadius: 8, padding: "8px 10px" }}>
-                      <div style={{ fontSize: 12, fontWeight: 700 }}>{prospect.player_name}</div>
-                      <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 4, lineHeight: 1.4 }}>
-                        {(TIER_CONFIG[prospect.tier ?? "flier"]?.label ?? (prospect.tier ?? "FLIER")).toUpperCase()} tier
-                      </div>
-                      <div style={{ fontSize: 10, color: section.color, marginTop: 2, lineHeight: 1.4 }}>
-                        {prospect.player_name} -- {section.label}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+      {viewMode === "board" && (
+        <RankingDisagreementsPanel
+          sleeperDisagreements={sleeperDisagreements}
+          fadingDisagreements={fadingDisagreements}
+        />
       )}
 
       {!username && (
@@ -417,49 +328,7 @@ export default function RookieDraft() {
         </div>
       )}
 
-      {draftCtx && draftCtx.picks_2026.length > 0 && (
-        <div style={{
-          background: "var(--card)",
-          border: "1px solid var(--border)",
-          borderRadius: 12,
-          padding: "16px 20px",
-          marginTop: 16,
-        }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-            <div>
-              <span style={{ fontSize: 14, fontWeight: 800 }}>Your 2026 Picks</span>
-              <span style={{ fontSize: 12, color: "var(--text-muted)", marginLeft: 8 }}>
-                {draftCtx.picks_2026.length} pick{draftCtx.picks_2026.length !== 1 ? "s" : ""} across {draftCtx.total_leagues} leagues
-              </span>
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              {draftCtx.aggregate_needs.filter((n: AggregateNeed) => n.overall_urgency !== "low").map((n: AggregateNeed) => (
-                <span
-                  key={n.position}
-                  style={{
-                    fontSize: 10,
-                    fontWeight: 700,
-                    padding: "3px 8px",
-                    borderRadius: 4,
-                    background: n.overall_urgency === "critical" ? "rgba(239,68,68,0.15)" : "rgba(245,158,11,0.15)",
-                    color: n.overall_urgency === "critical" ? "var(--red)" : "var(--amber)",
-                    border: `1px solid ${n.overall_urgency === "critical" ? "rgba(239,68,68,0.3)" : "rgba(245,158,11,0.3)"}`,
-                  }}
-                >
-                  {n.position}: {n.overall_urgency === "critical" ? "NEED" : "WANT"}
-                  {n.leagues_with_hole > 0 && ` (${n.leagues_with_hole} holes)`}
-                </span>
-              ))}
-            </div>
-          </div>
-
-          <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 4 }}>
-            {draftCtx.picks_2026.map((pick: DraftPickContext, i: number) => (
-              <PickCard key={`${pick.league_id}-${pick.round}-${pick.tier}-${i}`} pick={pick} />
-            ))}
-          </div>
-        </div>
-      )}
+      <OwnedPicksPanel draftContext={draftCtx} />
 
       {viewMode === "board" && (
         <BigBoardView
