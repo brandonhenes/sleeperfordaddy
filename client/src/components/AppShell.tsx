@@ -3,6 +3,7 @@ import NavBar from "./NavBar";
 import { CurrentUserProvider } from "./CurrentUserContext";
 import SyncGate, { type SyncGateProps } from "./SyncGate";
 import { useCurrentUsername } from "../hooks/use-current-user";
+import SlipDock from "./slip/SlipDock";
 
 interface AppShellProps {
   children: ReactNode;
@@ -31,6 +32,7 @@ export default function AppShell({
         <div className="app-shell-content">
           {content}
         </div>
+        <SlipDock />
       </div>
     </CurrentUserProvider>
   );

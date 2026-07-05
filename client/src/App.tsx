@@ -1,5 +1,6 @@
 import { lazy, Suspense } from "react";
 import { Route, Switch } from "wouter";
+import { SlipProvider } from "./lib/slip";
 
 const Landing = lazy(() => import("./pages/Landing"));
 const Dashboard = lazy(() => import("./pages/Dashboard"));
@@ -34,6 +35,7 @@ function RouteFallback() {
 
 export default function App() {
   return (
+    <SlipProvider>
     <Suspense fallback={<RouteFallback />}>
       <Switch>
         <Route path="/">
@@ -150,5 +152,6 @@ export default function App() {
         </Route>
       </Switch>
     </Suspense>
+    </SlipProvider>
   );
 }
