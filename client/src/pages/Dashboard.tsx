@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
-import { useParams } from "wouter";
 import AppShell from "../components/AppShell";
+import SyncGate from "../components/SyncGate";
 import { SectionHeader } from "../components/ui";
 import {
   useDashboard,
   type DashboardLeagueScope,
 } from "../hooks/use-dashboard";
-import { useEnsureUser } from "../hooks/use-ensure-user";
+import { useCurrentUsername } from "../hooks/use-current-user";
 import FreshnessBar from "../components/FreshnessBar";
 import EmpireOverview from "../components/dashboard/EmpireOverview";
 import RosterHoles from "../components/dashboard/RosterHoles";
@@ -139,15 +139,9 @@ function HeaderBlock({
 }
 
 export default function Dashboard() {
-  const { username } = useParams<{ username: string }>();
+  const { username } = useCurrentUsername();
   const [leagueScope, setLeagueScope] =
     useState<DashboardLeagueScope>(initialLeagueScope);
-  const { phase, syncProgress, errorMsg, retry } = useEnsureUser(username);
-  const { data, isLoading, error } = useDashboard(
-    phase === "ready" ? username : undefined,
-    leagueScope
-  );
-  const isRedraft = leagueScope === "redraft";
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -157,133 +151,52 @@ export default function Dashboard() {
     window.history.replaceState({}, "", url.toString());
   }, [leagueScope]);
 
-  if (phase === "checking" || phase === "syncing") {
-    return (
-      <AppShell>
-        <HeaderBlock
-          title="Dashboard"
-          leagueScope={leagueScope}
-          onScopeChange={setLeagueScope}
-        />
-        <div
-          style={{
-            background: "var(--card)",
-            border: "1px solid var(--border)",
-            borderRadius: 12,
-            padding: "48px 24px",
-            textAlign: "center",
-          }}
-        >
-          <div
-            style={{
-              fontSize: 14,
-              color: "var(--amber)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 8,
-            }}
-          >
-            <span className="animate-pulse">*</span>
-            {phase === "checking"
-              ? `Looking up ${username}...`
-              : `Syncing ${username}'s leagues${
-                  syncProgress
-                    ? ` (${syncProgress.done}/${syncProgress.total})`
-                    : "..."
-                }`}
-          </div>
-          <p style={{ color: "var(--text-muted)", fontSize: 12, marginTop: 12 }}>
-            {phase === "syncing"
-              ? "First-time sync may take a minute. Pulling leagues, rosters, and player data from Sleeper."
-              : "Checking if data is available..."}
-          </p>
-        </div>
-      </AppShell>
-    );
-  }
-
-  if (phase === "error") {
-    return (
-      <AppShell>
-        <HeaderBlock
-          title="Dashboard"
-          leagueScope={leagueScope}
-          onScopeChange={setLeagueScope}
-        />
-        <div
-          style={{
-            background: "var(--card)",
-            border: "1px solid var(--border)",
-            borderRadius: 12,
-            padding: "48px 24px",
-            textAlign: "center",
-          }}
-        >
-          <p style={{ color: "var(--red)", fontSize: 14, margin: 0 }}>
-            {errorMsg || "Something went wrong."}
-          </p>
-          <button
-            onClick={retry}
-            style={{
-              marginTop: 16,
-              background:
-                "linear-gradient(135deg, var(--amber), var(--amber-dark))",
-              color: "var(--dark-base)",
-              border: "none",
-              borderRadius: 8,
-              padding: "10px 20px",
-              fontWeight: 700,
-              fontSize: 13,
-              cursor: "pointer",
-            }}
-          >
-            Try Again
-          </button>
-        </div>
-      </AppShell>
-    );
-  }
-
-  if (isLoading) {
-    return (
-      <AppShell>
-        <LoadingSkeleton
-          username={username}
-          leagueScope={leagueScope}
-          onScopeChange={setLeagueScope}
-        />
-      </AppShell>
-    );
-  }
-
-  if (error || !data) {
-    return (
-      <AppShell>
-        <HeaderBlock
-          title="Dashboard"
-          leagueScope={leagueScope}
-          onScopeChange={setLeagueScope}
-        />
-        <EmptyCard
-          label={
-            error
-              ? (error as Error).message
-              : `No ${leagueScope} data found. Try syncing first.`
-          }
-        />
-      </AppShell>
-    );
-  }
+  const title = username ? `${greeting()}, ${username}` : "Dashboard";
+  const subtitle = username ? today() : undefined;
 
   return (
     <AppShell>
       <HeaderBlock
-        title={`${greeting()}, ${username}`}
-        subtitle={today()}
+        title={title}
+        subtitle={subtitle}
         leagueScope={leagueScope}
         onScopeChange={setLeagueScope}
       />
+      <SyncGate username={username}>
+        <DashboardReady username={username} leagueScope={leagueScope} />
+      </SyncGate>
+    </AppShell>
+  );
+}
+
+function DashboardReady({
+  username,
+  leagueScope,
+}: {
+  username: string;
+  leagueScope: DashboardLeagueScope;
+}) {
+  const { data, isLoading, error } = useDashboard(username, leagueScope);
+  const isRedraft = leagueScope === "redraft";
+
+  if (isLoading) {
+    return <LoadingSkeleton />;
+  }
+
+  if (error || !data) {
+    return (
+      <EmptyCard
+        label={
+          error
+            ? (error as Error).message
+            : `No ${leagueScope} data found. Try syncing first.`
+        }
+      />
+    );
+  }
+
+  return (
+    <>
       <FreshnessBar />
 
       {isRedraft && (
@@ -361,27 +274,13 @@ export default function Dashboard() {
           <ArchetypeActions actions={data.archetype_actions} />
         </>
       )}
-    </AppShell>
+    </>
   );
 }
 
-function LoadingSkeleton({
-  username,
-  leagueScope,
-  onScopeChange,
-}: {
-  username: string | undefined;
-  leagueScope: DashboardLeagueScope;
-  onScopeChange: (scope: DashboardLeagueScope) => void;
-}) {
+function LoadingSkeleton() {
   return (
     <>
-      <HeaderBlock
-        title={`${greeting()}, ${username}`}
-        subtitle={today()}
-        leagueScope={leagueScope}
-        onScopeChange={onScopeChange}
-      />
       {[1, 2, 3].map((i) => (
         <div
           key={i}
