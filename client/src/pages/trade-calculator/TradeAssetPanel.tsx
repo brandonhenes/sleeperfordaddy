@@ -6,7 +6,7 @@ import { EvalMetric } from "./TradeEvalMetric";
 
 function ratingTone(score: number): string {
   if (score >= 85) return "var(--green)";
-  if (score >= 70) return "var(--amber)";
+  if (score >= 70) return "var(--warning)";
   if (score >= 55) return "var(--text-muted)";
   return "var(--red)";
 }
@@ -71,7 +71,7 @@ function AssetValuationDetails({ asset }: { asset: EvaluatedAsset }) {
       <summary style={{ cursor: "pointer", color: "var(--text-muted)", fontSize: 10, fontWeight: 700 }}>
         Valuation details
       </summary>
-      <div style={{ display: "grid", gap: 8, marginTop: 6, background: "rgba(15,23,42,0.45)", border: "1px solid var(--border)", borderRadius: 8, padding: 8 }}>
+      <div style={{ display: "grid", gap: 8, marginTop: 6, background: "rgba(11,13,18,0.45)", border: "1px solid var(--border)", borderRadius: 8, padding: 8 }}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(92px, 1fr))", gap: 6 }}>
           <EvalMetric label="Base" value={formatTradeValue(asset.base_market_value)} />
           <EvalMetric label="League" value={formatTradeValue(asset.league_market_value)} />

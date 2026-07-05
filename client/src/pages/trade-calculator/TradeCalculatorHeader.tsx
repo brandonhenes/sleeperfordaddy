@@ -30,7 +30,7 @@ export default function TradeCalculatorHeader({
     <div style={{ padding: "28px 0 8px" }}>
       <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>Trade Calculator</h1>
       <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 4 }}>
-        Click your roster and your opponent roster. Evaluation and acceptance update live.
+        Pick a league and a partner, then tap players and picks to build both sides. The verdict updates live.
       </p>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 10 }}>
         <button
@@ -61,7 +61,7 @@ export default function TradeCalculatorHeader({
                 borderRadius: 999,
                 padding: "7px 12px",
                 border: `1px solid ${valuationMode === option.value ? "var(--amber)" : "var(--border)"}`,
-                background: valuationMode === option.value ? "rgba(245,158,11,0.12)" : "transparent",
+                background: valuationMode === option.value ? "rgba(61,139,253,0.12)" : "transparent",
                 color: valuationMode === option.value ? "var(--amber)" : "var(--text-muted)",
                 fontSize: 12,
                 fontWeight: 700,

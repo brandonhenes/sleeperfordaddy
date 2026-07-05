@@ -97,9 +97,9 @@ export default function VacuumSearchColumn({
       </div>
       <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
         <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 700 }}>Add Pick:</span>
-        <select value={pickSeason} onChange={(event) => onPickSeasonChange(event.target.value)} style={{ background: "var(--dark-base)", border: "1px solid var(--border)", borderRadius: 7, color: "var(--text)", padding: "6px 8px", fontSize: 12, fontFamily: "inherit" }}>{PICK_YEARS.map((year) => <option key={year} value={year}>{year}</option>)}</select>
-        <select value={pickRound} onChange={(event) => onPickRoundChange(Number(event.target.value))} style={{ background: "var(--dark-base)", border: "1px solid var(--border)", borderRadius: 7, color: "var(--text)", padding: "6px 8px", fontSize: 12, fontFamily: "inherit" }}>{[1, 2, 3, 4].map((round) => <option key={round} value={round}>Round {round}</option>)}</select>
-        <select value={pickSelection} onChange={(event) => handlePickSelection(event.target.value as PickSelection)} style={{ background: "var(--dark-base)", border: "1px solid var(--border)", borderRadius: 7, color: "var(--text)", padding: "6px 8px", fontSize: 12, fontFamily: "inherit" }}>
+        <select value={pickSeason} onChange={(event) => onPickSeasonChange(event.target.value)}>{PICK_YEARS.map((year) => <option key={year} value={year}>{year}</option>)}</select>
+        <select value={pickRound} onChange={(event) => onPickRoundChange(Number(event.target.value))}>{[1, 2, 3, 4].map((round) => <option key={round} value={round}>Round {round}</option>)}</select>
+        <select value={pickSelection} onChange={(event) => handlePickSelection(event.target.value as PickSelection)}>
           <option value="early">Early</option>
           <option value="mid">Mid</option>
           <option value="late">Late</option>
@@ -109,7 +109,7 @@ export default function VacuumSearchColumn({
             </option>
           ))}
         </select>
-        <button type="button" onClick={onAddPick} style={{ background: color, border: "none", borderRadius: 7, color: "#fff", padding: "6px 10px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>+ {addPickLabel}</button>
+        <button type="button" onClick={onAddPick} style={{ background: color, border: "none", borderRadius: 7, color: "var(--dark)", padding: "8px 12px", fontSize: 12, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>+ {addPickLabel}</button>
       </div>
     </div>
   );

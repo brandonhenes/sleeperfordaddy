@@ -18,7 +18,7 @@ export { TradePanel } from "./TradeAssetPanel";
 
 function fairnessColor(f: TradeEvaluation["fairness"]): string {
   if (f === "fair") return "var(--green)";
-  if (f === "slight_edge") return "var(--amber)";
+  if (f === "slight_edge") return "var(--warning)";
   return "var(--red)";
 }
 
@@ -146,7 +146,7 @@ export function EvalBar({
     return <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: 12, color: "var(--text-muted)", fontSize: 13 }}>Click players below to build a trade.</div>;
   }
   if (!result && isPending) {
-    return <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: 12, color: "var(--amber)", fontSize: 13 }}><span className="animate-pulse">Evaluating trade...</span></div>;
+    return <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: 12, color: "var(--warning)", fontSize: 13 }}><span className="animate-pulse">Evaluating trade...</span></div>;
   }
   if (!result) return null;
 

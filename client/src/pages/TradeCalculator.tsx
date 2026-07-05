@@ -20,6 +20,7 @@ import { buildTradeMessage } from "./trade-calculator/trade-message";
 import TradeCalculatorHeader from "./trade-calculator/TradeCalculatorHeader";
 import LeagueOpponentSelectors from "./trade-calculator/LeagueOpponentSelectors";
 import TradeActionButtons from "./trade-calculator/TradeActionButtons";
+import { TradeSheet, TradeTray } from "./trade-calculator/TradeTray";
 import type {
   AcceptanceAssetView,
   OpponentContextResponse,
@@ -37,6 +38,47 @@ function assetKey(a: TradeAssetInput): string {
     return `k:${a.pick_season}|${a.pick_round}|${a.pick_slot}${ownerKey}`;
   }
   return `k:${a.pick_season}|${a.pick_round}|${a.pick_tier ?? "mid"}${ownerKey}`;
+}
+
+function RosterSideTabs({
+  active,
+  onChange,
+  sendLabel,
+  receiveLabel,
+  sendCount,
+  receiveCount,
+}: {
+  active: Side;
+  onChange: (side: Side) => void;
+  sendLabel: string;
+  receiveLabel: string;
+  sendCount: number;
+  receiveCount: number;
+}) {
+  return (
+    <div className="tc-roster-tabs" role="tablist" aria-label="Trade side">
+      <button
+        type="button"
+        role="tab"
+        aria-selected={active === "send"}
+        className={`tc-roster-tab side-send${active === "send" ? " active" : ""}`}
+        onClick={() => onChange("send")}
+      >
+        {sendLabel}
+        {sendCount > 0 ? ` · ${sendCount}` : ""}
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={active === "receive"}
+        className={`tc-roster-tab side-receive${active === "receive" ? " active" : ""}`}
+        onClick={() => onChange("receive")}
+      >
+        {receiveLabel}
+        {receiveCount > 0 ? ` · ${receiveCount}` : ""}
+      </button>
+    </div>
+  );
 }
 
 export default function TradeCalculator() {
@@ -59,6 +101,8 @@ export default function TradeCalculator() {
   const [receivePickTier, setReceivePickTier] = useState<PickTier>("mid");
   const [receivePickSlot, setReceivePickSlot] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
+  const [activeRosterSide, setActiveRosterSide] = useState<Side>("send");
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [isCompactLeagueLayout, setIsCompactLeagueLayout] = useState(() => (
     typeof window !== "undefined" ? window.innerWidth < 1180 : false
   ));
@@ -95,6 +139,8 @@ export default function TradeCalculator() {
     setReceiveAssets([]);
     setSendLabels([]);
     setReceiveLabels([]);
+    setActiveRosterSide("send");
+    setSheetOpen(false);
   }, [selectedLeague]);
 
   useEffect(() => {
@@ -239,20 +285,90 @@ export default function TradeCalculator() {
     );
   }
 
-  const leagueColumns = isCompactLeagueLayout ? "1fr" : "minmax(0, 1fr) 320px minmax(0, 1fr)";
+  const leagueColumns = "minmax(0, 1fr) 320px minmax(0, 1fr)";
   const rosterPaneStyle = {
-    maxHeight: isCompactLeagueLayout ? "none" : "70vh",
-    overflowY: isCompactLeagueLayout ? "visible" : "auto",
+    maxHeight: "70vh",
+    overflowY: "auto",
   } as const;
   const centerPaneStyle = {
-    position: isCompactLeagueLayout ? "static" : "sticky",
-    top: isCompactLeagueLayout ? undefined : 80,
-    maxHeight: isCompactLeagueLayout ? "none" : "85vh",
-    overflowY: isCompactLeagueLayout ? "visible" : "auto",
+    position: "sticky",
+    top: 80,
+    maxHeight: "85vh",
+    overflowY: "auto",
     display: "grid",
     gap: 12,
     alignSelf: "start",
   } as const;
+
+  const sendVacuumColumn = (
+    <VacuumSearchColumn
+      title="YOU SEND"
+      color="var(--red)"
+      search={sendSearch}
+      onSearchChange={setSendSearch}
+      results={sendSearchResults}
+      isLoading={sendSearchLoading}
+      onAddPlayer={(player) => toggleAsset("send", { type: "player", player_id: player.player_id }, player.label)}
+      pickSeason={sendPickSeason}
+      onPickSeasonChange={setSendPickSeason}
+      pickRound={sendPickRound}
+      onPickRoundChange={setSendPickRound}
+      pickTier={sendPickTier}
+      onPickTierChange={setSendPickTier}
+      pickSlot={sendPickSlot}
+      onPickSlotChange={setSendPickSlot}
+      onAddPick={() => addVacuumPick("send")}
+      addPickLabel="Send Pick"
+    />
+  );
+
+  const receiveVacuumColumn = (
+    <VacuumSearchColumn
+      title="YOU GET"
+      color="var(--green)"
+      search={receiveSearch}
+      onSearchChange={setReceiveSearch}
+      results={receiveSearchResults}
+      isLoading={receiveSearchLoading}
+      onAddPlayer={(player) => toggleAsset("receive", { type: "player", player_id: player.player_id }, player.label)}
+      pickSeason={receivePickSeason}
+      onPickSeasonChange={setReceivePickSeason}
+      pickRound={receivePickRound}
+      onPickRoundChange={setReceivePickRound}
+      pickTier={receivePickTier}
+      onPickTierChange={setReceivePickTier}
+      pickSlot={receivePickSlot}
+      onPickSlotChange={setReceivePickSlot}
+      onAddPick={() => addVacuumPick("receive")}
+      addPickLabel="Get Pick"
+    />
+  );
+
+  const tradeBreakdown = (
+    <>
+      <TradePanel title="YOU SEND" color="var(--red)" labels={sendLabels} side={result?.sideA ?? null} onRemove={removeSend} onClear={() => clearSide("send")} />
+      <EvalBar result={result} acceptance={selectedLeague ? liveAcceptance : null} hasBothSides={hasBothSides} isPending={evalMutation.isPending} />
+      <TradePanel title="YOU GET" color="var(--green)" labels={receiveLabels} side={result?.sideB ?? null} onRemove={removeReceive} onClear={() => clearSide("receive")} />
+      {selectedLeague && <AcceptanceBadge acceptance={liveAcceptance} opponent={activeOpponent} />}
+      {result && selectedLeague && (
+        <TradeActionButtons
+          selectedLeague={selectedLeague}
+          copied={copied}
+          onCopyTradeMessage={() => {
+            const msg = buildTradeMessage(
+              result,
+              result.sideA.assets.map((asset) => asset.label),
+              result.sideB.assets.map((asset) => asset.label),
+              activeOpponent,
+              liveAcceptance
+            );
+            navigator.clipboard.writeText(msg);
+            setCopied(true);
+          }}
+        />
+      )}
+    </>
+  );
 
   return (
     <AppShell>
@@ -274,92 +390,82 @@ export default function TradeCalculator() {
         isCompact={isCompactLeagueLayout}
       />
 
-      {!selectedLeague && (
+      {/* Vacuum mode (no league) */}
+      {!selectedLeague && (isCompactLeagueLayout ? (
+        <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+          <RosterSideTabs
+            active={activeRosterSide}
+            onChange={setActiveRosterSide}
+            sendLabel="You send"
+            receiveLabel="You get"
+            sendCount={sendLabels.length}
+            receiveCount={receiveLabels.length}
+          />
+          {activeRosterSide === "send" ? sendVacuumColumn : receiveVacuumColumn}
+        </div>
+      ) : (
         <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: leagueColumns, gap: 12, alignItems: "start" }}>
-          <div style={{ ...rosterPaneStyle, display: "grid", gap: 12, alignSelf: "start", order: 1 }}>
-            <VacuumSearchColumn
-              title="YOU SEND"
-              color="#ef4444"
-              search={sendSearch}
-              onSearchChange={setSendSearch}
-              results={sendSearchResults}
-              isLoading={sendSearchLoading}
-              onAddPlayer={(player) => toggleAsset("send", { type: "player", player_id: player.player_id }, player.label)}
-              pickSeason={sendPickSeason}
-              onPickSeasonChange={setSendPickSeason}
-              pickRound={sendPickRound}
-              onPickRoundChange={setSendPickRound}
-              pickTier={sendPickTier}
-              onPickTierChange={setSendPickTier}
-              pickSlot={sendPickSlot}
-              onPickSlotChange={setSendPickSlot}
-              onAddPick={() => addVacuumPick("send")}
-              addPickLabel="Send Pick"
-            />
+          <div style={{ ...rosterPaneStyle, display: "grid", gap: 12, alignSelf: "start" }}>
+            {sendVacuumColumn}
           </div>
-          <div style={{ ...centerPaneStyle, order: 2 }}>
-            <TradePanel title="YOU SEND" color="#ef4444" labels={sendLabels} side={result?.sideA ?? null} onRemove={removeSend} onClear={() => clearSide("send")} />
+          <div style={centerPaneStyle}>
+            <TradePanel title="YOU SEND" color="var(--red)" labels={sendLabels} side={result?.sideA ?? null} onRemove={removeSend} onClear={() => clearSide("send")} />
             <EvalBar result={result} acceptance={null} hasBothSides={hasBothSides} isPending={evalMutation.isPending} />
-            <TradePanel title="YOU GET" color="#22c55e" labels={receiveLabels} side={result?.sideB ?? null} onRemove={removeReceive} onClear={() => clearSide("receive")} />
+            <TradePanel title="YOU GET" color="var(--green)" labels={receiveLabels} side={result?.sideB ?? null} onRemove={removeReceive} onClear={() => clearSide("receive")} />
           </div>
-          <div style={{ ...rosterPaneStyle, display: "grid", gap: 12, alignSelf: "start", order: 3 }}>
-            <VacuumSearchColumn
-              title="YOU GET"
-              color="#22c55e"
-              search={receiveSearch}
-              onSearchChange={setReceiveSearch}
-              results={receiveSearchResults}
-              isLoading={receiveSearchLoading}
-              onAddPlayer={(player) => toggleAsset("receive", { type: "player", player_id: player.player_id }, player.label)}
-              pickSeason={receivePickSeason}
-              onPickSeasonChange={setReceivePickSeason}
-              pickRound={receivePickRound}
-              onPickRoundChange={setReceivePickRound}
-              pickTier={receivePickTier}
-              onPickTierChange={setReceivePickTier}
-              pickSlot={receivePickSlot}
-              onPickSlotChange={setReceivePickSlot}
-              onAddPick={() => addVacuumPick("receive")}
-              addPickLabel="Get Pick"
-            />
+          <div style={{ ...rosterPaneStyle, display: "grid", gap: 12, alignSelf: "start" }}>
+            {receiveVacuumColumn}
           </div>
         </div>
-      )}
+      ))}
 
-      {selectedLeague && (
+      {/* League mode */}
+      {selectedLeague && (isCompactLeagueLayout ? (
+        <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+          <RosterSideTabs
+            active={activeRosterSide}
+            onChange={setActiveRosterSide}
+            sendLabel="Your roster"
+            receiveLabel={oppRoster?.display_name ?? "Their roster"}
+            sendCount={sendLabels.length}
+            receiveCount={receiveLabels.length}
+          />
+          {activeRosterSide === "send" ? (
+            <RosterGrid roster={userRoster} usedPlayerIds={sendPlayerIds} usedPickKeys={sendPickKeys} onPlayerClick={(p) => addFromRoster(p, "send")} onPickClick={(p) => addPick(p, "send")} />
+          ) : (
+            <RosterGrid roster={oppRoster} usedPlayerIds={receivePlayerIds} usedPickKeys={receivePickKeys} onPlayerClick={(p) => addFromRoster(p, "receive")} onPickClick={(p) => addPick(p, "receive")} />
+          )}
+        </div>
+      ) : (
         <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: leagueColumns, gap: 12, alignItems: "start" }}>
-          <div style={{ ...rosterPaneStyle, order: isCompactLeagueLayout ? 2 : 1 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}><div style={{ color: "#ef4444", fontSize: 12, fontWeight: 800 }}>YOUR ROSTER</div><div style={{ fontSize: 11, color: "var(--text-muted)" }}>{userRoster?.display_name ?? "-"}</div></div>
+          <div style={rosterPaneStyle}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}><div style={{ color: "var(--red)", fontSize: 12, fontWeight: 800 }}>YOUR ROSTER</div><div style={{ fontSize: 11, color: "var(--text-muted)" }}>{userRoster?.display_name ?? "-"}</div></div>
             <RosterGrid roster={userRoster} usedPlayerIds={sendPlayerIds} usedPickKeys={sendPickKeys} onPlayerClick={(p) => addFromRoster(p, "send")} onPickClick={(p) => addPick(p, "send")} />
           </div>
-          <div style={{ ...centerPaneStyle, order: isCompactLeagueLayout ? 1 : 2 }}>
-            <TradePanel title="YOU SEND" color="#ef4444" labels={sendLabels} side={result?.sideA ?? null} onRemove={removeSend} onClear={() => clearSide("send")} />
-            <EvalBar result={result} acceptance={liveAcceptance} hasBothSides={hasBothSides} isPending={evalMutation.isPending} />
-            <TradePanel title="YOU GET" color="#22c55e" labels={receiveLabels} side={result?.sideB ?? null} onRemove={removeReceive} onClear={() => clearSide("receive")} />
-            <AcceptanceBadge acceptance={liveAcceptance} opponent={activeOpponent} />
-            {result && selectedLeague && (
-              <TradeActionButtons
-                selectedLeague={selectedLeague}
-                copied={copied}
-                onCopyTradeMessage={() => {
-                  const msg = buildTradeMessage(
-                    result,
-                    result.sideA.assets.map((asset) => asset.label),
-                    result.sideB.assets.map((asset) => asset.label),
-                    activeOpponent,
-                    liveAcceptance
-                  );
-                  navigator.clipboard.writeText(msg);
-                  setCopied(true);
-                }}
-              />
-            )}
+          <div style={centerPaneStyle}>
+            {tradeBreakdown}
           </div>
-          <div style={{ ...rosterPaneStyle, order: 3 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}><div style={{ color: "#22c55e", fontSize: 12, fontWeight: 800 }}>THEIR ROSTER</div><div style={{ fontSize: 11, color: "var(--text-muted)" }}>{oppRoster?.display_name ?? "Select opponent"}</div></div>
+          <div style={rosterPaneStyle}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}><div style={{ color: "var(--green)", fontSize: 12, fontWeight: 800 }}>THEIR ROSTER</div><div style={{ fontSize: 11, color: "var(--text-muted)" }}>{oppRoster?.display_name ?? "Select opponent"}</div></div>
             <RosterGrid roster={oppRoster} usedPlayerIds={receivePlayerIds} usedPickKeys={receivePickKeys} onPlayerClick={(p) => addFromRoster(p, "receive")} onPickClick={(p) => addPick(p, "receive")} />
           </div>
         </div>
+      ))}
+
+      {/* Mobile: sticky trade tray + expandable details sheet */}
+      {isCompactLeagueLayout && (
+        <>
+          <TradeTray
+            result={result}
+            isPending={evalMutation.isPending}
+            sendLabels={sendLabels}
+            receiveLabels={receiveLabels}
+            onOpen={() => setSheetOpen(true)}
+          />
+          <TradeSheet open={sheetOpen} onClose={() => setSheetOpen(false)}>
+            {tradeBreakdown}
+          </TradeSheet>
+        </>
       )}
 
     </AppShell>
