@@ -36,6 +36,10 @@ const prCache = new Map<string, { data: LeaguePowerRanking[]; expires: number }>
 const PR_TTL_MS = 5 * 60 * 1000;
 const PR_DB_ONLY = process.env.POWER_RANKINGS_DB_ONLY === "true";
 
+interface PowerRankingsOptions {
+  leagueIds?: string[];
+}
+
 export function clearPowerRankingsCache(username?: string) {
   if (username) {
     const prefix = `${username.toLowerCase()}:`;
@@ -72,7 +76,8 @@ export async function getPowerRankings(
   username: string,
   scopeOrValueType: LeagueScope | ValueType = "dynasty",
   valueTypeOrWeights?: ValueType | SourceWeights,
-  maybeWeights?: SourceWeights
+  maybeWeights?: SourceWeights,
+  options: PowerRankingsOptions = {}
 ): Promise<LeaguePowerRanking[]> {
   const scope: LeagueScope = scopeOrValueType === "redraft" ? "dynasty" : scopeOrValueType;
   const valueType: ValueType = scopeOrValueType === "redraft"
@@ -81,7 +86,8 @@ export async function getPowerRankings(
       ? valueTypeOrWeights
       : "dynasty";
   const weights = typeof valueTypeOrWeights === "string" ? maybeWeights : valueTypeOrWeights;
-  const cacheKey = `${username.toLowerCase()}:${valueType}:${sourceWeightsKey(weights)}`;
+  const leagueFilter = options.leagueIds?.filter(Boolean).sort() ?? [];
+  const cacheKey = `${username.toLowerCase()}:${valueType}:${sourceWeightsKey(weights)}:${leagueFilter.length > 0 ? leagueFilter.join(",") : "all"}`;
   const now = Date.now();
   const hit = prCache.get(cacheKey);
   if (hit && hit.expires > now) {
@@ -94,7 +100,10 @@ export async function getPowerRankings(
   const userId = (userRows as unknown as { user_id: string }[])[0]?.user_id;
   if (!userId) return [];
 
-  const leagueIds = await getLeagueIdsForUserLatestSeason(userId, scope);
+  const allLeagueIds = await getLeagueIdsForUserLatestSeason(userId, scope);
+  const leagueIds = leagueFilter.length > 0
+    ? allLeagueIds.filter((leagueId) => leagueFilter.includes(leagueId))
+    : allLeagueIds;
   if (leagueIds.length === 0) return [];
 
   if (PR_DB_ONLY) {

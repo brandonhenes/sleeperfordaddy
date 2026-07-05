@@ -1714,7 +1714,9 @@ export async function findTrades(
   classStrengths?: ClassStrengthMap,
   weights?: SourceWeights
 ): Promise<TradeSuggestion[]> {
-  const allLeagues = await getPowerRankings(username, "dynasty", weights);
+  const allLeagues = await getPowerRankings(username, "dynasty", weights, undefined, {
+    leagueIds: [leagueId],
+  });
   const league = allLeagues.find((l) => l.league_id === leagueId);
   if (!league || league.rosters.length < 2) return [];
 
