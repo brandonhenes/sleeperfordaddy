@@ -38,6 +38,7 @@ const PR_DB_ONLY = process.env.POWER_RANKINGS_DB_ONLY === "true";
 
 interface PowerRankingsOptions {
   leagueIds?: string[];
+  forceDbOnly?: boolean;
 }
 
 export function clearPowerRankingsCache(username?: string) {
@@ -100,19 +101,36 @@ export async function getPowerRankings(
   const userId = (userRows as unknown as { user_id: string }[])[0]?.user_id;
   if (!userId) return [];
 
-  const allLeagueIds = await getLeagueIdsForUserLatestSeason(userId, scope);
-  const leagueIds = leagueFilter.length > 0
-    ? allLeagueIds.filter((leagueId) => leagueFilter.includes(leagueId))
-    : allLeagueIds;
+  let leagueIds: string[];
+  if (leagueFilter.length > 0) {
+    const leagueIdFrags = leagueFilter.map((id) => sql`${id}`);
+    const leagueInClause = sql.join(leagueIdFrags, sql`, `);
+    const rows = await db.execute(sql`
+      SELECT l.league_id
+      FROM user_leagues ul
+      JOIN leagues l ON ul.league_id = l.league_id
+      WHERE ul.user_id = ${userId}
+        AND l.league_id IN (${leagueInClause})
+    `);
+    const requested = new Set(leagueFilter);
+    leagueIds = (rows as unknown as { league_id: string }[])
+      .map((row) => row.league_id)
+      .filter((leagueId) => requested.has(leagueId));
+  } else {
+    leagueIds = await getLeagueIdsForUserLatestSeason(userId, scope);
+  }
   if (leagueIds.length === 0) return [];
 
-  if (PR_DB_ONLY) {
+  if (PR_DB_ONLY || options.forceDbOnly) {
     try {
       const dbOnly = await getPowerRankingsDbOnly(username, userId, leagueIds, valueType, weights);
       prCache.set(cacheKey, { data: dbOnly, expires: Date.now() + PR_TTL_MS });
       return dbOnly;
     } catch (err) {
       console.error("[power-rankings] DB-only path failed, falling back to legacy path", err);
+      if (options.forceDbOnly) {
+        return [];
+      }
     }
   }
 

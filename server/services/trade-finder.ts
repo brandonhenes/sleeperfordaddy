@@ -14,7 +14,7 @@ import type {
 import { db } from "../db/connection.js";
 import { sql } from "drizzle-orm";
 import { getPowerRankings } from "./power-rankings.js";
-import type { SourceWeights } from "./edge-score.js";
+import { sourceWeightsKey, type SourceWeights } from "./edge-score.js";
 import {
   parseLeagueScoring,
   loadPlayerUsageStats,
@@ -225,6 +225,34 @@ function packageShapeKey(pkg: Pick<TradePackage, "you_send" | "you_receive" | "o
   const send = pkg.you_send.map(assetShapeKey).sort().join("+");
   const receive = pkg.you_receive.map(assetShapeKey).sort().join("+");
   return `${pkg.opportunity_type ?? "unknown"}:${send}->${receive}`;
+}
+
+function classStrengthsKey(classStrengths?: ClassStrengthMap): string {
+  if (!classStrengths) return "default";
+  return Object.entries(classStrengths)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([season, strength]) => `${season}:${strength}`)
+    .join(",");
+}
+
+function packageEvaluationCacheKey(
+  send: TradePackageAsset[],
+  receive: TradePackageAsset[],
+  leagueId: string,
+  mode: "sf" | "1qb",
+  classStrengths?: ClassStrengthMap,
+  weights?: SourceWeights
+): string {
+  const sendKey = send.map(assetShapeKey).sort().join("+");
+  const receiveKey = receive.map(assetShapeKey).sort().join("+");
+  return [
+    leagueId,
+    mode,
+    sourceWeightsKey(weights),
+    classStrengthsKey(classStrengths),
+    sendKey,
+    receiveKey,
+  ].join("|");
 }
 
 function pickOnlyShapeKey(pkg: Pick<TradePackage, "you_send" | "you_receive">): string {
@@ -1716,6 +1744,7 @@ export async function findTrades(
 ): Promise<TradeSuggestion[]> {
   const allLeagues = await getPowerRankings(username, "dynasty", weights, undefined, {
     leagueIds: [leagueId],
+    forceDbOnly: true,
   });
   const league = allLeagues.find((l) => l.league_id === leagueId);
   if (!league || league.rosters.length < 2) return [];
@@ -1770,9 +1799,37 @@ export async function findTrades(
     .sort((a, b) => b.score - a.score)
     .slice(0, TRADE_FINDER_MAX_OPPONENTS);
 
-  const suggestions: TradeSuggestion[] = [];
+  const packageScoreCache = new Map<string, Promise<PackageScore>>();
+  const scoreTradeFinderPackageCached: TradeFinderPackageScorer = (
+    send,
+    receive,
+    packageLeagueId,
+    packageMode,
+    packageClassStrengths
+  ) => {
+    const cacheKey = packageEvaluationCacheKey(
+      send,
+      receive,
+      packageLeagueId,
+      packageMode,
+      packageClassStrengths,
+      weights
+    );
+    const cached = packageScoreCache.get(cacheKey);
+    if (cached) return cached;
+    const work = scoreTradeFinderPackage(
+      send,
+      receive,
+      packageLeagueId,
+      packageMode,
+      packageClassStrengths,
+      weights
+    );
+    packageScoreCache.set(cacheKey, work);
+    return work;
+  };
 
-  for (const { opp, score, reason } of ranked) {
+  const suggestions = (await Promise.all(ranked.map(async ({ opp, score, reason }): Promise<TradeSuggestion | null> => {
     const basePackages = await generateTradeFinderPackages(
       userProfile,
       opp,
@@ -1782,17 +1839,9 @@ export async function findTrades(
       usageMap,
       hasCustomScoring,
       classStrengths,
-      (send, receive, packageLeagueId, packageMode, packageClassStrengths) =>
-        scoreTradeFinderPackage(
-          send,
-          receive,
-          packageLeagueId,
-          packageMode,
-          packageClassStrengths,
-          weights
-        )
+      scoreTradeFinderPackageCached
     );
-    if (basePackages.length === 0) continue;
+    if (basePackages.length === 0) return null;
     const packageHealthScores = new Map<string, number>();
     for (const pkg of basePackages) {
       for (const asset of [...pkg.you_send, ...pkg.you_receive]) {
@@ -1837,9 +1886,9 @@ export async function findTrades(
       .map((pkg) => annotateTradeFinderPackage(pkg, qualityContext))
       .filter(shouldSurfaceTradeFinderPackage);
     const packages = dedupeAndRankTradeFinderPackages(evaluatedPackages, 4);
-    if (packages.length === 0) continue;
+    if (packages.length === 0) return null;
 
-    suggestions.push({
+    return {
       partner: {
         roster_id: opp.roster.roster_id,
         display_name: opp.roster.display_name,
@@ -1852,8 +1901,8 @@ export async function findTrades(
         recent_trades: opp.behavior?.recent_trades ?? 0,
       },
       packages,
-    });
-  }
+    };
+  }))).filter((suggestion): suggestion is TradeSuggestion => suggestion != null);
 
   return applyDisplayedTradeDiversity(suggestions);
 }
