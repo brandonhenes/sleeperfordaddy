@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { TradePackageAsset, TradePickBreakdown } from "../../../shared/types.js";
-import type { CoreAsset } from "../power-rankings.js";
+import type { CoreAsset, TradePackageAsset, TradePickBreakdown } from "../../../shared/types.js";
 import type {
   OpportunityPackageValuation,
   OpportunityPackageValuationInput,

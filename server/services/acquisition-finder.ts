@@ -2,18 +2,18 @@ import { db } from "../db/connection.js";
 import { sql } from "drizzle-orm";
 import {
   getPowerRankings,
-  type RosterRanking,
-  type CoreAsset,
-  type LeaguePowerRanking,
 } from "./power-rankings.js";
-import type { ScoredPick } from "./draft-picks.js";
 import type {
   AcquisitionResult,
   AcquisitionTarget,
   AcquisitionOpportunity,
   AcquisitionDifficulty,
   AcquisitionOffer,
+  CoreAsset,
+  LeaguePowerRanking,
   OpponentPerspective,
+  RosterRanking,
+  ScoredPick,
   TradePackageAsset,
   TradeComp,
   TradeValuationWarning,

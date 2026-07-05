@@ -1,7 +1,6 @@
 import type { Dispatch, SetStateAction } from "react";
 import { Link } from "wouter";
-import type { LeaguePowerRanking } from "../../hooks/use-power-rankings";
-import type { OpponentProfile, TradeSuggestion } from "@shared/types";
+import type { LeaguePowerRanking, OpponentProfile, TradeSuggestion } from "@shared/types";
 import PartnerCard from "./PartnerCard";
 import PickInventoryPanel, { type LeaguePicksResponse } from "./PickInventoryPanel";
 

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import EdgeScoreBadge from "../../components/EdgeScoreBadge";
 import { PositionBadge } from "../../components/ui";
-import type { CoreAsset, RosterRanking, ScoredPick } from "../../hooks/use-power-rankings";
+import type { CoreAsset, RosterRanking, ScoredPick } from "@shared/types";
 import { pickDisplay, pickKey } from "./picks";
 
 const POSITIONS = ["QB", "RB", "WR", "TE"] as const;

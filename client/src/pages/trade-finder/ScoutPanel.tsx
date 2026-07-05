@@ -1,9 +1,8 @@
 import type { Dispatch, Ref, SetStateAction } from "react";
 import OpponentCard from "../../components/OpponentCard";
 import OpponentDetail from "../../components/OpponentDetail";
-import type { LeaguePowerRanking } from "../../hooks/use-power-rankings";
 import { formatDateTime } from "../../lib/format";
-import type { ExploitAngle, OpponentProfile, OpponentProfilesResponse } from "@shared/types";
+import type { ExploitAngle, LeaguePowerRanking, OpponentProfile, OpponentProfilesResponse } from "@shared/types";
 
 export interface ScoutProfileWithScore {
   profile: OpponentProfile;

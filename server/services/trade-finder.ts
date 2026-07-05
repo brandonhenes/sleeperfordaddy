@@ -1,4 +1,7 @@
 import type {
+  CoreAsset,
+  RosterRanking,
+  ScoredPick,
   TradeSuggestion,
   TradePackage,
   TradePackageAsset,
@@ -10,13 +13,8 @@ import type {
 } from "../../shared/types.js";
 import { db } from "../db/connection.js";
 import { sql } from "drizzle-orm";
-import {
-  getPowerRankings,
-  type RosterRanking,
-  type CoreAsset,
-} from "./power-rankings.js";
+import { getPowerRankings } from "./power-rankings.js";
 import type { SourceWeights } from "./edge-score.js";
-import type { ScoredPick } from "./draft-picks.js";
 import {
   parseLeagueScoring,
   loadPlayerUsageStats,

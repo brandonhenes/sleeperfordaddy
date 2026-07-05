@@ -2,15 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import AppShell from "../components/AppShell";
 import { useEvaluateTrade } from "../hooks/use-trade-calculator";
-import {
-  usePowerRankings,
-  type CoreAsset,
-  type ScoredPick,
-} from "../hooks/use-power-rankings";
+import { usePowerRankings } from "../hooks/use-power-rankings";
 import { useCurrentUsername } from "../hooks/use-current-user";
 import { apiFetch } from "../lib/api";
 import { computeAcceptance } from "../lib/acceptance";
 import type {
+  CoreAsset,
+  ScoredPick,
   TradeAssetInput,
   TradeValuationProfile,
 } from "@shared/types";

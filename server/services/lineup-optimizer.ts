@@ -1,50 +1,13 @@
-import type { AgeCurveStatus } from "./age-curves.js";
-import type { PlayerAvailability } from "../../shared/player-availability.js";
+import type {
+  CoreAsset,
+  OptimizedLineup,
+  SlotGrade,
+  SlottedPlayer,
+} from "../../shared/types.js";
 
 // ─── Types ───
 
-export interface PlayerForSlot {
-  player_id: string;
-  full_name: string;
-  position: string;
-  edge_score: number;
-  age: number | null;
-  age_curve: AgeCurveStatus;
-  fc_value: number | null;
-  ktc_value: number | null;
-  dp_value: number | null;
-  fc_score: number | null;
-  ktc_score: number | null;
-  dp_score: number | null;
-  sources_available: number;
-  source_agreement: "high" | "medium" | "low";
-  team?: string | null;
-  status?: string | null;
-  availability?: PlayerAvailability;
-  league_points_total?: number | null;
-  league_points_ppg?: number | null;
-  league_points_weeks?: number | null;
-  league_points_season?: number | null;
-}
-
-export interface SlottedPlayer extends PlayerForSlot {
-  slot: string;
-  slot_label: string;
-  is_starter: boolean;
-}
-
-export interface SlotGrade {
-  slot_label: string;
-  avg_score: number;
-  grade: "elite" | "strong" | "average" | "weak" | "hole";
-  count: number;
-}
-
-export interface OptimizedLineup {
-  starters: SlottedPlayer[];
-  bench: SlottedPlayer[];
-  slot_grades: SlotGrade[];
-}
+export type PlayerForSlot = CoreAsset;
 
 // ─── Slot Eligibility ───
 

@@ -1,5 +1,4 @@
-import type { ScoredPick } from "../../hooks/use-power-rankings";
-import type { TradeAssetInput } from "@shared/types";
+import type { ScoredPick, TradeAssetInput } from "@shared/types";
 
 const YEAR = new Date().getFullYear();
 

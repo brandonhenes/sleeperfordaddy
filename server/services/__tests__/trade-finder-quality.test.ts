@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import type {
+  CoreAsset,
   TradePackage,
   TradePackageAsset,
   TradePickBreakdown,
   TradeSuggestion,
 } from "../../../shared/types.js";
-import type { CoreAsset } from "../power-rankings.js";
 import type {
   OpportunityPackageValuation,
   OpportunityPackageValuationInput,

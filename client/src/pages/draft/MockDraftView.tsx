@@ -1,6 +1,5 @@
 import { PositionBadge } from "../../components/ui";
-import type { MockDraftPick, MockDraftProspect, MockDraftSetup } from "@shared/types";
-import type { LeaguePowerRanking } from "../../hooks/use-power-rankings";
+import type { LeaguePowerRanking, MockDraftPick, MockDraftProspect, MockDraftSetup } from "@shared/types";
 
 interface MockDraftViewProps {
   leagues: LeaguePowerRanking[] | undefined;

@@ -7,15 +7,15 @@ import PlayerStatusBadge from "../ui/PlayerStatusBadge";
 import LeaguePointsBadge from "../ui/LeaguePointsBadge";
 import { posColor } from "../../lib/position-colors";
 import ShareButton from "../ShareButton";
-import {
-  usePowerRankings,
-  type LeaguePowerRanking,
-  type RosterRanking,
-  type CoreAsset,
-  type SlottedPlayer,
-  type SlotGrade,
-  type ScoredPick,
-} from "../../hooks/use-power-rankings";
+import { usePowerRankings } from "../../hooks/use-power-rankings";
+import type {
+  CoreAsset,
+  LeaguePowerRanking,
+  RosterRanking,
+  ScoredPick,
+  SlottedPlayer,
+  SlotGrade,
+} from "@shared/types";
 import { useStartSync, useSyncStatus } from "../../hooks/use-sleeper";
 
 // ─── Helpers ───

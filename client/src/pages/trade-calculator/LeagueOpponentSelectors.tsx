@@ -1,4 +1,4 @@
-import type { LeaguePowerRanking } from "../../hooks/use-power-rankings";
+import type { LeaguePowerRanking } from "@shared/types";
 import type { OpponentContext } from "./types";
 
 type LeagueOpponentSelectorsProps = {
