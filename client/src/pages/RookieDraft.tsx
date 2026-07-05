@@ -13,8 +13,10 @@ import { PlayerLink } from "../components/ui";
 import { posColor } from "../lib/position-colors";
 import PickCard from "./draft/PickCard";
 import AnalyticsView from "./draft/AnalyticsView";
+import DraftCompareView from "./draft/CompareView";
 import LiveDraftView from "./draft/LiveDraftView";
 import MockDraftView from "./draft/MockDraftView";
+import TierBadge from "./draft/TierBadge";
 import TierPickValueOverlay from "./draft/TierPickValueOverlay";
 import {
   POS_FILTERS,
@@ -554,7 +556,7 @@ export default function RookieDraft() {
       )}
 
       {viewMode === "compare" && compareProspects.length >= 2 && (
-        <CompareView prospects={compareProspects} onBack={() => setViewMode("board")} />
+        <DraftCompareView prospects={compareProspects} onBack={() => setViewMode("board")} />
       )}
 
       {viewMode === "myboard" && (
@@ -650,7 +652,6 @@ export default function RookieDraft() {
     </AppShell>
   );
 }
-
 function ProspectCard({
   prospect: p,
   overallRank,
@@ -915,248 +916,6 @@ function MarketMetric({
       <div style={{ fontSize: 10, color: "var(--text-muted)", marginBottom: 2 }}>{label}</div>
       <div className="font-mono" style={{ fontSize: 13, fontWeight: 700, color: style.color }}>
         {value}
-      </div>
-    </div>
-  );
-}
-
-function CompareView({
-  prospects,
-  onBack,
-}: {
-  prospects: Prospect[];
-  onBack: () => void;
-}) {
-  const fields: { label: string; render: (p: Prospect) => string | null }[] = [
-    { label: "Position", render: (p) => cleanText(p.position) },
-    { label: "School", render: (p) => cleanText(p.school) },
-    { label: "Age", render: (p) => (p.age != null ? String(p.age) : null) },
-    { label: "Tier", render: (p) => cleanText((p.tier ?? "").toUpperCase()) },
-    { label: "Pos Rank", render: (p) => (p.fp_rank != null ? `${p.position}${p.fp_rank}` : null) },
-    {
-      label: "Size",
-      render: (p) => {
-        const h = cleanText(p.height);
-        const w = cleanText(p.weight);
-        return h && w ? `${h} / ${w}` : h ?? w;
-      },
-    },
-    {
-      label: "Comp",
-      render: (p) =>
-        cleanText(p.consensus_comp) ??
-        (p.all_comps?.[0]?.comp ? cleanText(p.all_comps[0].comp) : null),
-    },
-    { label: "Draft Capital", render: (p) => cleanText(p.draft_capital) },
-    {
-      label: "40-Yard",
-      render: (p) => cleanText(p.combine_40 != null ? String(p.combine_40) : null),
-    },
-    {
-      label: "Vertical",
-      render: (p) => cleanText(p.combine_vertical != null ? String(p.combine_vertical) : null),
-    },
-  ];
-
-  return (
-    <div style={{ marginTop: 16 }}>
-      <button
-        onClick={onBack}
-        style={{
-          background: "none",
-          border: "1px solid var(--border)",
-          borderRadius: 6,
-          padding: "6px 14px",
-          fontSize: 12,
-          color: "var(--text-muted)",
-          cursor: "pointer",
-          fontFamily: "inherit",
-          marginBottom: 16,
-        }}
-      >
-        ← Back to Board
-      </button>
-
-      <div
-        style={{
-          background: "var(--card)",
-          border: "1px solid var(--border)",
-          borderRadius: 12,
-          overflow: "hidden",
-        }}
-      >
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: `160px repeat(${prospects.length}, 1fr)`,
-            borderBottom: "2px solid var(--border)",
-          }}
-        >
-          <div
-            style={{
-              padding: "14px 16px",
-              fontWeight: 700,
-              fontSize: 12,
-              color: "var(--text-muted)",
-            }}
-          >
-            ATTRIBUTE
-          </div>
-          {prospects.map((p) => (
-            <div
-              key={p.player_name}
-              style={{
-                padding: "14px 16px",
-                textAlign: "center",
-                borderLeft: "1px solid var(--border)",
-              }}
-            >
-              <div style={{ fontWeight: 800, fontSize: 15 }}>{p.player_name}</div>
-              <div
-                style={{
-                  fontSize: 11,
-                  color: posColor(p.position ?? ""),
-                  fontWeight: 700,
-                  marginTop: 2,
-                }}
-              >
-                {p.position}
-              </div>
-              <TierBadge tier={p.tier} />
-            </div>
-          ))}
-        </div>
-
-        {fields.map((field) => (
-          <div
-            key={field.label}
-            style={{
-              display: "grid",
-              gridTemplateColumns: `160px repeat(${prospects.length}, 1fr)`,
-              borderBottom: "1px solid var(--border)",
-            }}
-          >
-            <div
-              style={{
-                padding: "10px 16px",
-                fontSize: 12,
-                fontWeight: 600,
-                color: "var(--text-muted)",
-                background: "var(--dark-base)",
-              }}
-            >
-              {field.label}
-            </div>
-            {prospects.map((p) => {
-              const val = field.render(p);
-              return (
-                <div
-                  key={p.player_name}
-                  style={{
-                    padding: "10px 16px",
-                    fontSize: 13,
-                    textAlign: "center",
-                    borderLeft: "1px solid var(--border)",
-                    color: val ? "var(--text)" : "var(--text-muted)",
-                  }}
-                >
-                  {val ?? "-"}
-                </div>
-              );
-            })}
-          </div>
-        ))}
-
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: `160px repeat(${prospects.length}, 1fr)`,
-            borderBottom: "1px solid var(--border)",
-          }}
-        >
-          <div
-            style={{
-              padding: "10px 16px",
-              fontSize: 12,
-              fontWeight: 600,
-              color: "#22c55e",
-              background: "var(--dark-base)",
-            }}
-          >
-            Strengths
-          </div>
-          {prospects.map((p) => (
-            <div
-              key={p.player_name}
-              style={{ padding: "10px 16px", borderLeft: "1px solid var(--border)" }}
-            >
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-                {(p.key_strengths ?? [])
-                  .map(cleanText)
-                  .filter((s): s is string => !!s)
-                  .map((s, i) => (
-                    <span
-                      key={i}
-                      style={{
-                        fontSize: 10,
-                        padding: "2px 6px",
-                        borderRadius: 999,
-                        background: "rgba(34,197,94,0.12)",
-                        color: "#86efac",
-                      }}
-                    >
-                      {s.length > 40 ? `${s.slice(0, 40)}...` : s}
-                    </span>
-                  ))}
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: `160px repeat(${prospects.length}, 1fr)`,
-          }}
-        >
-          <div
-            style={{
-              padding: "10px 16px",
-              fontSize: 12,
-              fontWeight: 600,
-              color: "#ef4444",
-              background: "var(--dark-base)",
-            }}
-          >
-            Concerns
-          </div>
-          {prospects.map((p) => (
-            <div
-              key={p.player_name}
-              style={{ padding: "10px 16px", borderLeft: "1px solid var(--border)" }}
-            >
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-                {(p.key_concerns ?? [])
-                  .map(cleanText)
-                  .filter((c): c is string => !!c)
-                  .map((c, i) => (
-                    <span
-                      key={i}
-                      style={{
-                        fontSize: 10,
-                        padding: "2px 6px",
-                        borderRadius: 999,
-                        background: "rgba(239,68,68,0.12)",
-                        color: "#fca5a5",
-                      }}
-                    >
-                      {c.length > 40 ? `${c.slice(0, 40)}...` : c}
-                    </span>
-                  ))}
-              </div>
-            </div>
-          ))}
-        </div>
       </div>
     </div>
   );
@@ -1468,14 +1227,5 @@ function MeasurableBar({
         </span>
       </div>
     </div>
-  );
-}
-
-function TierBadge({ tier }: { tier: string | null }) {
-  const cfg = TIER_CONFIG[(tier ?? "flier").toLowerCase()] ?? TIER_CONFIG.flier;
-  return (
-    <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 10, fontWeight: 700, letterSpacing: 0.8, background: cfg.bg, color: cfg.text }}>
-      {cfg.label}
-    </span>
   );
 }
