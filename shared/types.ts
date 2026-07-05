@@ -544,6 +544,13 @@ export interface TradeSuggestion {
   packages: TradePackage[];
 }
 
+export interface TradeBoardLine {
+  league_id: string;
+  league_name: string;
+  partner: TradeSuggestion["partner"];
+  package: TradePackage;
+}
+
 export type TradeOpportunityType =
   | "buy_target"
   | "sell_player"

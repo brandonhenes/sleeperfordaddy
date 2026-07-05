@@ -1,11 +1,35 @@
 import { Router } from "express";
-import { findTrades } from "../services/trade-finder.js";
+import { findTradeBoardLines, findTrades } from "../services/trade-finder.js";
 import { findAcquisitionPackages } from "../services/acquisition-finder.js";
 import { shopPlayer } from "../services/shop-player.js";
 import { parseClassStrengths } from "../lib/parse-class-strengths.js";
 import { parseWeights } from "../lib/parse-weights.js";
 
 const router = Router();
+
+/** GET /api/trade/board/:username?leagueIds=... */
+router.get("/api/trade/board/:username", async (req, res) => {
+  try {
+    const { username } = req.params;
+    if (!username) {
+      return res.status(400).json({ message: "username is required" });
+    }
+    const leagueIds = String(req.query.leagueIds ?? "")
+      .split(",")
+      .map((leagueId) => leagueId.trim())
+      .filter(Boolean);
+    if (leagueIds.length === 0) {
+      return res.status(400).json({ message: "leagueIds query parameter is required" });
+    }
+    const classStrengths = parseClassStrengths(req);
+    const weights = parseWeights(req);
+    const data = await findTradeBoardLines(username, leagueIds, classStrengths, weights);
+    res.json(data);
+  } catch (err) {
+    console.error("[trade-board] Error:", err);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
 
 /** GET /api/trade/find/:username/:leagueId */
 router.get("/api/trade/find/:username/:leagueId", async (req, res) => {

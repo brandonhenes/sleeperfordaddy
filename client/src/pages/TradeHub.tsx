@@ -6,12 +6,12 @@ import { Card, PageHeader } from "../components/ui";
 import { SlipTicketRow } from "../components/slip/SlipDock";
 import { useCurrentUsername } from "../hooks/use-current-user";
 import { usePowerRankings } from "../hooks/use-power-rankings";
-import { useTradeSuggestions } from "../hooks/use-trade-finder";
+import { useTradeBoardLines } from "../hooks/use-trade-finder";
 import { useBuyingWindows } from "../hooks/use-injury-tracker";
 import { acceptanceBand, useSlip, type SlipLeg } from "../lib/slip";
 import { formatTradeValue, humanize } from "../lib/format";
 import { buildTradeFinderUrl } from "../lib/trade-finder-url";
-import type { BuyingWindow, TradeAssetInput, TradePackage, TradePackageAsset, TradeSuggestion } from "@shared/types";
+import type { BuyingWindow, TradeAssetInput, TradeBoardLine, TradePackage, TradePackageAsset } from "@shared/types";
 
 const BOARD_LEAGUE_COUNT = 4;
 
@@ -53,44 +53,6 @@ function packageToLegs(pkg: TradePackage): SlipLeg[] {
   return [...send, ...receive];
 }
 
-function tierRank(pkg: TradePackage): number {
-  if (pkg.quality_tier === "strong") return 2;
-  if (pkg.quality_tier === "speculative") return 1;
-  return 0;
-}
-
-function isPickOnlyPackage(pkg: TradePackage): boolean {
-  return [...pkg.you_send, ...pkg.you_receive].every((asset) => asset.asset_type === "pick");
-}
-
-function isMultiAssetPlayerPackage(pkg: TradePackage): boolean {
-  return !isPickOnlyPackage(pkg) && pkg.you_send.length + pkg.you_receive.length > 2;
-}
-
-function bestPackage(suggestions: TradeSuggestion[]): { pkg: TradePackage; partner: TradeSuggestion["partner"] } | null {
-  let best: { pkg: TradePackage; partner: TradeSuggestion["partner"]; score: number } | null = null;
-  const hasPlayerBased = suggestions.some((suggestion) =>
-    suggestion.packages.some((pkg) => !isPickOnlyPackage(pkg))
-  );
-  const hasMultiAssetPlayer = suggestions.some((suggestion) =>
-    suggestion.packages.some(isMultiAssetPlayerPackage)
-  );
-  for (const suggestion of suggestions) {
-    for (const pkg of suggestion.packages) {
-      if (hasPlayerBased && isPickOnlyPackage(pkg)) continue;
-      const score =
-        tierRank(pkg) * 2_000 +
-        (pkg.strategy_score ?? 0) * 20 +
-        (pkg.ranking_components?.total ?? 0) * 10 +
-        (pkg.acceptance?.probability ?? 0) +
-        (isMultiAssetPlayerPackage(pkg) ? 700 : 0) -
-        (hasMultiAssetPlayer && pkg.trade_type === "1-for-1" ? 450 : 0);
-      if (!best || score > best.score) best = { pkg, partner: suggestion.partner, score };
-    }
-  }
-  return best;
-}
-
 function TicketSkeleton() {
   return (
     <div className="ticket-card animate-pulse" aria-hidden>
@@ -102,15 +64,17 @@ function TicketSkeleton() {
   );
 }
 
-function LeagueBestLine({ username, leagueId, leagueName }: { username: string; leagueId: string; leagueName: string }) {
-  const { data: suggestions, isLoading, isError } = useTradeSuggestions(username, leagueId);
+function LeagueBestLine({ line, leagueId, leagueName, isLoading }: {
+  line: TradeBoardLine | undefined;
+  leagueId: string;
+  leagueName: string;
+  isLoading: boolean;
+}) {
   const slip = useSlip();
 
   if (isLoading) return <TicketSkeleton />;
-  if (isError || !suggestions) return null;
-  const best = bestPackage(suggestions);
-  if (!best) return null;
-  const { pkg, partner } = best;
+  if (!line) return null;
+  const { package: pkg, partner } = line;
   const probability = pkg.acceptance?.probability ?? null;
   const band = acceptanceBand(probability);
 
@@ -207,6 +171,14 @@ export default function TradeHub() {
   const slip = useSlip();
 
   const boardLeagues = leagues.slice(0, BOARD_LEAGUE_COUNT);
+  const boardLeagueIds = boardLeagues.map((league) => league.league_id);
+  const boardLinesQuery = useTradeBoardLines(username, boardLeagueIds);
+  const boardLinesByLeague = new Map(
+    (boardLinesQuery.data ?? []).map((line) => [line.league_id, line])
+  );
+  const boardLoading =
+    boardLeagues.length > 0 &&
+    (boardLinesQuery.isLoading || (boardLinesQuery.isFetching && !boardLinesQuery.data));
 
   return (
     <AppShell>
@@ -231,7 +203,13 @@ export default function TradeHub() {
       )}
       <div className="board-rail">
         {boardLeagues.map((l) => (
-          <LeagueBestLine key={l.league_id} username={username} leagueId={l.league_id} leagueName={l.league_name} />
+          <LeagueBestLine
+            key={l.league_id}
+            line={boardLinesByLeague.get(l.league_id)}
+            leagueId={l.league_id}
+            leagueName={l.league_name}
+            isLoading={boardLoading}
+          />
         ))}
       </div>
       {leagues.length > BOARD_LEAGUE_COUNT && (

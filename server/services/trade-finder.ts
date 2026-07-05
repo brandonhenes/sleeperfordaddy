@@ -1,5 +1,6 @@
 import type {
   CoreAsset,
+  TradeBoardLine,
   RosterRanking,
   ScoredPick,
   TradeSuggestion,
@@ -71,7 +72,8 @@ const TRADE_FINDER_MAX_ROSTER_SPOT_TEMPLATES = 2;
 const TRADE_FINDER_MAX_TIER_DOWN_TEMPLATES = 4;
 const TRADE_FINDER_MAX_RENTAL_TEMPLATES = 3;
 const TRADE_FINDER_MAX_CONCURRENT_VALUATIONS = 4;
-const TRADE_FINDER_RESULT_TTL_MS = 60_000;
+const TRADE_FINDER_RESULT_TTL_MS = 5 * 60_000;
+const TRADE_FINDER_BOARD_RESULT_TTL_MS = 10 * 60_000;
 const TRADE_FINDER_RESULT_CACHE_MAX_ENTRIES = 20;
 
 let activeTradeFinderValuations = 0;
@@ -97,11 +99,16 @@ function tradeFinderResultCacheKey(
   username: string,
   leagueId: string,
   classStrengths?: ClassStrengthMap,
-  weights?: SourceWeights
+  weights?: SourceWeights,
+  options: TradeFinderRuntimeOptions = {}
 ): string {
   return [
     username.toLowerCase(),
     leagueId,
+    options.cacheNamespace ?? "full",
+    options.maxOpponents ?? TRADE_FINDER_MAX_OPPONENTS,
+    options.maxEvaluationsPerOpponent ?? TRADE_FINDER_MAX_EVALUATIONS_PER_OPPONENT,
+    options.maxPackagesPerPartner ?? TRADE_FINDER_MAX_PACKAGES_PER_PARTNER,
     sourceWeightsKey(weights),
     classStrengthsKey(classStrengths),
   ].join("|");
@@ -120,10 +127,14 @@ function getCachedTradeFinderResult(key: string): TradeSuggestion[] | null {
   return hit.data;
 }
 
-function setCachedTradeFinderResult(key: string, data: TradeSuggestion[]) {
+function setCachedTradeFinderResult(
+  key: string,
+  data: TradeSuggestion[],
+  ttlMs = TRADE_FINDER_RESULT_TTL_MS
+) {
   tradeFinderResultCache.set(key, {
     data,
-    expires: Date.now() + TRADE_FINDER_RESULT_TTL_MS,
+    expires: Date.now() + ttlMs,
   });
 
   const now = Date.now();
@@ -163,6 +174,14 @@ interface RosterProfile {
 type EnrichedPick = ScoredPick & {
   pick_breakdown: TradePackageAsset["pick_breakdown"];
 };
+
+interface TradeFinderRuntimeOptions {
+  cacheNamespace?: string;
+  maxEvaluationsPerOpponent?: number;
+  maxOpponents?: number;
+  maxPackagesPerPartner?: number;
+  resultTtlMs?: number;
+}
 
 // Helpers
 
@@ -1178,15 +1197,20 @@ export async function generateTradeFinderPackages(
   usage: UsageStats,
   hasCustom: boolean,
   classStrengths?: ClassStrengthMap,
-  scorePackage: TradeFinderPackageScorer = scoreTradeFinderPackage
+  scorePackage: TradeFinderPackageScorer = scoreTradeFinderPackage,
+  options: TradeFinderRuntimeOptions = {}
 ): Promise<TradePackage[]> {
   const packages: TradePackage[] = [];
+  const maxEvaluationsPerOpponent =
+    options.maxEvaluationsPerOpponent ?? TRADE_FINDER_MAX_EVALUATIONS_PER_OPPONENT;
+  const maxPackagesPerPartner =
+    options.maxPackagesPerPartner ?? TRADE_FINDER_MAX_PACKAGES_PER_PARTNER;
   let packageEvaluationsStarted = 0;
   const scorePackageWithBudget = async (
     send: TradePackageAsset[],
     receive: TradePackageAsset[]
   ): Promise<PackageScore | null> => {
-    if (packageEvaluationsStarted >= TRADE_FINDER_MAX_EVALUATIONS_PER_OPPONENT) {
+    if (packageEvaluationsStarted >= maxEvaluationsPerOpponent) {
       return null;
     }
     packageEvaluationsStarted += 1;
@@ -1812,7 +1836,7 @@ export async function generateTradeFinderPackages(
 
   return dedupeAndRankTradeFinderPackages(
     qualified,
-    TRADE_FINDER_MAX_PACKAGES_PER_PARTNER
+    maxPackagesPerPartner
   );
 }
 
@@ -1822,18 +1846,19 @@ export async function findTrades(
   username: string,
   leagueId: string,
   classStrengths?: ClassStrengthMap,
-  weights?: SourceWeights
+  weights?: SourceWeights,
+  options: TradeFinderRuntimeOptions = {}
 ): Promise<TradeSuggestion[]> {
-  const cacheKey = tradeFinderResultCacheKey(username, leagueId, classStrengths, weights);
+  const cacheKey = tradeFinderResultCacheKey(username, leagueId, classStrengths, weights, options);
   const cached = getCachedTradeFinderResult(cacheKey);
   if (cached) return cached;
 
   const inFlight = tradeFinderInFlight.get(cacheKey);
   if (inFlight) return inFlight;
 
-  const work = findTradesUncached(username, leagueId, classStrengths, weights)
+  const work = findTradesUncached(username, leagueId, classStrengths, weights, options)
     .then((data) => {
-      setCachedTradeFinderResult(cacheKey, data);
+      setCachedTradeFinderResult(cacheKey, data, options.resultTtlMs);
       return data;
     })
     .finally(() => {
@@ -1843,11 +1868,95 @@ export async function findTrades(
   return work;
 }
 
+function tradeBoardPackageScore(pkg: TradePackage): number {
+  const tier =
+    pkg.quality_tier === "strong" ? 2 :
+      pkg.quality_tier === "speculative" ? 1 :
+        0;
+  const isPickOnly = isPickOnlyTradePackage(pkg);
+  const isMultiAssetPlayer =
+    !isPickOnly && pkg.you_send.length + pkg.you_receive.length > 2;
+  return (
+    tier * 2_000 +
+    (pkg.strategy_score ?? 0) * 20 +
+    (pkg.ranking_components?.total ?? 0) * 10 +
+    (pkg.acceptance?.probability ?? 0) +
+    (isMultiAssetPlayer ? 700 : 0) -
+    (isPickOnly ? 1_000 : 0)
+  );
+}
+
+function bestTradeBoardLine(
+  leagueId: string,
+  leagueName: string,
+  suggestions: TradeSuggestion[]
+): TradeBoardLine | null {
+  let best: TradeBoardLine | null = null;
+  let bestScore = -Infinity;
+  for (const suggestion of suggestions) {
+    for (const pkg of suggestion.packages) {
+      const score = tradeBoardPackageScore(pkg);
+      if (score > bestScore) {
+        bestScore = score;
+        best = {
+          league_id: leagueId,
+          league_name: leagueName,
+          partner: suggestion.partner,
+          package: pkg,
+        };
+      }
+    }
+  }
+  return best;
+}
+
+export async function findTradeBoardLines(
+  username: string,
+  leagueIds: string[],
+  classStrengths?: ClassStrengthMap,
+  weights?: SourceWeights
+): Promise<TradeBoardLine[]> {
+  const uniqueLeagueIds = [...new Set(leagueIds.filter(Boolean))].slice(0, 4);
+  if (uniqueLeagueIds.length === 0) return [];
+
+  const leagueIdFrags = uniqueLeagueIds.map((id) => sql`${id}`);
+  const leagueInClause = sql.join(leagueIdFrags, sql`, `);
+  const leagueRows = await db.execute(sql`
+    SELECT league_id, name
+    FROM leagues
+    WHERE league_id IN (${leagueInClause})
+  `);
+  const leagueNames = new Map(
+    (leagueRows as unknown as Array<{ league_id: string; name: string | null }>)
+      .map((row) => [row.league_id, row.name ?? row.league_id])
+  );
+
+  const lines = await Promise.all(
+    uniqueLeagueIds.map(async (leagueId) => {
+      const suggestions = await findTrades(username, leagueId, classStrengths, weights, {
+        cacheNamespace: "board",
+        maxOpponents: 1,
+        maxEvaluationsPerOpponent: 8,
+        maxPackagesPerPartner: 2,
+        resultTtlMs: TRADE_FINDER_BOARD_RESULT_TTL_MS,
+      });
+      return bestTradeBoardLine(
+        leagueId,
+        leagueNames.get(leagueId) ?? leagueId,
+        suggestions
+      );
+    })
+  );
+
+  return lines.filter((line): line is TradeBoardLine => line != null);
+}
+
 async function findTradesUncached(
   username: string,
   leagueId: string,
   classStrengths?: ClassStrengthMap,
-  weights?: SourceWeights
+  weights?: SourceWeights,
+  options: TradeFinderRuntimeOptions = {}
 ): Promise<TradeSuggestion[]> {
   const allLeagues = await getPowerRankings(username, "dynasty", weights, undefined, {
     leagueIds: [leagueId],
@@ -1904,7 +2013,7 @@ async function findTradesUncached(
       return { opp, score, reason };
     })
     .sort((a, b) => b.score - a.score)
-    .slice(0, TRADE_FINDER_MAX_OPPONENTS);
+    .slice(0, options.maxOpponents ?? TRADE_FINDER_MAX_OPPONENTS);
 
   const packageScoreCache = new Map<string, Promise<PackageScore>>();
   const scoreTradeFinderPackageCached: TradeFinderPackageScorer = (
@@ -1948,7 +2057,8 @@ async function findTradesUncached(
       usageMap,
       hasCustomScoring,
       classStrengths,
-      scoreTradeFinderPackageCached
+      scoreTradeFinderPackageCached,
+      options
     );
     if (basePackages.length === 0) return null;
     const packageHealthScores = new Map<string, number>();
@@ -1996,7 +2106,7 @@ async function findTradesUncached(
       .filter(shouldSurfaceTradeFinderPackage);
     const packages = dedupeAndRankTradeFinderPackages(
       evaluatedPackages,
-      TRADE_FINDER_MAX_PACKAGES_PER_PARTNER
+      options.maxPackagesPerPartner ?? TRADE_FINDER_MAX_PACKAGES_PER_PARTNER
     );
     if (packages.length === 0) return null;
 

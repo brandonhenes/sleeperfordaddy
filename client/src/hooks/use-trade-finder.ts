@@ -2,10 +2,12 @@ import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "../lib/api";
 import { classStrengthQueryParams } from "../lib/pick-strengths";
 import { weightQueryParams } from "../lib/weights";
-import type { TradeSuggestion, ShopPlayerResult } from "@shared/types";
+import type { TradeBoardLine, TradeSuggestion, ShopPlayerResult } from "@shared/types";
 
 const SHOP_PLAYER_REQUEST_TIMEOUT_MS = 30_000;
 const TRADE_FINDER_REQUEST_TIMEOUT_MS = 60_000;
+const TRADE_FINDER_STALE_MS = 5 * 60_000;
+const TRADE_BOARD_STALE_MS = 10 * 60_000;
 const TRADE_FINDER_TIMEOUT_MESSAGE =
   "Trade Finder timed out while building package ideas. Retry after this league finishes loading.";
 
@@ -44,9 +46,37 @@ export function useTradeSuggestions(username: string, leagueId: string) {
       }
     },
     enabled: !!username && !!leagueId,
+    staleTime: TRADE_FINDER_STALE_MS,
+    gcTime: TRADE_FINDER_STALE_MS * 3,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
     retry: (failureCount, error) =>
       !String((error as Error).message ?? "").includes("timed out") &&
       failureCount < 1,
+  });
+}
+
+export function useTradeBoardLines(username: string, leagueIds: string[]) {
+  const suffix = tradeToolQueryParams();
+  const normalizedLeagueIds = leagueIds.filter(Boolean).slice(0, 4);
+  const leagueParam = normalizedLeagueIds.join(",");
+  const query = [
+    `leagueIds=${encodeURIComponent(leagueParam)}`,
+    suffix ? suffix.slice(1) : "",
+  ].filter(Boolean).join("&");
+
+  return useQuery<TradeBoardLine[]>({
+    queryKey: ["trade-board-lines", username, normalizedLeagueIds, suffix],
+    queryFn: () =>
+      apiFetch(
+        `/api/trade/board/${encodeURIComponent(username)}?${query}`
+      ),
+    enabled: !!username && normalizedLeagueIds.length > 0,
+    staleTime: TRADE_BOARD_STALE_MS,
+    gcTime: TRADE_BOARD_STALE_MS * 3,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    retry: 1,
   });
 }
 
