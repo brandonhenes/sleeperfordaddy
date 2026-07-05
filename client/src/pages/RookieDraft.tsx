@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import AppShell from "../components/AppShell";
 import FreshnessBar from "../components/FreshnessBar";
 import { useProspects, type Prospect } from "../hooks/use-market";
-import { useRookieDraftContext, type DraftPickContext, type AggregateNeed, type PickValueReference } from "../hooks/use-rookie-draft";
+import { useRookieDraftContext, type DraftPickContext, type AggregateNeed } from "../hooks/use-rookie-draft";
 import { usePowerRankings, type LeaguePowerRanking } from "../hooks/use-power-rankings";
 import { useMockDraftSetup, type MockDraftSetup, type MockDraftProspect, type MockDraftPick } from "../hooks/use-mock-draft";
 import { useActiveDrafts, useLiveDraft, type LiveDraftState, type ActiveDraftSummary } from "../hooks/use-live-draft";
@@ -11,73 +11,24 @@ import { useLatestProspectRankings, type ProspectRanking } from "../hooks/use-pr
 import { useCurrentUsername } from "../hooks/use-current-user";
 import { PlayerLink } from "../components/ui";
 import { posColor } from "../lib/position-colors";
-
-const TIER_ORDER = ["elite", "day1", "day2", "day3", "flier"] as const;
-type TierKey = (typeof TIER_ORDER)[number];
-
-const TIER_CONFIG: Record<string, {
-  bg: string;
-  text: string;
-  label: string;
-  border: string;
-  headerBg: string;
-}> = {
-  elite: { bg: "rgba(245,158,11,0.08)", text: "var(--amber)", label: "ELITE", border: "rgba(245,158,11,0.3)", headerBg: "rgba(245,158,11,0.12)" },
-  ELITE: { bg: "rgba(245,158,11,0.08)", text: "var(--amber)", label: "ELITE", border: "rgba(245,158,11,0.3)", headerBg: "rgba(245,158,11,0.12)" },
-  day1: { bg: "rgba(96,165,250,0.08)", text: "var(--blue)", label: "DAY 1", border: "rgba(96,165,250,0.3)", headerBg: "rgba(96,165,250,0.12)" },
-  DAY1: { bg: "rgba(96,165,250,0.08)", text: "var(--blue)", label: "DAY 1", border: "rgba(96,165,250,0.3)", headerBg: "rgba(96,165,250,0.12)" },
-  day2: { bg: "rgba(74,222,128,0.08)", text: "var(--green)", label: "DAY 2", border: "rgba(74,222,128,0.3)", headerBg: "rgba(74,222,128,0.12)" },
-  DAY2: { bg: "rgba(74,222,128,0.08)", text: "var(--green)", label: "DAY 2", border: "rgba(74,222,128,0.3)", headerBg: "rgba(74,222,128,0.12)" },
-  day3: { bg: "rgba(148,163,184,0.08)", text: "var(--text-dim)", label: "DAY 3", border: "rgba(148,163,184,0.3)", headerBg: "rgba(148,163,184,0.12)" },
-  DAY3: { bg: "rgba(148,163,184,0.08)", text: "var(--text-dim)", label: "DAY 3", border: "rgba(148,163,184,0.3)", headerBg: "rgba(148,163,184,0.12)" },
-  flier: { bg: "rgba(107,114,128,0.06)", text: "var(--text-muted)", label: "FLIER", border: "rgba(107,114,128,0.2)", headerBg: "rgba(107,114,128,0.08)" },
-};
-
-const POS_FILTERS = ["ALL", "QB", "RB", "WR", "TE"] as const;
-const WATCHLIST_KEY = "edge-draft-watchlist";
-const MYBOARD_KEY = "edge-draft-myboard";
-
-interface MyBoardState {
-  [prospectName: string]: string;
-}
-
-function cleanText(val: string | null | undefined): string | null {
-  if (val == null) return null;
-  const t = val.trim();
-  if (!t || t.toLowerCase() === "null") return null;
-  return t;
-}
-
-function scoutingReport(p: Prospect): string | null {
-  return cleanText(p.scouting_notes) ?? cleanText(p.fp_scouting_notes) ?? cleanText(p.notes);
-}
-
-function formatMarketNumber(value: number | null | undefined, decimals = 0): string {
-  if (value == null || Number.isNaN(value)) return "-";
-  return decimals > 0 ? value.toFixed(decimals) : Math.round(value).toString();
-}
-
-function loadWatchlist(): Set<string> {
-  if (typeof window === "undefined") return new Set();
-  try {
-    const raw = localStorage.getItem(WATCHLIST_KEY);
-    if (raw) return new Set(JSON.parse(raw));
-  } catch {
-    // ignore
-  }
-  return new Set();
-}
-
-function loadMyBoard(): MyBoardState {
-  if (typeof window === "undefined") return {};
-  try {
-    const raw = localStorage.getItem(MYBOARD_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch {
-    // ignore
-  }
-  return {};
-}
+import PickCard from "./draft/PickCard";
+import TierPickValueOverlay from "./draft/TierPickValueOverlay";
+import {
+  POS_FILTERS,
+  TIER_CONFIG,
+  TIER_ORDER,
+  MYBOARD_KEY,
+  WATCHLIST_KEY,
+  type MyBoardState,
+  type TierKey,
+} from "./draft/rookie-draft-config";
+import {
+  cleanText,
+  formatMarketNumber,
+  loadMyBoard,
+  loadWatchlist,
+  scoutingReport,
+} from "./draft/rookie-draft-utils";
 
 export default function RookieDraft() {
   const { data, isLoading, error } = useProspects();
@@ -540,7 +491,13 @@ export default function RookieDraft() {
                   <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
                     {prospects.length} prospect{prospects.length !== 1 ? "s" : ""}
                   </span>
-                  {draftCtx && renderTierPickValueOverlay(tier, draftCtx.pick_values, draftCtx.picks_2026)}
+                  {draftCtx && (
+                    <TierPickValueOverlay
+                      tier={tier}
+                      pickValues={draftCtx.pick_values}
+                      userPicks2026={draftCtx.picks_2026}
+                    />
+                  )}
                 </div>
 
                 <div style={{ background: cfg.bg }}>
@@ -688,193 +645,6 @@ export default function RookieDraft() {
         </div>
       )}
     </AppShell>
-  );
-}
-
-function renderTierPickValueOverlay(
-  tier: string,
-  pickValues: PickValueReference[],
-  userPicks2026: DraftPickContext[]
-) {
-  const tierPickMap: Record<string, { round: number; tier: string }[]> = {
-    elite: [{ round: 1, tier: "early" }],
-    day1: [{ round: 1, tier: "mid" }, { round: 1, tier: "late" }],
-    day2: [{ round: 2, tier: "early" }, { round: 2, tier: "mid" }],
-    day3: [{ round: 2, tier: "late" }, { round: 3, tier: "early" }],
-    flier: [{ round: 3, tier: "mid" }, { round: 3, tier: "late" }],
-  };
-
-  const pickRefs = tierPickMap[tier] ?? [];
-  const values = pickRefs
-    .map((ref) => pickValues.find(
-      (pv: PickValueReference) => pv.season === 2026 && pv.round === ref.round && pv.tier === ref.tier
-    ))
-    .filter((v): v is PickValueReference => !!v);
-
-  if (values.length === 0) return null;
-
-  const minVal = Math.min(...values.map((v) => v.ktc_sf));
-  const maxVal = Math.max(...values.map((v) => v.ktc_sf));
-  const valStr = minVal === maxVal
-    ? `~${minVal.toLocaleString()} KTC`
-    : `${minVal.toLocaleString()} - ${maxVal.toLocaleString()} KTC`;
-
-  const userPicksHere = userPicks2026.filter((p) =>
-    pickRefs.some((ref) => p.round === ref.round && p.tier === ref.tier)
-  );
-
-  return (
-    <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10, fontSize: 11 }}>
-      <span className="font-mono" style={{ color: "var(--text-dim)" }}>
-        Pick value: {valStr}
-      </span>
-      {userPicksHere.length > 0 && (
-        <span style={{
-          background: "var(--amber)",
-          color: "var(--dark-base)",
-          padding: "2px 8px",
-          borderRadius: 4,
-          fontWeight: 700,
-          fontSize: 10,
-        }}>
-          YOU PICK HERE ({userPicksHere.length})
-        </span>
-      )}
-    </div>
-  );
-}
-
-function PickCard({ pick }: { pick: DraftPickContext }) {
-  const [showNeeds, setShowNeeds] = useState(false);
-  const tierColors: Record<"early" | "mid" | "late", string> = {
-    early: "var(--green)",
-    mid: "var(--amber)",
-    late: "var(--red)",
-  };
-
-  const needsWithUrgency = pick.roster_needs.filter(
-    (n) => n.urgency === "A+" || n.urgency === "A"
-  );
-
-  return (
-    <div
-      style={{
-        background: "var(--dark-base)",
-        border: "1px solid var(--border)",
-        borderRadius: 10,
-        padding: "12px 16px",
-        minWidth: 220,
-        maxWidth: 280,
-        flexShrink: 0,
-        cursor: "pointer",
-        position: "relative",
-      }}
-      onClick={() => setShowNeeds(!showNeeds)}
-    >
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <div>
-          <span style={{ fontSize: 14, fontWeight: 800, color: tierColors[pick.tier] }}>
-            {pick.label}
-          </span>
-        </div>
-        {pick.ktc_value != null && (
-          <span className="font-mono" style={{ fontSize: 11, color: "var(--text-dim)", fontWeight: 600 }}>
-            {pick.ktc_value.toLocaleString()} KTC
-          </span>
-        )}
-      </div>
-
-      <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
-        {pick.league_name}
-        {pick.scoring_label && (
-          <span style={{ color: "var(--amber)", marginLeft: 4 }}>
-            {pick.scoring_label}
-          </span>
-        )}
-      </div>
-
-      {needsWithUrgency.length > 0 && (
-        <div style={{ display: "flex", gap: 4, marginTop: 8 }}>
-          {needsWithUrgency.slice(0, 3).map((n) => (
-            <span key={n.position} style={{
-              fontSize: 9,
-              fontWeight: 700,
-              padding: "2px 6px",
-              borderRadius: 3,
-              background: n.urgency === "A+" ? "rgba(239,68,68,0.15)" : "rgba(245,158,11,0.15)",
-              color: n.urgency === "A+" ? "#fca5a5" : "var(--amber)",
-            }}>
-              {n.position} {n.urgency}
-            </span>
-          ))}
-        </div>
-      )}
-
-      {showNeeds && (
-        <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px solid var(--border)" }}>
-          <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)", letterSpacing: 0.5, marginBottom: 6 }}>
-            ROSTER NEEDS
-          </div>
-          {pick.roster_needs.map((n) => (
-            <div key={n.position} style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              padding: "3px 0",
-              fontSize: 11,
-            }}>
-              <span style={{ fontWeight: 600, color: posColor(n.position) }}>{n.position}</span>
-              <NeedGradeBadge grade={n.grade} urgency={n.urgency} />
-            </div>
-          ))}
-        </div>
-      )}
-
-      <div style={{ marginTop: 8 }}>
-        <a
-          href="/trade-calculator"
-          style={{
-            fontSize: 10,
-            color: "var(--amber)",
-            fontWeight: 600,
-            textDecoration: "none",
-          }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          Trade this pick →
-        </a>
-      </div>
-    </div>
-  );
-}
-
-function NeedGradeBadge({ grade, urgency }: { grade: string; urgency: string }) {
-  const colors: Record<string, { bg: string; text: string }> = {
-    "A+": { bg: "rgba(239,68,68,0.15)", text: "#fca5a5" },
-    "A": { bg: "rgba(245,158,11,0.15)", text: "var(--amber)" },
-    "B": { bg: "rgba(148,163,184,0.1)", text: "var(--text-dim)" },
-    "C": { bg: "rgba(34,197,94,0.1)", text: "var(--green)" },
-    "D": { bg: "rgba(34,197,94,0.15)", text: "#86efac" },
-  };
-  const c = colors[urgency] ?? colors.B;
-  const labels: Record<string, string> = {
-    hole: "HOLE",
-    weak: "WEAK",
-    average: "OK",
-    strong: "GOOD",
-    elite: "SET",
-  };
-  return (
-    <span style={{
-      fontSize: 9,
-      fontWeight: 700,
-      padding: "2px 6px",
-      borderRadius: 3,
-      background: c.bg,
-      color: c.text,
-    }}>
-      {labels[grade] ?? grade} ({urgency})
-    </span>
   );
 }
 
