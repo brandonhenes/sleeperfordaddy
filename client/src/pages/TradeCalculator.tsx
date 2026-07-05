@@ -21,6 +21,7 @@ import { PICK_YEARS, pickDisplay, pickSlotLabel, pickToAsset } from "./trade-cal
 import { buildTradeMessage } from "./trade-calculator/trade-message";
 import TradeCalculatorHeader from "./trade-calculator/TradeCalculatorHeader";
 import LeagueOpponentSelectors from "./trade-calculator/LeagueOpponentSelectors";
+import TradeActionButtons from "./trade-calculator/TradeActionButtons";
 import type {
   AcceptanceAssetView,
   OpponentContextResponse,
@@ -339,59 +340,21 @@ export default function TradeCalculator() {
             <TradePanel title="YOU GET" color="#22c55e" labels={receiveLabels} side={result?.sideB ?? null} onRemove={removeReceive} onClear={() => clearSide("receive")} />
             <AcceptanceBadge acceptance={liveAcceptance} opponent={activeOpponent} />
             {result && selectedLeague && (
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                <a
-                  href={`https://sleeper.app/leagues/${selectedLeague}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 6,
-                    padding: "10px 16px",
-                    borderRadius: 8,
-                    background: "rgba(55, 65, 81, 0.5)",
-                    border: "1px solid var(--border)",
-                    color: "var(--text)",
-                    fontSize: 13,
-                    fontWeight: 600,
-                    textDecoration: "none",
-                    cursor: "pointer",
-                  }}
-                >
-                  Open in Sleeper
-                </a>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const msg = buildTradeMessage(
-                      result,
-                      result.sideA.assets.map((asset) => asset.label),
-                      result.sideB.assets.map((asset) => asset.label),
-                      activeOpponent,
-                      liveAcceptance
-                    );
-                    navigator.clipboard.writeText(msg);
-                    setCopied(true);
-                  }}
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 6,
-                    padding: "10px 16px",
-                    borderRadius: 8,
-                    background: "rgba(245,158,11,0.15)",
-                    border: "1px solid rgba(245,158,11,0.3)",
-                    color: "var(--amber)",
-                    fontSize: 13,
-                    fontWeight: 600,
-                    cursor: "pointer",
-                    fontFamily: "inherit",
-                  }}
-                >
-                  {copied ? "Copied!" : "Copy Trade Message"}
-                </button>
-              </div>
+              <TradeActionButtons
+                selectedLeague={selectedLeague}
+                copied={copied}
+                onCopyTradeMessage={() => {
+                  const msg = buildTradeMessage(
+                    result,
+                    result.sideA.assets.map((asset) => asset.label),
+                    result.sideB.assets.map((asset) => asset.label),
+                    activeOpponent,
+                    liveAcceptance
+                  );
+                  navigator.clipboard.writeText(msg);
+                  setCopied(true);
+                }}
+              />
             )}
           </div>
           <div style={{ ...rosterPaneStyle, order: 3 }}>
