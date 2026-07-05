@@ -5,18 +5,24 @@ import FreshnessBar from "../components/FreshnessBar";
 import LeaderboardTab from "../components/LeaderboardTab";
 import SyncGate from "../components/SyncGate";
 import TradeGradesTab from "../components/TradeGradesTab";
+import {
+  Card,
+  ErrorState,
+  LoadingSkeleton,
+  PageHeader,
+  TabBar,
+  type TabBarItem,
+} from "../components/ui";
 import { useCurrentUsername } from "../hooks/use-current-user";
 import { useTradeIntelligenceChains } from "../hooks/use-trade-intelligence";
 import { useTradeHistory } from "../hooks/use-trade-history";
 
 const mainTabs = ["Trade Grades", "Leaderboard"] as const;
 type MainTab = (typeof mainTabs)[number];
-
-const cardStyle = {
-  background: "var(--card)",
-  border: "1px solid var(--border)",
-  borderRadius: 10,
-} as const;
+const MAIN_TABS: TabBarItem<MainTab>[] = mainTabs.map((tab) => ({
+  key: tab,
+  label: tab,
+}));
 
 export default function TradeHistory() {
   const { username } = useCurrentUsername();
@@ -37,13 +43,11 @@ export default function TradeHistory() {
 
 function TradeHistoryHeader() {
   return (
-    <div style={{ padding: "28px 0 8px" }}>
-      <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>Trade Execution Tracker</h1>
-      <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 4 }}>
-        Win rate and value tracking across all leagues
-      </p>
-      <FreshnessBar />
-    </div>
+    <PageHeader
+      title="Trade Execution Tracker"
+      subtitle="Win rate and value tracking across all leagues"
+      actions={<FreshnessBar />}
+    />
   );
 }
 
@@ -98,20 +102,19 @@ function TradeHistoryReady({ username }: { username: string }) {
   }, [selectedChain, selectedSeason]);
 
   if (isLoading || chainsQuery.isLoading) {
-    return (
-      <div style={{ ...cardStyle, padding: "48px 24px", textAlign: "center", color: "var(--amber)" }}>
-        <span className="animate-pulse">Loading trade history...</span>
-      </div>
-    );
+    return <LoadingSkeleton label="Loading trade history" rows={3} />;
   }
 
   if (error || chainsQuery.error || !data) {
     return (
-      <div style={{ ...cardStyle, padding: "32px 24px", color: "var(--red)", fontSize: 14 }}>
-        {(error as Error)?.message ??
+      <ErrorState
+        title="Could not load trade history"
+        message={
+          (error as Error)?.message ??
           (chainsQuery.error as Error)?.message ??
-          "Unable to load trade history."}
-      </div>
+          "Unable to load trade history."
+        }
+      />
     );
   }
 
@@ -125,36 +128,19 @@ function TradeHistoryReady({ username }: { username: string }) {
 
   return (
     <>
-      <div style={{ display: "flex", gap: 0, marginBottom: 24, borderBottom: "1px solid var(--border)" }}>
-        {mainTabs.map(tab => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            style={{
-              padding: "10px 20px",
-              background: "none",
-              border: "none",
-              borderBottom: activeTab === tab ? "2px solid var(--green)" : "2px solid transparent",
-              color: activeTab === tab ? "var(--text)" : "var(--text-muted)",
-              fontSize: 14,
-              fontWeight: activeTab === tab ? 700 : 500,
-              cursor: "pointer",
-              fontFamily: "inherit",
-            }}
-          >
-            {tab}
-          </button>
-        ))}
-      </div>
+      <TabBar
+        tabs={MAIN_TABS}
+        active={activeTab}
+        onChange={setActiveTab}
+        ariaLabel="Trade history views"
+      />
 
-      <div
+      <Card
         style={{
           display: "grid",
           gap: 12,
           marginBottom: 20,
-          gridTemplateColumns: selectedChain
-            ? "minmax(240px, 1fr) 140px"
-            : "minmax(240px, 1fr)",
+          gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
         }}
       >
         <div>
@@ -216,7 +202,7 @@ function TradeHistoryReady({ username }: { username: string }) {
             </select>
           </div>
         ) : null}
-      </div>
+      </Card>
 
       {activeTab === "Trade Grades" && (
         <TradeGradesTab selectedLeagueId={intelLeagueId} leagueName={intelLeagueName} username={username ?? ""} />

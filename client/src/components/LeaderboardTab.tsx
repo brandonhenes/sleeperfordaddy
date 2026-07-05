@@ -1,6 +1,12 @@
 import { useMemo, useState } from "react";
 import EmptyState from "./EmptyState";
-import { SectionHeader } from "./ui";
+import {
+  ErrorState,
+  LoadingSkeleton,
+  ResponsiveTable,
+  SectionHeader,
+  type ResponsiveTableColumn,
+} from "./ui";
 import { useTradeIntelligenceLeaderboard } from "../hooks/use-trade-intelligence";
 import type { OwnerProfile } from "@shared/types";
 
@@ -11,12 +17,6 @@ type LeaderboardSortKey =
   | "cumulative_win_impact"
   | "trade_win_rate_value"
   | "soft_target_score";
-
-const cardStyle = {
-  background: "var(--card)",
-  border: "1px solid var(--border)",
-  borderRadius: 12,
-} as const;
 
 function formatSigned(value: number, suffix = ""): string {
   return `${value > 0 ? "+" : ""}${value.toFixed(1)}${suffix}`;
@@ -55,19 +55,11 @@ function sortProfiles(
 }
 
 function LoadingBlock({ label }: { label: string }) {
-  return (
-    <div style={{ ...cardStyle, padding: "48px 24px", textAlign: "center", color: "var(--amber)" }}>
-      <span className="animate-pulse">{label}</span>
-    </div>
-  );
+  return <LoadingSkeleton label={label} rows={4} />;
 }
 
 function ErrorBlock({ message }: { message: string }) {
-  return (
-    <div style={{ ...cardStyle, padding: "24px 20px", color: "var(--red)", fontSize: 13 }}>
-      {message}
-    </div>
-  );
+  return <ErrorState title="Could not load owner profiles" message={message} />;
 }
 
 function LeaderboardTable({
@@ -91,152 +83,170 @@ function LeaderboardTable({
     return sortDirection === "desc" ? " \u2193" : " \u2191";
   }
 
-  return (
-    <div style={{ ...cardStyle, overflowX: "auto" }}>
-      <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 860 }}>
-        <thead>
-          <tr style={{ background: "rgba(15, 23, 42, 0.85)" }}>
-            {[
-              { key: "display_name", label: "Owner" },
-              { key: "total_trades", label: "Trades" },
-              { key: "trade_win_rate_impact", label: "Impact Win Rate" },
-              { key: "cumulative_win_impact", label: "Cum Win Impact" },
-              { key: "trade_win_rate_value", label: "Value Win Rate" },
-              { key: "soft_target_score", label: "Soft Target" },
-            ].map((column) => (
-              <th
-                key={column.key}
-                style={{
-                  padding: "12px 14px",
-                  textAlign: column.key === "display_name" ? "left" : "right",
-                  fontSize: 11,
-                  color: "var(--text-muted)",
-                  letterSpacing: 0.5,
-                }}
-              >
-                <button
-                  type="button"
-                  onClick={() => onSort(column.key as LeaderboardSortKey)}
+  function SortHeader({ sort, label }: { sort: LeaderboardSortKey; label: string }) {
+    return (
+      <button
+        type="button"
+        onClick={() => onSort(sort)}
+        style={{
+          background: "none",
+          border: "none",
+          color: "inherit",
+          cursor: "pointer",
+          fontFamily: "inherit",
+          fontSize: "inherit",
+          fontWeight: 700,
+          padding: 0,
+          textAlign: "inherit",
+        }}
+      >
+        {label}
+        {arrow(sort)}
+      </button>
+    );
+  }
+
+  const columns: ResponsiveTableColumn<OwnerProfile>[] = [
+    {
+      key: "owner",
+      header: <SortHeader sort="display_name" label="Owner" />,
+      cardLabel: "Owner",
+      render: (profile) => {
+        const rank = sortedProfiles.findIndex((item) => item.roster_id === profile.roster_id) + 1;
+        return (
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span className="font-mono" style={{ color: "var(--text-muted)", minWidth: 26 }}>
+              #{rank}
+            </span>
+            <div>
+              <div style={{ fontWeight: 700 }}>{profile.display_name}</div>
+              {profile.soft_target_score > 70 && (
+                <div style={{ fontSize: 11, color: "var(--amber)", marginTop: 2 }}>Soft target</div>
+              )}
+            </div>
+          </div>
+        );
+      },
+    },
+    {
+      key: "trades",
+      header: <SortHeader sort="total_trades" label="Trades" />,
+      cardLabel: "Trades",
+      align: "right",
+      render: (profile) => <span style={{ color: "var(--text-dim)" }}>{profile.total_trades}</span>,
+    },
+    {
+      key: "impact_win_rate",
+      header: <SortHeader sort="trade_win_rate_impact" label="Impact Win Rate" />,
+      cardLabel: "Impact Win Rate",
+      align: "right",
+      render: (profile) => (
+        <span style={{ color: profile.trade_win_rate_impact >= 50 ? "var(--green)" : "var(--red)", fontWeight: 700 }}>
+          {profile.trade_win_rate_impact.toFixed(1)}%
+        </span>
+      ),
+    },
+    {
+      key: "cumulative_win_impact",
+      header: <SortHeader sort="cumulative_win_impact" label="Cum Win Impact" />,
+      cardLabel: "Cum Win Impact",
+      align: "right",
+      render: (profile) => (
+        <span style={{ color: profile.cumulative_win_impact >= 0 ? "var(--green)" : "var(--red)", fontWeight: 700 }}>
+          {formatSigned(profile.cumulative_win_impact)}
+        </span>
+      ),
+    },
+    {
+      key: "value_win_rate",
+      header: <SortHeader sort="trade_win_rate_value" label="Value Win Rate" />,
+      cardLabel: "Value Win Rate",
+      align: "right",
+      render: (profile) => (
+        <span style={{ color: profile.trade_win_rate_value >= 50 ? "var(--green)" : "var(--red)", fontWeight: 700 }}>
+          {profile.trade_win_rate_value.toFixed(1)}%
+        </span>
+      ),
+    },
+    {
+      key: "soft_target",
+      header: <SortHeader sort="soft_target_score" label="Soft Target" />,
+      cardLabel: "Soft Target",
+      align: "right",
+      render: (profile) => (
+        <span style={{ color: profile.soft_target_score > 70 ? "var(--amber)" : "var(--text-dim)", fontWeight: 700 }}>
+          {profile.soft_target_score.toFixed(0)}
+        </span>
+      ),
+    },
+    {
+      key: "tendency",
+      header: "Tendency",
+      render: (profile) => {
+        const tendencyColor =
+          profile.youth_vet_bias === "youth"
+            ? { background: "rgba(34, 197, 94, 0.14)", color: "#4ade80", border: "rgba(34, 197, 94, 0.3)" }
+            : profile.youth_vet_bias === "veteran"
+              ? { background: "rgba(249, 115, 22, 0.14)", color: "#fb923c", border: "rgba(249, 115, 22, 0.3)" }
+              : { background: "rgba(148, 163, 184, 0.14)", color: "#cbd5e1", border: "rgba(148, 163, 184, 0.28)" };
+
+        return (
+          <span
+            style={{
+              padding: "4px 8px",
+              borderRadius: 999,
+              background: tendencyColor.background,
+              border: `1px solid ${tendencyColor.border}`,
+              color: tendencyColor.color,
+              fontSize: 11,
+              fontWeight: 800,
+              textTransform: "capitalize",
+            }}
+          >
+            {profile.youth_vet_bias}
+          </span>
+        );
+      },
+    },
+    {
+      key: "positions",
+      header: "Top Positions",
+      render: (profile) => (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+          {profile.top_positions_acquired.length > 0 ? (
+            profile.top_positions_acquired.map((position) => {
+              const colors = getPositionPillColor(position);
+              return (
+                <span
+                  key={`${profile.roster_id}-${position}`}
                   style={{
-                    background: "none",
-                    border: "none",
-                    color: "inherit",
-                    cursor: "pointer",
-                    fontFamily: "inherit",
-                    fontSize: "inherit",
-                    fontWeight: 700,
-                    padding: 0,
+                    padding: "4px 8px",
+                    borderRadius: 999,
+                    background: colors.background,
+                    border: `1px solid ${colors.border}`,
+                    color: colors.color,
+                    fontSize: 10,
+                    fontWeight: 800,
                   }}
                 >
-                  {column.label.toUpperCase()}
-                  {arrow(column.key as LeaderboardSortKey)}
-                </button>
-              </th>
-            ))}
-            <th style={{ padding: "12px 14px", textAlign: "left", fontSize: 11, color: "var(--text-muted)", letterSpacing: 0.5 }}>
-              TENDENCY
-            </th>
-            <th style={{ padding: "12px 14px", textAlign: "left", fontSize: 11, color: "var(--text-muted)", letterSpacing: 0.5 }}>
-              TOP POSITIONS
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {sortedProfiles.map((profile, index) => {
-            const tendencyColor =
-              profile.youth_vet_bias === "youth"
-                ? { background: "rgba(34, 197, 94, 0.14)", color: "#4ade80", border: "rgba(34, 197, 94, 0.3)" }
-                : profile.youth_vet_bias === "veteran"
-                  ? { background: "rgba(249, 115, 22, 0.14)", color: "#fb923c", border: "rgba(249, 115, 22, 0.3)" }
-                  : { background: "rgba(148, 163, 184, 0.14)", color: "#cbd5e1", border: "rgba(148, 163, 184, 0.28)" };
+                  {position}
+                </span>
+              );
+            })
+          ) : (
+            <span style={{ color: "var(--text-muted)", fontSize: 12 }}>None</span>
+          )}
+        </div>
+      ),
+    },
+  ];
 
-            return (
-              <tr
-                key={`${profile.league_id}-${profile.roster_id}`}
-                style={{
-                  borderTop: "1px solid var(--border)",
-                  background: profile.soft_target_score > 70 ? "rgba(245, 158, 11, 0.06)" : "transparent",
-                }}
-              >
-                <td style={{ padding: "14px", fontSize: 13 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <span className="font-mono" style={{ color: "var(--text-muted)", minWidth: 26 }}>
-                      #{index + 1}
-                    </span>
-                    <div>
-                      <div style={{ fontWeight: 700 }}>{profile.display_name}</div>
-                      {profile.soft_target_score > 70 && (
-                        <div style={{ fontSize: 11, color: "var(--amber)", marginTop: 2 }}>Soft target</div>
-                      )}
-                    </div>
-                  </div>
-                </td>
-                <td style={{ padding: "14px", fontSize: 13, textAlign: "right", color: "var(--text-dim)" }}>
-                  {profile.total_trades}
-                </td>
-                <td style={{ padding: "14px", fontSize: 13, textAlign: "right", color: profile.trade_win_rate_impact >= 50 ? "var(--green)" : "var(--red)", fontWeight: 700 }}>
-                  {profile.trade_win_rate_impact.toFixed(1)}%
-                </td>
-                <td style={{ padding: "14px", fontSize: 13, textAlign: "right", color: profile.cumulative_win_impact >= 0 ? "var(--green)" : "var(--red)", fontWeight: 700 }}>
-                  {formatSigned(profile.cumulative_win_impact)}
-                </td>
-                <td style={{ padding: "14px", fontSize: 13, textAlign: "right", color: profile.trade_win_rate_value >= 50 ? "var(--green)" : "var(--red)", fontWeight: 700 }}>
-                  {profile.trade_win_rate_value.toFixed(1)}%
-                </td>
-                <td style={{ padding: "14px", fontSize: 13, textAlign: "right" }}>
-                  <span style={{ color: profile.soft_target_score > 70 ? "var(--amber)" : "var(--text-dim)", fontWeight: 700 }}>
-                    {profile.soft_target_score.toFixed(0)}
-                  </span>
-                </td>
-                <td style={{ padding: "14px", fontSize: 13 }}>
-                  <span
-                    style={{
-                      padding: "4px 8px",
-                      borderRadius: 999,
-                      background: tendencyColor.background,
-                      border: `1px solid ${tendencyColor.border}`,
-                      color: tendencyColor.color,
-                      fontSize: 11,
-                      fontWeight: 800,
-                      textTransform: "capitalize",
-                    }}
-                  >
-                    {profile.youth_vet_bias}
-                  </span>
-                </td>
-                <td style={{ padding: "14px", fontSize: 13 }}>
-                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    {profile.top_positions_acquired.length > 0 ? (
-                      profile.top_positions_acquired.map((position) => {
-                        const colors = getPositionPillColor(position);
-                        return (
-                          <span
-                            key={`${profile.roster_id}-${position}`}
-                            style={{
-                              padding: "4px 8px",
-                              borderRadius: 999,
-                              background: colors.background,
-                              border: `1px solid ${colors.border}`,
-                              color: colors.color,
-                              fontSize: 10,
-                              fontWeight: 800,
-                            }}
-                          >
-                            {position}
-                          </span>
-                        );
-                      })
-                    ) : (
-                      <span style={{ color: "var(--text-muted)", fontSize: 12 }}>None</span>
-                    )}
-                  </div>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
+  return (
+    <ResponsiveTable
+      rows={sortedProfiles}
+      columns={columns}
+      getRowKey={(profile) => `${profile.league_id}-${profile.roster_id}`}
+    />
   );
 }
 

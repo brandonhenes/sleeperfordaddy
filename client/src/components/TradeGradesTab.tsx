@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import TradeCard from "./TradeCard";
 import EmptyState from "./EmptyState";
-import { SectionHeader } from "./ui";
+import { ErrorState, LoadingSkeleton, SectionHeader } from "./ui";
 import { usePowerRankings } from "../hooks/use-power-rankings";
 import {
   useTradeIntelligenceLeague,
@@ -12,12 +12,6 @@ import type {
   TradeOutcome,
   TradeOutcomeSeason,
 } from "@shared/types";
-
-const cardStyle = {
-  background: "var(--card)",
-  border: "1px solid var(--border)",
-  borderRadius: 12,
-} as const;
 
 const selectStyle = {
   padding: "10px 12px",
@@ -42,17 +36,11 @@ function getTradeKey(outcome: TradeOutcome): string {
 }
 
 function TradeCardSkeleton() {
-  return (
-    <div className="animate-pulse" style={{ ...cardStyle, height: 290 }} />
-  );
+  return <LoadingSkeleton label="Loading trade grades" rows={4} />;
 }
 
 function ErrorBlock({ message }: { message: string }) {
-  return (
-    <div style={{ ...cardStyle, padding: "24px 20px", color: "var(--red)", fontSize: 13 }}>
-      {message}
-    </div>
-  );
+  return <ErrorState title="Could not load trade grades" message={message} />;
 }
 
 interface TradeGradesTabProps {
@@ -187,11 +175,7 @@ export default function TradeGradesTab({ selectedLeagueId, leagueName, username 
       ) : null}
 
       {leagueQuery.isLoading ? (
-        <div style={{ display: "grid", gap: 12 }}>
-          {[1, 2, 3].map((value) => (
-            <TradeCardSkeleton key={value} />
-          ))}
-        </div>
+        <TradeCardSkeleton />
       ) : leagueQuery.error ? (
         <ErrorBlock message={(leagueQuery.error as Error).message || "Failed to load graded trades."} />
       ) : filteredOutcomes.length === 0 ? (
