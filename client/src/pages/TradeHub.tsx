@@ -59,11 +59,32 @@ function tierRank(pkg: TradePackage): number {
   return 0;
 }
 
+function isPickOnlyPackage(pkg: TradePackage): boolean {
+  return [...pkg.you_send, ...pkg.you_receive].every((asset) => asset.asset_type === "pick");
+}
+
+function isMultiAssetPlayerPackage(pkg: TradePackage): boolean {
+  return !isPickOnlyPackage(pkg) && pkg.you_send.length + pkg.you_receive.length > 2;
+}
+
 function bestPackage(suggestions: TradeSuggestion[]): { pkg: TradePackage; partner: TradeSuggestion["partner"] } | null {
   let best: { pkg: TradePackage; partner: TradeSuggestion["partner"]; score: number } | null = null;
+  const hasPlayerBased = suggestions.some((suggestion) =>
+    suggestion.packages.some((pkg) => !isPickOnlyPackage(pkg))
+  );
+  const hasMultiAssetPlayer = suggestions.some((suggestion) =>
+    suggestion.packages.some(isMultiAssetPlayerPackage)
+  );
   for (const suggestion of suggestions) {
     for (const pkg of suggestion.packages) {
-      const score = tierRank(pkg) * 1000 + (pkg.acceptance?.probability ?? 0);
+      if (hasPlayerBased && isPickOnlyPackage(pkg)) continue;
+      const score =
+        tierRank(pkg) * 2_000 +
+        (pkg.strategy_score ?? 0) * 20 +
+        (pkg.ranking_components?.total ?? 0) * 10 +
+        (pkg.acceptance?.probability ?? 0) +
+        (isMultiAssetPlayerPackage(pkg) ? 700 : 0) -
+        (hasMultiAssetPlayer && pkg.trade_type === "1-for-1" ? 450 : 0);
       if (!best || score > best.score) best = { pkg, partner: suggestion.partner, score };
     }
   }
@@ -97,7 +118,11 @@ function LeagueBestLine({ username, leagueId, leagueName }: { username: string; 
     <div className="ticket-card">
       <div className="ticket-card-head">
         <span className="ticket-card-league">{leagueName}</span>
-        {pkg.opportunity_type && <span className="ticket-tag">{humanize(pkg.opportunity_type)}</span>}
+        {(pkg.strategy_label || pkg.opportunity_type) && (
+          <span className="ticket-tag">
+            {pkg.strategy_label ?? (pkg.opportunity_type ? humanize(pkg.opportunity_type) : "")}
+          </span>
+        )}
       </div>
       <div className="ticket-line">
         <span className="who" style={{ color: "var(--red)" }}>GIVE {pkg.you_send.map((a) => a.label).join(", ")}</span>

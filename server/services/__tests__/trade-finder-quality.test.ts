@@ -277,7 +277,7 @@ function profile(overrides: Record<string, unknown>) {
 }
 
 describe("Find Trades generator quality", () => {
-  it("caps pick-only opportunities when player-based opportunities exist", () => {
+  it("removes pick-only opportunities when player-based opportunities exist", () => {
     const playerPackages = Array.from({ length: 8 }, (_, index) =>
       annotateTradeFinderPackage(
         packageFrom(
@@ -316,7 +316,7 @@ describe("Find Trades generator quality", () => {
     const filtered = applyDisplayedTradeDiversity(suggestions);
     const remaining = filtered.flatMap((suggestion) => suggestion.packages);
 
-    expect(remaining.filter(isPickOnlyTradePackage)).toHaveLength(2);
+    expect(remaining.filter(isPickOnlyTradePackage)).toHaveLength(0);
     expect(remaining.filter((pkg) => !isPickOnlyTradePackage(pkg))).toHaveLength(8);
   });
 
@@ -349,7 +349,7 @@ describe("Find Trades generator quality", () => {
 
     const filtered = applyDisplayedTradeDiversity(suggestions);
 
-    expect(filtered.flatMap((suggestion) => suggestion.packages).filter(isPickOnlyTradePackage)).toHaveLength(1);
+    expect(filtered.flatMap((suggestion) => suggestion.packages).filter(isPickOnlyTradePackage)).toHaveLength(0);
   });
 
   it("generates player-based and player-plus-pick opportunities when valid player assets exist", async () => {
@@ -430,6 +430,38 @@ describe("Find Trades generator quality", () => {
     expect(strong.quality_tier).toBe("strong");
     expect(speculative.quality_tier).toBe("speculative");
     expect(ranked.map((pkg) => pkg.quality_tier)).toEqual(["strong", "speculative"]);
+  });
+
+  it("limits extra 1-for-1 swaps when multi-asset strategy packages exist", () => {
+    const oneForOneA = annotateTradeFinderPackage(
+      packageFrom([player("Send QB", "QB", 68)], [player("Receive WR", "WR", 68)]),
+      { userNeeds: ["WR"], opponentNeeds: ["QB"], userArchetype: "Competitor", opponentArchetype: "Competitor" }
+    );
+    const oneForOneB = annotateTradeFinderPackage(
+      packageFrom([player("Send RB", "RB", 68)], [player("Receive TE", "TE", 68)]),
+      { userNeeds: ["TE"], opponentNeeds: ["RB"], userArchetype: "Competitor", opponentArchetype: "Competitor" }
+    );
+    const consolidation = annotateTradeFinderPackage(
+      packageFrom(
+        [
+          player("Useful WR", "WR", 70, { context_trade_value: 3_500, trade_power: 3_500 }),
+          player("Useful RB", "RB", 66, { context_trade_value: 3_100, trade_power: 3_100 }),
+        ],
+        [player("Anchor TE", "TE", 84)],
+        { type: "consolidation", trade_type: "2-for-1", label: "2-for-1 Consolidation" }
+      ),
+      {
+        userNeeds: ["TE"],
+        opponentNeeds: ["WR", "RB"],
+        userArchetype: "All-In Contender",
+        opponentArchetype: "Rebuilder",
+      }
+    );
+
+    const ranked = dedupeAndRankTradeFinderPackages([oneForOneA, oneForOneB, consolidation], 4);
+
+    expect(ranked).toContain(consolidation);
+    expect(ranked.filter((pkg) => pkg.trade_type === "1-for-1")).toHaveLength(1);
   });
 
   it("uses low-confidence fallback only when better results are unavailable", () => {

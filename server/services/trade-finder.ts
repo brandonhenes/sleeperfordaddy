@@ -659,6 +659,9 @@ export function dedupeAndRankTradeFinderPackages(
   const seen = new Set<string>();
   const typeCounts = new Map<TradeOpportunityType, number>();
   const validPackages = packages.filter(shouldSurfaceTradeFinderPackage);
+  const hasMultiAssetPlayerPackage = validPackages.some(
+    (pkg) => !isPickOnlyTradePackage(pkg) && pkg.you_send.length + pkg.you_receive.length > 2
+  );
   const betterThanLow = validPackages.filter((pkg) => pkg.quality_tier !== "low_confidence");
   const pool = betterThanLow.length > 0
     ? betterThanLow
@@ -671,9 +674,16 @@ export function dedupeAndRankTradeFinderPackages(
     speculative: 2,
     low_confidence: 1,
   };
+  const shapeRank = (pkg: TradePackage): number => {
+    if (isPickOnlyTradePackage(pkg)) return -3;
+    if (pkg.you_send.length + pkg.you_receive.length > 2) return 3;
+    if (pkg.trade_type === "1-for-1") return -1;
+    return 1;
+  };
   const sorted = [...pool].sort(
     (a, b) =>
       tierRank[b.quality_tier ?? "low_confidence"] - tierRank[a.quality_tier ?? "low_confidence"] ||
+      shapeRank(b) - shapeRank(a) ||
       (b.ranking_components?.total ?? 0) - (a.ranking_components?.total ?? 0) ||
       (b.receive_total - b.send_total) - (a.receive_total - a.send_total)
   );
@@ -687,6 +697,13 @@ export function dedupeAndRankTradeFinderPackages(
     const typeCount = typeCounts.get(type) ?? 0;
     if (typeCount >= 2 && selected.length < effectiveMaxPackages - 1) continue;
     if (isPickOnlyTradePackage(pkg) && selected.some(isPickOnlyTradePackage)) continue;
+    if (
+      hasMultiAssetPlayerPackage &&
+      pkg.trade_type === "1-for-1" &&
+      selected.some((selectedPkg) => selectedPkg.trade_type === "1-for-1")
+    ) {
+      continue;
+    }
 
     seen.add(key);
     typeCounts.set(type, typeCount + 1);
@@ -698,6 +715,13 @@ export function dedupeAndRankTradeFinderPackages(
       if (selected.length >= effectiveMaxPackages) break;
       const key = packageShapeKey(pkg);
       if (seen.has(key)) continue;
+      if (
+        hasMultiAssetPlayerPackage &&
+        pkg.trade_type === "1-for-1" &&
+        selected.some((selectedPkg) => selectedPkg.trade_type === "1-for-1")
+      ) {
+        continue;
+      }
       seen.add(key);
       selected.push(pkg);
     }
@@ -732,8 +756,8 @@ export function applyDisplayedTradeDiversity(
   }
 
   const allowedPickOnly = playerBasedCount > 0
-    ? Math.floor(playerBasedCount / 4)
-    : Math.min(2, pickEntries.length);
+    ? 0
+    : Math.min(1, pickEntries.length);
   const keepPickEntries = new Set<string>();
   const seenPickShapes = new Set<string>();
   for (const entry of [...pickEntries].sort((a, b) => b.rank - a.rank)) {
@@ -1048,6 +1072,217 @@ export async function generateTradeFinderPackages(
   scorePackage: TradeFinderPackageScorer = scoreTradeFinderPackage
 ): Promise<TradePackage[]> {
   const packages: TradePackage[] = [];
+  type StrategicPackageInput = {
+    type: TradePackage["type"];
+    label: string;
+    send: TradePackageAsset[];
+    receive: TradePackageAsset[];
+    why_you_do_it: string;
+    why_they_accept: string;
+    sweetener_hint?: string | null;
+  };
+  const addStrategicPackage = async (input: StrategicPackageInput): Promise<boolean> => {
+    const scored = await scorePackage(input.send, input.receive, leagueId, mode, classStrengths);
+    if (scored.sendTotal <= 0 || scored.receiveTotal <= 0) return false;
+    packages.push({
+      type: input.type,
+      trade_type: tradeTypeForPackage(input.type),
+      label: input.label,
+      you_send: scored.sendAssets,
+      you_receive: scored.receiveAssets,
+      send_total: scored.sendTotal,
+      receive_total: scored.receiveTotal,
+      delta: scored.delta,
+      send_edge: scored.sendEdge,
+      receive_edge: scored.receiveEdge,
+      delta_edge: scored.deltaEdge,
+      package_penalty_pct_send: scored.packagePenaltySend,
+      package_penalty_pct_receive: scored.packagePenaltyReceive,
+      ...valuationFields(scored),
+      fairness: scored.fairness,
+      why_you_do_it: input.why_you_do_it,
+      why_they_accept: input.why_they_accept,
+      sweetener_hint: input.sweetener_hint ?? null,
+      acceptance: null,
+      healthCheck: [],
+    });
+    return true;
+  };
+  const userTopIds = new Set(Object.values(user.topPlayerIdsByPos).filter(Boolean));
+  const userPlayers = [...user.roster.core_assets]
+    .filter((asset) => POSITIONS.includes(asset.position as Pos) && asset.edge_score >= MIN_EDGE_SCORE)
+    .sort((a, b) => b.edge_score - a.edge_score);
+  const oppPlayers = [...opp.roster.core_assets]
+    .filter((asset) => POSITIONS.includes(asset.position as Pos) && asset.edge_score >= MIN_EDGE_SCORE)
+    .sort((a, b) => b.edge_score - a.edge_score);
+  const userDepth = userPlayers
+    .filter((asset) => {
+      const pos = asset.position as Pos;
+      return (
+        asset.edge_score <= 82 &&
+        (!userTopIds.has(asset.player_id) || user.surplus[pos].some((surplus) => surplus.player_id === asset.player_id))
+      );
+    })
+    .slice(0, 10);
+  const oppTargets = oppPlayers
+    .filter((asset) => asset.edge_score >= 60)
+    .slice(0, 10);
+  const userPicks = user.tradeablePicks
+    .filter((pick) => pick.edge_score >= 18)
+    .slice(0, 6);
+  const oppPicks = opp.tradeablePicks
+    .filter((pick) => pick.edge_score >= 18)
+    .slice(0, 6);
+  const userWindow = user.roster.archetype;
+  const userIsContender =
+    userWindow.includes("Contender") ||
+    userWindow.includes("Juggernaut") ||
+    userWindow === "Competitor";
+  const userWantsFuture = wantsFutureAssets(userWindow);
+
+  let consolidationGenerated = 0;
+  for (const target of oppTargets.filter((asset) => asset.edge_score >= 68)) {
+    if (consolidationGenerated >= 6) break;
+    for (let i = 0; i < userDepth.length && consolidationGenerated < 6; i++) {
+      for (let j = i + 1; j < Math.min(userDepth.length, i + 5) && consolidationGenerated < 6; j++) {
+        const first = userDepth[i];
+        const second = userDepth[j];
+        if (target.edge_score < Math.max(first.edge_score, second.edge_score) + 4) continue;
+        const sendEdge = first.edge_score + second.edge_score;
+        if (sendEdge < target.edge_score * 1.15 || sendEdge > target.edge_score * 2.1) continue;
+        const sentPositions = [first.position, second.position].join(" + ");
+        const added = await addStrategicPackage({
+          type: "consolidation",
+          label: "2-for-1 Consolidation",
+          send: [
+            assetFromPlayerWithScoring(first, scoring, usage, hasCustom),
+            assetFromPlayerWithScoring(second, scoring, usage, hasCustom),
+          ],
+          receive: [assetFromPlayerWithScoring(target, scoring, usage, hasCustom)],
+          why_you_do_it: `Turn two usable roster spots into a better weekly ${target.position} asset`,
+          why_they_accept: `Gets ${sentPositions} depth for one asset. ${ARCHETYPE_WANTS[opp.roster.archetype] ?? "Flexibility matters for them."}`,
+          sweetener_hint: "Consolidation is worth paying a small premium when the target actually starts for you.",
+        });
+        if (added) consolidationGenerated += 1;
+      }
+    }
+  }
+
+  let playerPickGenerated = 0;
+  for (const target of oppTargets.filter((asset) => asset.edge_score >= 64)) {
+    if (playerPickGenerated >= 8) break;
+    const candidates = userDepth.filter(
+      (asset) =>
+        asset.player_id !== target.player_id &&
+        asset.edge_score >= 50 &&
+        asset.edge_score <= target.edge_score - 4
+    );
+    for (const userPlayer of candidates.slice(0, 5)) {
+      if (playerPickGenerated >= 8) break;
+      const neededPick = userPicks.find((pick) => userPlayer.edge_score + pick.edge_score >= target.edge_score * 0.9);
+      if (!neededPick) continue;
+      const added = await addStrategicPackage({
+        type: "player_plus_pick",
+        label: "Player + Pick Upgrade",
+        send: [
+          assetFromPlayerWithScoring(userPlayer, scoring, usage, hasCustom),
+          assetFromPick(neededPick),
+        ],
+        receive: [assetFromPlayerWithScoring(target, scoring, usage, hasCustom)],
+        why_you_do_it: `Use ${userPlayer.position} value plus a pick to climb into a stronger ${target.position}`,
+        why_they_accept: opp.needs.includes(userPlayer.position as Pos)
+          ? `Fills their ${userPlayer.position} need and adds draft capital.`
+          : `Turns one player into a player-plus-pick return.`,
+        sweetener_hint: "This is the default dynasty upgrade shape: useful player plus pick for the better anchor.",
+      });
+      if (added) playerPickGenerated += 1;
+    }
+  }
+
+  let rosterSpotGenerated = 0;
+  if (userPicks.length > 0) {
+    for (const target of oppTargets.filter((asset) => asset.edge_score >= 75)) {
+      if (rosterSpotGenerated >= 4) break;
+      const depthPair = userDepth
+        .filter((asset) => asset.edge_score <= target.edge_score - 8)
+        .slice(0, 2);
+      const pick = userPicks[0];
+      if (depthPair.length < 2 || !pick) continue;
+      const added = await addStrategicPackage({
+        type: "consolidation",
+        label: "3-for-1 Roster-Spot Upgrade",
+        send: [
+          assetFromPlayerWithScoring(depthPair[0], scoring, usage, hasCustom),
+          assetFromPlayerWithScoring(depthPair[1], scoring, usage, hasCustom),
+          assetFromPick(pick),
+        ],
+        receive: [assetFromPlayerWithScoring(target, scoring, usage, hasCustom)],
+        why_you_do_it: `Convert bench value and a pick into one asset that matters in your lineup`,
+        why_they_accept: `Gets two playable pieces plus draft capital for one premium player.`,
+        sweetener_hint: "Roster-spot arbitrage only works if the one asset is meaningfully better than every piece you send.",
+      });
+      if (added) rosterSpotGenerated += 1;
+    }
+  }
+
+  let tierDownGenerated = 0;
+  if (userWantsFuture || userWindow === "Dead Zone") {
+    const sellAnchors = userPlayers.filter((asset) => asset.edge_score >= 75).slice(0, 5);
+    for (const outgoing of sellAnchors) {
+      if (tierDownGenerated >= 5) break;
+      const anchor = oppPlayers.find(
+        (asset) =>
+          asset.player_id !== outgoing.player_id &&
+          asset.edge_score >= 60 &&
+          asset.edge_score <= outgoing.edge_score - 4 &&
+          asset.edge_score >= outgoing.edge_score - 20
+      );
+      const pick = oppPicks.find((candidate) => candidate.edge_score >= 28);
+      if (!anchor || !pick) continue;
+      const added = await addStrategicPackage({
+        type: "player_plus_pick",
+        label: "Tier Down",
+        send: [assetFromPlayerWithScoring(outgoing, scoring, usage, hasCustom)],
+        receive: [
+          assetFromPlayerWithScoring(anchor, scoring, usage, hasCustom),
+          assetFromPick(pick),
+        ],
+        why_you_do_it: `Tier down from ${outgoing.full_name} into an anchor plus liquid draft capital`,
+        why_they_accept: `Consolidates a player-plus-pick package into the better single asset.`,
+        sweetener_hint: "Tier-down only works if the return includes a real anchor, not just volume.",
+      });
+      if (added) tierDownGenerated += 1;
+    }
+  }
+
+  let rentalGenerated = 0;
+  if (userIsContender && userPicks.length > 0) {
+    const rentalTargets = oppTargets.filter(
+      (asset) =>
+        asset.edge_score >= 66 &&
+        ((asset.position === "RB" && (asset.age ?? 0) >= 27) ||
+          ((asset.position === "WR" || asset.position === "TE") && (asset.age ?? 0) >= 29))
+    );
+    for (const target of rentalTargets.slice(0, 4)) {
+      if (rentalGenerated >= 4) break;
+      const depth = userDepth.find((asset) => asset.edge_score >= 45 && asset.edge_score <= target.edge_score - 6);
+      const pick = userPicks[0];
+      if (!depth || !pick) continue;
+      const added = await addStrategicPackage({
+        type: "player_plus_pick",
+        label: "Win-Now Rental",
+        send: [
+          assetFromPlayerWithScoring(depth, scoring, usage, hasCustom),
+          assetFromPick(pick),
+        ],
+        receive: [assetFromPlayerWithScoring(target, scoring, usage, hasCustom)],
+        why_you_do_it: `Buy discounted veteran production for a title push`,
+        why_they_accept: `Moves an older producer for a younger/depth piece plus draft capital.`,
+        sweetener_hint: "Only worth it if this player actually raises your weekly lineup ceiling.",
+      });
+      if (added) rentalGenerated += 1;
+    }
+  }
 
   for (const userPos of POSITIONS) {
     if (user.surplus[userPos].length === 0) continue;
