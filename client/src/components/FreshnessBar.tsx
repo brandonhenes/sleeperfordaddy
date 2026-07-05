@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "../lib/api";
 import { useStartSync, useSyncStatus } from "../hooks/use-sleeper";
+import { useCurrentUser } from "./CurrentUserContext";
 
 interface SourceFreshness {
   last_synced: string | null;
@@ -33,10 +34,7 @@ export default function FreshnessBar({
   leagueId?: string;
 }) {
   const queryClient = useQueryClient();
-  const username = useMemo(
-    () => (typeof window !== "undefined" ? localStorage.getItem("edge_username") ?? "" : ""),
-    []
-  );
+  const { username } = useCurrentUser();
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState("");
   const { data } = useQuery<FreshnessData>({

@@ -8,6 +8,7 @@ import { useMockDraftSetup, type MockDraftSetup, type MockDraftProspect, type Mo
 import { useActiveDrafts, useLiveDraft, type LiveDraftState, type ActiveDraftSummary } from "../hooks/use-live-draft";
 import { useHitRates, useRookieADP, type HitRateData, type LeagueADP } from "../hooks/use-draft-data";
 import { useLatestProspectRankings, type ProspectRanking } from "../hooks/use-prospect-rankings";
+import { useCurrentUsername } from "../hooks/use-current-user";
 import { PlayerLink } from "../components/ui";
 import { posColor } from "../lib/position-colors";
 
@@ -80,7 +81,7 @@ function loadMyBoard(): MyBoardState {
 
 export default function RookieDraft() {
   const { data, isLoading, error } = useProspects();
-  const username = typeof window !== "undefined" ? localStorage.getItem("edge_username") ?? "" : "";
+  const { username } = useCurrentUsername();
   const { data: draftCtx } = useRookieDraftContext(username);
   const [posFilter, setPosFilter] = useState<string>("ALL");
   const [viewMode, setViewMode] = useState<"board" | "positional" | "compare" | "myboard" | "mock" | "live" | "analytics">("board");

@@ -9,6 +9,7 @@ import {
   CartesianGrid,
 } from "recharts";
 import AppShell from "../components/AppShell";
+import { useCurrentUser } from "../components/CurrentUserContext";
 import EdgeScoreBadge from "../components/EdgeScoreBadge";
 import ShareButton from "../components/ShareButton";
 import { TrendArrow, SectionHeader } from "../components/ui";
@@ -25,6 +26,7 @@ import {
   type ExposureInfo,
 } from "../hooks/use-player";
 import { useComparables } from "../hooks/use-comparables";
+import { useCurrentUsername } from "../hooks/use-current-user";
 
 // ─── Zone Colors ───
 
@@ -361,7 +363,7 @@ function TradeComps({ trades }: { trades: { trade_id: string; league_name: strin
 // ─── Quick Actions ───
 
 function QuickActions({ playerName, playerId }: { playerName: string; playerId: string | null }) {
-  const username = typeof window !== "undefined" ? localStorage.getItem("edge_username") ?? "" : "";
+  const { username } = useCurrentUser();
   return (
     <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
       {username && (
@@ -397,7 +399,7 @@ function QuickActions({ playerName, playerId }: { playerName: string; playerId: 
 export default function PlayerDetail() {
   const { playerName } = useParams<{ playerName: string }>();
   const decoded = playerName ? decodeURIComponent(playerName) : undefined;
-  const username = typeof window !== "undefined" ? localStorage.getItem("edge_username") ?? "" : "";
+  const { username } = useCurrentUsername();
   const { data, isLoading, error } = usePlayer(decoded, username);
   const { data: comparables } = useComparables(decoded);
 

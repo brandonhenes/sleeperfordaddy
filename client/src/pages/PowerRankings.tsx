@@ -1,11 +1,11 @@
-import { useLocation, useParams, useSearch } from "wouter";
+import { useLocation, useSearch } from "wouter";
 import AppShell from "../components/AppShell";
 import FreshnessBar from "../components/FreshnessBar";
 import LeagueHistoryContent from "../components/teams/LeagueHistoryContent";
 import PowerRankingsContent from "../components/teams/PowerRankingsContent";
 import RosterGradesContent from "../components/teams/RosterGradesContent";
 import { PageHeader, TabBar, type TabBarItem } from "../components/ui";
-import { readStoredUsername } from "../lib/current-user";
+import { useCurrentUsername } from "../hooks/use-current-user";
 
 type TeamsTab = "power" | "grades" | "history";
 
@@ -28,8 +28,7 @@ function pathFromLocation(location: string): string {
 export default function PowerRankings() {
   const [location, setLocation] = useLocation();
   const search = useSearch();
-  const { username } = useParams<{ username: string }>();
-  const effectiveUser = username ?? readStoredUsername();
+  const { username: effectiveUser } = useCurrentUsername();
   const activeTab = parseTab(search);
 
   function updateTab(tab: TeamsTab) {

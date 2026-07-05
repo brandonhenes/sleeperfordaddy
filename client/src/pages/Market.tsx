@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useLocation, useParams, useSearch } from "wouter";
+import { useLocation, useSearch } from "wouter";
 import AppShell from "../components/AppShell";
 import EdgeScoreBadge from "../components/EdgeScoreBadge";
 import FreshnessBar from "../components/FreshnessBar";
@@ -7,7 +7,7 @@ import ArbitrageContent from "../components/free-agents/ArbitrageContent";
 import WaiverContent from "../components/free-agents/WaiverContent";
 import ValueMoversTab from "../components/market/ValueMoversTab";
 import { PageHeader, TabBar, type TabBarItem } from "../components/ui";
-import { readStoredUsername } from "../lib/current-user";
+import { useCurrentUsername } from "../hooks/use-current-user";
 import { posColor } from "../lib/position-colors";
 import {
   useMarketSignals,
@@ -197,8 +197,7 @@ function FreeAgentsPanel({
 export default function Market() {
   const [location, setLocation] = useLocation();
   const search = useSearch();
-  const { username } = useParams<{ username: string }>();
-  const effectiveUser = username ?? readStoredUsername();
+  const { username: effectiveUser } = useCurrentUsername();
   const activeTab = parseTab(search);
   const activeFreeAgentTab = parseFreeAgentTab(search);
 

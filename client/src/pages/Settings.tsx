@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import AppShell from "../components/AppShell";
 import ClassStrengthSettings from "../components/ClassStrengthSettings";
+import { useCurrentUsername } from "../hooks/use-current-user";
 import { useSettings } from "../hooks/use-settings";
 import {
   DEFAULT_SOURCE_WEIGHTS,
@@ -27,7 +28,7 @@ const cardStyle = {
 } as const;
 
 export default function Settings() {
-  const username = typeof window !== "undefined" ? localStorage.getItem("edge_username") ?? "" : "";
+  const { username } = useCurrentUsername();
   const { weights: savedWeights, isLoading, isSaving, saveWeights } = useSettings(username);
   const [weights, setWeights] = useState<SourceWeights>(getStoredWeights);
 

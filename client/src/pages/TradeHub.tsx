@@ -1,7 +1,8 @@
 import { ArrowRight, Calculator, ClipboardList, Search, ShoppingBag } from "lucide-react";
-import { Link, useParams } from "wouter";
+import { Link } from "wouter";
 import AppShell from "../components/AppShell";
 import { Card, PageHeader } from "../components/ui";
+import { useCurrentUsername } from "../hooks/use-current-user";
 import { buildTradeFinderUrl } from "../lib/trade-finder-url";
 
 const tools = [
@@ -32,7 +33,7 @@ const tools = [
 ];
 
 export default function TradeHub() {
-  const { username = "" } = useParams<{ username: string }>();
+  const { username } = useCurrentUsername();
 
   return (
     <AppShell>

@@ -12,6 +12,7 @@ import {
   type RosterRanking,
   type ScoredPick,
 } from "../hooks/use-power-rankings";
+import { useCurrentUsername } from "../hooks/use-current-user";
 import { apiFetch } from "../lib/api";
 import { computeAcceptance, type AcceptanceResult } from "../lib/acceptance";
 import {
@@ -963,7 +964,7 @@ export default function TradeCalculator() {
     typeof window !== "undefined" ? window.innerWidth < 1180 : false
   ));
 
-  const storedUsername = typeof window !== "undefined" ? localStorage.getItem("edge_username") ?? "" : "";
+  const { username: storedUsername } = useCurrentUsername();
   const { data: leagues = [] } = usePowerRankings(storedUsername, showRedraft);
   const selectedLeagueData = leagues.find((l) => l.league_id === selectedLeague);
   const userRoster = selectedLeagueData?.rosters.find((r) => r.is_user) ?? null;

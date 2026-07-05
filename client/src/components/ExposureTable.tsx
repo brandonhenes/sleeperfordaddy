@@ -4,6 +4,7 @@ import { ExposureBar } from "./ui";
 import PlayerLink from "./ui/PlayerLink";
 import PlayerStatusBadge from "./ui/PlayerStatusBadge";
 import EdgeScoreBadge from "./EdgeScoreBadge";
+import { useCurrentUser } from "./CurrentUserContext";
 import { posColor } from "../lib/position-colors";
 
 const ZONE_COLORS: Record<string, string> = {
@@ -21,8 +22,7 @@ interface ExposureTableProps {
 }
 
 export default function ExposureTable({ players }: ExposureTableProps) {
-  const username =
-    typeof window !== "undefined" ? localStorage.getItem("edge_username") ?? "" : "";
+  const { username } = useCurrentUser();
 
   if (players.length === 0) {
     return (
