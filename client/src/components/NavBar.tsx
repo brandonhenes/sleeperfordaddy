@@ -102,7 +102,7 @@ const MORE_ITEMS: NavItem[] = [
   },
   {
     label: "History",
-    href: (username) => userScopedPath("history", username),
+    href: (username) => `${userScopedPath("power", username)}?tab=history`,
     icon: History,
     active: ["/history"],
   },

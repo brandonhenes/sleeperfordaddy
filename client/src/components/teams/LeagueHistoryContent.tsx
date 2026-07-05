@@ -1,5 +1,4 @@
 import { useState, useEffect, useMemo } from "react";
-import { useParams } from "wouter";
 import {
   LineChart,
   Line,
@@ -10,15 +9,14 @@ import {
   CartesianGrid,
   Legend,
 } from "recharts";
-import AppShell from "../components/AppShell";
-import { SectionHeader } from "../components/ui";
-import { useOverview } from "../hooks/use-sleeper";
-import { useLeagueHistory } from "../hooks/use-league-history";
+import { SectionHeader } from "../ui";
+import { useOverview } from "../../hooks/use-sleeper";
+import { useLeagueHistory } from "../../hooks/use-league-history";
 import type {
   LeagueHistoryData,
   LeagueHistorySeason,
   LeagueGroup,
-} from "../../../shared/types";
+} from "../../../../shared/types";
 
 // ─── Constants ───
 
@@ -375,8 +373,7 @@ function ordinal(n: number): string {
 
 // ─── Page ───
 
-export default function LeagueHistory() {
-  const { username } = useParams<{ username: string }>();
+export default function LeagueHistoryContent({ username }: { username: string }) {
   const { data: overview, isLoading: overviewLoading } = useOverview(username);
   const groups = overview?.league_groups ?? [];
   const [selectedGroupId, setSelectedGroupId] = useState("");
@@ -391,7 +388,7 @@ export default function LeagueHistory() {
     useLeagueHistory(selectedGroupId);
 
   return (
-    <AppShell>
+    <>
       <div style={{ padding: "28px 0 8px" }}>
         <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>
           League History
@@ -485,6 +482,6 @@ export default function LeagueHistory() {
           ) : null}
         </>
       )}
-    </AppShell>
+    </>
   );
 }

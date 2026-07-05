@@ -1,9 +1,7 @@
 import { useState, useMemo } from "react";
-import { useParams } from "wouter";
-import AppShell from "../components/AppShell";
-import { StatCard } from "../components/ui";
-import { posColor } from "../lib/position-colors";
-import { useRosterGrades, type LeagueGrades, type PositionGrade } from "../hooks/use-roster-grades";
+import { StatCard } from "../ui";
+import { posColor } from "../../lib/position-colors";
+import { useRosterGrades, type LeagueGrades, type PositionGrade } from "../../hooks/use-roster-grades";
 
 type SortKey = "overall" | "league";
 const POSITIONS = ["QB", "RB", "WR", "TE"];
@@ -149,8 +147,7 @@ function SummaryCards({ leagues }: { leagues: LeagueGrades[] }) {
 
 // ─── Page ───
 
-export default function RosterGrades() {
-  const { username } = useParams<{ username: string }>();
+export default function RosterGradesContent({ username }: { username: string }) {
   const [showRedraft, setShowRedraft] = useState(false);
   const { data, isLoading, error } = useRosterGrades(username ?? "", showRedraft);
   const [sortKey, setSortKey] = useState<SortKey>("overall");
@@ -165,10 +162,10 @@ export default function RosterGrades() {
     return list;
   }, [data, sortKey]);
 
-  if (isLoading) return <AppShell><LoadingSkeleton /></AppShell>;
+  if (isLoading) return <LoadingSkeleton />;
 
   return (
-    <AppShell>
+    <>
       <div style={{ padding: "28px 0 8px" }}>
         <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>Roster Grades</h1>
         <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 4 }}>
@@ -214,7 +211,7 @@ export default function RosterGrades() {
           </div>
         </>
       )}
-    </AppShell>
+    </>
   );
 }
 
@@ -228,7 +225,7 @@ function LoadingSkeleton() {
       <div style={{ padding: "28px 0 8px" }}>
         <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>Roster Grades</h1>
       </div>
-      <div style={{ display: "flex", gap: 16, marginTop: 16 }}>
+      <div style={{ display: "flex", gap: 16, marginTop: 16, flexWrap: "wrap" }}>
         {[1, 2, 3, 4].map((i) => (
           <div key={i} className="animate-pulse" style={{ ...skel, flex: 1, minWidth: 120, height: 90 }} />
         ))}

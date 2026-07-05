@@ -7,19 +7,18 @@ const Portfolio = lazy(() => import("./pages/Portfolio"));
 const Market = lazy(() => import("./pages/Market"));
 const Action = lazy(() => import("./pages/Action"));
 const PlayerDetail = lazy(() => import("./pages/PlayerDetail"));
-const RosterGrades = lazy(() => import("./pages/RosterGrades"));
 const PowerRankings = lazy(() => import("./pages/PowerRankings"));
 const TradeCalculator = lazy(() => import("./pages/TradeCalculator"));
 const TradeHub = lazy(() => import("./pages/TradeHub"));
 const TradeFinder = lazy(() => import("./pages/TradeFinder"));
 const TradeHistory = lazy(() => import("./pages/TradeHistory"));
 const RookieDraft = lazy(() => import("./pages/RookieDraft"));
-const LeagueHistory = lazy(() => import("./pages/LeagueHistory"));
 const InjuryTracker = lazy(() => import("./pages/InjuryTracker"));
 const Settings = lazy(() => import("./pages/Settings"));
 const HowItWorks = lazy(() => import("./pages/HowItWorks"));
 const StoredUserRedirect = lazy(() => import("./pages/StoredUserRedirect"));
 const LegacyMarketRedirect = lazy(() => import("./pages/LegacyMarketRedirect"));
+const LegacyTeamsRedirect = lazy(() => import("./pages/LegacyTeamsRedirect"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 function RouteFallback() {
@@ -68,7 +67,10 @@ export default function App() {
           <LegacyMarketRedirect tab="free-agents" freeAgentTab="arbitrage" />
         </Route>
         <Route path="/grades/:username">
-          <RosterGrades />
+          <LegacyTeamsRedirect tab="grades" />
+        </Route>
+        <Route path="/grades">
+          <LegacyTeamsRedirect tab="grades" />
         </Route>
         <Route path="/power/:username">
           <PowerRankings />
@@ -110,10 +112,10 @@ export default function App() {
           <RookieDraft />
         </Route>
         <Route path="/history/:username">
-          <LeagueHistory />
+          <LegacyTeamsRedirect tab="history" />
         </Route>
         <Route path="/history">
-          <StoredUserRedirect to="history" />
+          <LegacyTeamsRedirect tab="history" />
         </Route>
         <Route path="/injuries/:username">
           <InjuryTracker />
