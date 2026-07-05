@@ -3,11 +3,9 @@ import { Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import AppShell from "../components/AppShell";
 import FreshnessBar from "../components/FreshnessBar";
-import OpponentCard from "../components/OpponentCard";
-import OpponentDetail from "../components/OpponentDetail";
 import SyncGate from "../components/SyncGate";
 import { useCurrentUsername } from "../hooks/use-current-user";
-import { usePowerRankings, type LeaguePowerRanking } from "../hooks/use-power-rankings";
+import { usePowerRankings } from "../hooks/use-power-rankings";
 import { useTradeSuggestions, useShopPlayer } from "../hooks/use-trade-finder";
 import { useAcquisition } from "../hooks/use-acquisition";
 import {
@@ -17,7 +15,6 @@ import {
 } from "../hooks/use-opponent-profiles";
 import { usePortfolio } from "../hooks/use-portfolio";
 import { apiFetch } from "../lib/api";
-import { formatDateTime } from "../lib/format";
 import { classStrengthQueryParams } from "../lib/pick-strengths";
 import { buildTradeFinderUrl, parseTradeFinderQuery } from "../lib/trade-finder-url";
 import AcquisitionPanel, {
@@ -26,57 +23,8 @@ import AcquisitionPanel, {
 } from "./trade-finder/AcquisitionPanel";
 import PartnerCard from "./trade-finder/PartnerCard";
 import PickInventoryPanel, { type LeaguePicksResponse } from "./trade-finder/PickInventoryPanel";
+import ScoutPanel, { scoreScoutProfiles } from "./trade-finder/ScoutPanel";
 import ShopPlayerPanel, { type ShopPathFilter } from "./trade-finder/ShopPlayerPanel";
-import type { OpponentProfile } from "@shared/types";
-
-function getActivityWeight(level: OpponentProfile["activityLevel"]): number {
-  if (level === "hyperactive") return 100;
-  if (level === "active") return 80;
-  if (level === "moderate") return 50;
-  if (level === "passive") return 20;
-  return 0;
-}
-
-function getTendencyStrength(profile: OpponentProfile): number {
-  const acquired = Object.values(profile.positionsAcquired);
-  const sold = Object.values(profile.positionsSold);
-  const acquiredSpread = acquired.length > 0 ? Math.max(...acquired) - Math.min(...acquired) : 0;
-  const soldSpread = sold.length > 0 ? Math.max(...sold) - Math.min(...sold) : 0;
-  const ageWeight =
-    profile.ageBias === "youth_chaser" || profile.ageBias === "win_now_buyer"
-      ? 30
-      : profile.ageBias === "leans_young" || profile.ageBias === "leans_vet"
-        ? 15
-        : 0;
-  const pickWeight =
-    profile.pickTendency === "hoarder" || profile.pickTendency === "spender"
-      ? 20
-      : profile.pickTendency === "accumulator" || profile.pickTendency === "seller"
-        ? 10
-        : 0;
-  return Math.min(100, acquiredSpread * 8 + soldSpread * 6 + ageWeight + pickWeight);
-}
-
-function getRosterGapScore(profile: OpponentProfile, league: LeaguePowerRanking | undefined): number {
-  const roster = league?.rosters.find((entry) => entry.roster_id === profile.rosterId);
-  const slotGrades = roster?.lineup?.slot_grades ?? [];
-  let score = 0;
-  for (const grade of slotGrades) {
-    if (grade.grade === "hole") score += 22;
-    else if (grade.grade === "weak") score += 12;
-    else if (grade.grade === "average") score += 4;
-  }
-  return Math.min(100, score);
-}
-
-function getExploitability(profile: OpponentProfile, league: LeaguePowerRanking | undefined): number {
-  const activityWeight = getActivityWeight(profile.activityLevel);
-  const tendencyStrength = getTendencyStrength(profile);
-  const rosterGapScore = getRosterGapScore(profile, league);
-  return Math.round(
-    activityWeight * 0.4 + tendencyStrength * 0.3 + rosterGapScore * 0.3
-  );
-}
 
 export default function TradeFinder() {
   const { username } = useCurrentUsername();
@@ -148,12 +96,10 @@ function TradeFinderReady({ username }: { username: string }) {
     shopAmbition,
     showShopRedraft
   );
-  const scoutProfilesWithScores = (scoutProfilesQuery.data?.profiles ?? [])
-    .map((profile) => ({
-      profile,
-      exploitability: getExploitability(profile, selectedLeagueData),
-    }))
-    .sort((a, b) => b.exploitability - a.exploitability);
+  const scoutProfilesWithScores = scoreScoutProfiles(
+    scoutProfilesQuery.data?.profiles ?? [],
+    selectedLeagueData
+  );
   const selectedScoutProfile =
     scoutProfilesWithScores.find(({ profile }) => profile.rosterId === selectedScoutRosterId)?.profile ?? null;
   const filteredSuggestions = (suggestions ?? []).filter(
@@ -375,129 +321,38 @@ function TradeFinderReady({ username }: { username: string }) {
         />
       )}
       {mode === "scout" && (
-        <div>
-          <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: 16, marginTop: 8 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
-              <div style={{ flex: 1, minWidth: 240 }}>
-                <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 0.5 }}>Select League</label>
-                {leaguesLoading ? (
-                  <div style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 8 }}><span className="animate-pulse">Loading leagues...</span></div>
-                ) : (
-                  <select value={selectedLeague} onChange={(e) => setSelectedLeague(e.target.value)} style={{ display: "block", width: "100%", marginTop: 8, padding: "10px 12px", background: "var(--dark-base)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text)", fontSize: 14, cursor: "pointer" }}>
-                    <option value="">Choose a league...</option>
-                    {leagues?.map((league) => <option key={league.league_id} value={league.league_id}>{league.league_name} ({league.mode.toUpperCase()}{league.scoring_label ? ` | ${league.scoring_label}` : ""})</option>)}
-                  </select>
-                )}
-              </div>
-
-              <div style={{ display: "grid", gap: 8, justifyItems: "end" }}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!selectedLeague) return;
-                    refreshProfilesMutation.mutate({ leagueId: selectedLeague, username });
-                  }}
-                  disabled={!selectedLeague || refreshProfilesMutation.isPending}
-                  style={{
-                    border: "1px solid rgba(245,158,11,0.35)",
-                    background: "rgba(245,158,11,0.14)",
-                    color: "var(--amber)",
-                    borderRadius: 10,
-                    padding: "10px 14px",
-                    fontSize: 12,
-                    fontWeight: 800,
-                    cursor: !selectedLeague || refreshProfilesMutation.isPending ? "not-allowed" : "pointer",
-                    fontFamily: "inherit",
-                    opacity: !selectedLeague ? 0.6 : 1,
-                  }}
-                >
-                  {refreshProfilesMutation.isPending ? "Refreshing..." : "Refresh Profiles"}
-                </button>
-                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
-                  <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                    Last profiled: {formatDateTime(scoutProfilesQuery.data?.lastProfiled ?? null)}
-                  </span>
-                  {scoutProfilesQuery.data?.isStale && (
-                    <span style={{ background: "rgba(245,158,11,0.16)", color: "#fbbf24", borderRadius: 999, padding: "4px 8px", fontSize: 10, fontWeight: 800 }}>
-                      Stale data
-                    </span>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {scoutRouteWarning && (
-            <div style={{ background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.25)", borderRadius: 10, padding: "12px 16px", marginTop: 12, color: "var(--amber)", fontSize: 12, lineHeight: 1.5 }}>
-              {scoutRouteWarning}
-            </div>
-          )}
-
-          {!selectedLeague && (
-            <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: "48px 24px", marginTop: 16, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>
-              Select a league above to scout opponent tendencies.
-            </div>
-          )}
-
-          {selectedLeague && scoutProfilesQuery.isLoading && (
-            <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: "48px 24px", marginTop: 16, textAlign: "center" }}>
-              <span className="animate-pulse" style={{ color: "var(--amber)", fontSize: 14 }}>
-                Building opponent profiles...
-              </span>
-            </div>
-          )}
-
-          {selectedLeague && scoutProfilesQuery.error && (
-            <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: "24px 20px", marginTop: 16, color: "var(--red)", fontSize: 13 }}>
-              {(scoutProfilesQuery.error as Error).message || "Failed to load opponent profiles."}
-            </div>
-          )}
-
-          {selectedLeague && !scoutProfilesQuery.isLoading && !scoutProfilesQuery.error && scoutProfilesWithScores.length === 0 && (
-            <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: "48px 24px", marginTop: 16, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>
-              No opponent profiles are available yet. Refresh profiles to build the first pass from Sleeper history.
-            </div>
-          )}
-
-          {selectedLeague && scoutProfilesWithScores.length > 0 && (
-            <div style={{ display: "grid", gap: 16, marginTop: 16 }}>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 }}>
-                {scoutProfilesWithScores.map(({ profile, exploitability }) => (
-                  <OpponentCard
-                    key={profile.rosterId}
-                    profile={profile}
-                    exploitability={exploitability}
-                    selected={profile.rosterId === selectedScoutRosterId}
-                    onExploit={() => openExploitLink(profile.rosterId)}
-                  />
-                ))}
-              </div>
-
-              {selectedScoutProfile && (
-                <div ref={scoutDetailRef} tabIndex={-1} style={{ outline: "none" }}>
-                  {exploitAnglesQuery.error && (
-                    <div style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.25)", borderRadius: 10, padding: "12px 16px", marginBottom: 12, color: "var(--red)", fontSize: 12, lineHeight: 1.5 }}>
-                      {(exploitAnglesQuery.error as Error).message || "Failed to load exploit angles."}
-                    </div>
-                  )}
-                  <OpponentDetail
-                    profile={selectedScoutProfile}
-                    angles={exploitAnglesQuery.data?.angles ?? []}
-                    isLoading={exploitAnglesQuery.isLoading}
-                    onFindTrades={() => {
-                      setMode("find");
-                      setSelectedScoutRosterId(selectedScoutProfile.rosterId);
-                    }}
-                    onClose={() => {
-                      setSelectedScoutRosterId(null);
-                      setScoutRouteWarning(null);
-                    }}
-                  />
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+        <ScoutPanel
+          username={username}
+          leagues={leagues}
+          leaguesLoading={leaguesLoading}
+          selectedLeague={selectedLeague}
+          setSelectedLeague={setSelectedLeague}
+          scoutRouteWarning={scoutRouteWarning}
+          scoutProfilesWithScores={scoutProfilesWithScores}
+          selectedScoutRosterId={selectedScoutRosterId}
+          selectedScoutProfile={selectedScoutProfile}
+          scoutProfilesData={scoutProfilesQuery.data}
+          scoutProfilesLoading={scoutProfilesQuery.isLoading}
+          scoutProfilesError={scoutProfilesQuery.error}
+          onRefreshProfiles={() => {
+            if (!selectedLeague) return;
+            refreshProfilesMutation.mutate({ leagueId: selectedLeague, username });
+          }}
+          refreshProfilesPending={refreshProfilesMutation.isPending}
+          exploitAngles={exploitAnglesQuery.data?.angles ?? []}
+          exploitAnglesLoading={exploitAnglesQuery.isLoading}
+          exploitAnglesError={exploitAnglesQuery.error}
+          scoutDetailRef={scoutDetailRef}
+          onOpenExploit={openExploitLink}
+          onFindTrades={() => {
+            setMode("find");
+            setSelectedScoutRosterId(selectedScoutProfile?.rosterId ?? null);
+          }}
+          onCloseDetail={() => {
+            setSelectedScoutRosterId(null);
+            setScoutRouteWarning(null);
+          }}
+        />
       )}
     </>
   );
