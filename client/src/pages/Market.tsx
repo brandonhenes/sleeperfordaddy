@@ -3,7 +3,6 @@ import { useLocation, useSearch } from "wouter";
 import AppShell from "../components/AppShell";
 import EdgeScoreBadge from "../components/EdgeScoreBadge";
 import FreshnessBar from "../components/FreshnessBar";
-import SyncGate from "../components/SyncGate";
 import ArbitrageContent from "../components/free-agents/ArbitrageContent";
 import WaiverContent from "../components/free-agents/WaiverContent";
 import ValueMoversTab from "../components/market/ValueMoversTab";
@@ -197,7 +196,7 @@ export default function Market() {
   }
 
   return (
-    <AppShell>
+    <AppShell requireSync>
       <PageHeader
         title="Market"
         subtitle="Movers, signals, and free-agent angles in one place."
@@ -206,17 +205,15 @@ export default function Market() {
 
       <TabBar tabs={TABS} active={activeTab} onChange={updateTab} ariaLabel="Market views" />
 
-      <SyncGate username={effectiveUser}>
-        {activeTab === "movers" && <ValueMoversTab />}
-        {activeTab === "signals" && <SignalsTab username={effectiveUser} />}
-        {activeTab === "free-agents" && (
-          <FreeAgentsPanel
-            username={effectiveUser}
-            active={activeFreeAgentTab}
-            onChange={updateFreeAgentTab}
-          />
-        )}
-      </SyncGate>
+      {activeTab === "movers" && <ValueMoversTab />}
+      {activeTab === "signals" && <SignalsTab username={effectiveUser} />}
+      {activeTab === "free-agents" && (
+        <FreeAgentsPanel
+          username={effectiveUser}
+          active={activeFreeAgentTab}
+          onChange={updateFreeAgentTab}
+        />
+      )}
     </AppShell>
   );
 }

@@ -3,7 +3,6 @@ import AppShell from "../components/AppShell";
 import EmptyState from "../components/EmptyState";
 import FreshnessBar from "../components/FreshnessBar";
 import LeaderboardTab from "../components/LeaderboardTab";
-import SyncGate from "../components/SyncGate";
 import TradeGradesTab from "../components/TradeGradesTab";
 import {
   Card,
@@ -28,15 +27,15 @@ export default function TradeHistory() {
   const { username } = useCurrentUsername();
 
   return (
-    <AppShell>
+    <AppShell
+      requireSync
+      syncGate={{
+        checkingLabel: "Checking if trade history data is available...",
+        syncingDescription: "First-time sync may take a minute. Pulling league and trade data from Sleeper.",
+      }}
+    >
       <TradeHistoryHeader />
-      <SyncGate
-        username={username}
-        checkingLabel="Checking if trade history data is available..."
-        syncingDescription="First-time sync may take a minute. Pulling league and trade data from Sleeper."
-      >
-        <TradeHistoryReady username={username} />
-      </SyncGate>
+      <TradeHistoryReady username={username} />
     </AppShell>
   );
 }

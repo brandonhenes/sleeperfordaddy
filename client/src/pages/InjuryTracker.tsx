@@ -1,7 +1,6 @@
 import { useState } from "react";
 import AppShell from "../components/AppShell";
 import FreshnessBar from "../components/FreshnessBar";
-import SyncGate from "../components/SyncGate";
 import {
   Card,
   ErrorState,
@@ -355,16 +354,14 @@ export default function InjuryTracker() {
   const { username } = useCurrentUsername();
 
   return (
-    <AppShell>
+    <AppShell requireSync>
       <PageHeader
         title="Injury Tracker"
         subtitle="Monitor injuries across your portfolio and find buying windows."
         actions={<FreshnessBar />}
       />
 
-      <SyncGate username={username}>
-        <InjuryTrackerReady username={username} />
-      </SyncGate>
+      <InjuryTrackerReady username={username} />
     </AppShell>
   );
 }

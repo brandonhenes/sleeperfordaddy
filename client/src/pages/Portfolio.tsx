@@ -2,7 +2,6 @@ import { useState, useMemo } from "react";
 import AppShell from "../components/AppShell";
 import FreshnessBar from "../components/FreshnessBar";
 import ExposureTable from "../components/ExposureTable";
-import SyncGate from "../components/SyncGate";
 import {
   Card,
   ErrorState,
@@ -43,10 +42,8 @@ export default function Portfolio() {
   const { username } = useCurrentUsername();
 
   return (
-    <AppShell>
-      <SyncGate username={username}>
-        <PortfolioReady username={username} />
-      </SyncGate>
+    <AppShell requireSync>
+      <PortfolioReady username={username} />
     </AppShell>
   );
 }

@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import AppShell from "../components/AppShell";
-import SyncGate from "../components/SyncGate";
 import { SectionHeader } from "../components/ui";
 import {
   useDashboard,
@@ -155,16 +154,14 @@ export default function Dashboard() {
   const subtitle = username ? today() : undefined;
 
   return (
-    <AppShell>
+    <AppShell requireSync>
       <HeaderBlock
         title={title}
         subtitle={subtitle}
         leagueScope={leagueScope}
         onScopeChange={setLeagueScope}
       />
-      <SyncGate username={username}>
-        <DashboardReady username={username} leagueScope={leagueScope} />
-      </SyncGate>
+      <DashboardReady username={username} leagueScope={leagueScope} />
     </AppShell>
   );
 }

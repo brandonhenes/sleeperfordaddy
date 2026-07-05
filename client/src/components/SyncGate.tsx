@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { useEnsureUser } from "../hooks/use-ensure-user";
 
-interface SyncGateProps {
+export interface SyncGateProps {
   username: string;
   children: ReactNode;
   checkingLabel?: string;

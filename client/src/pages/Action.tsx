@@ -1,6 +1,5 @@
 import AppShell from "../components/AppShell";
 import FreshnessBar from "../components/FreshnessBar";
-import SyncGate from "../components/SyncGate";
 import {
   Card,
   ErrorState,
@@ -202,30 +201,28 @@ export default function Action() {
   const { username } = useCurrentUsername();
 
   return (
-    <AppShell>
+    <AppShell requireSync>
       <PageHeader
         title="Action Engine"
         subtitle="Sell high, buy low - matched to your portfolio."
         actions={<FreshnessBar />}
       />
 
-      <SyncGate username={username}>
-        <SectionHeader
-          num="01"
-          icon="Sell"
-          title="SELL CANDIDATES"
-          subtitle="Trending down or over-exposed - consider moving these"
-        />
-        <SellCandidatesSection username={username} />
+      <SectionHeader
+        num="01"
+        icon="Sell"
+        title="SELL CANDIDATES"
+        subtitle="Trending down or over-exposed - consider moving these"
+      />
+      <SellCandidatesSection username={username} />
 
-        <SectionHeader
-          num="02"
-          icon="Buy"
-          title="BUY OPPORTUNITIES"
-          subtitle="Newsletter BUY recs you do not own or are underweight on"
-        />
-        <BuyOpportunitiesSection username={username} />
-      </SyncGate>
+      <SectionHeader
+        num="02"
+        icon="Buy"
+        title="BUY OPPORTUNITIES"
+        subtitle="Newsletter BUY recs you do not own or are underweight on"
+      />
+      <BuyOpportunitiesSection username={username} />
     </AppShell>
   );
 }
