@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import { useParams, Link } from "wouter";
+import { Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import AppShell from "../components/AppShell";
 import FreshnessBar from "../components/FreshnessBar";
 import OpponentCard from "../components/OpponentCard";
 import OpponentDetail from "../components/OpponentDetail";
+import SyncGate from "../components/SyncGate";
 import VerdictBadge from "../components/VerdictBadge";
 import { PickBadge, PlayerLink } from "../components/ui";
-import { useEnsureUser } from "../hooks/use-ensure-user";
+import { useCurrentUsername } from "../hooks/use-current-user";
 import { usePowerRankings, type LeaguePowerRanking } from "../hooks/use-power-rankings";
 import { useTradeSuggestions, useShopPlayer } from "../hooks/use-trade-finder";
 import { useAcquisition } from "../hooks/use-acquisition";
@@ -837,8 +838,24 @@ function PickInventoryPanel({
 }
 
 export default function TradeFinder() {
-  const { username } = useParams<{ username: string }>();
-  const { phase } = useEnsureUser(username);
+  const { username } = useCurrentUsername();
+
+  return (
+    <AppShell>
+      <div style={{ padding: "28px 0 8px" }}>
+        <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>Trade Finder</h1>
+        <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 4 }}>
+          Suggested trades and acquisition plans based on roster composition, archetypes, and draft capital
+        </p>
+      </div>
+      <SyncGate username={username}>
+        <TradeFinderReady username={username} />
+      </SyncGate>
+    </AppShell>
+  );
+}
+
+function TradeFinderReady({ username }: { username: string }) {
   const [selectedLeague, setSelectedLeague] = useState<string>("");
   const [mode, setMode] = useState<"find" | "acquire" | "shop" | "scout">("find");
   const [targetSearch, setTargetSearch] = useState("");
@@ -852,9 +869,9 @@ export default function TradeFinder() {
   const [scoutRouteWarning, setScoutRouteWarning] = useState<string | null>(null);
   const scoutDetailRef = useRef<HTMLDivElement | null>(null);
 
-  const { data: leagues, isLoading: leaguesLoading } = usePowerRankings(phase === "ready" ? username : "", showShopRedraft);
-  const { data: suggestions, isLoading: suggestionsLoading, error: suggestionsError } = useTradeSuggestions(phase === "ready" ? username : "", selectedLeague);
-  const { data: portfolio } = usePortfolio(phase === "ready" ? username : undefined);
+  const { data: leagues, isLoading: leaguesLoading } = usePowerRankings(username, showShopRedraft);
+  const { data: suggestions, isLoading: suggestionsLoading, error: suggestionsError } = useTradeSuggestions(username, selectedLeague);
+  const { data: portfolio } = usePortfolio(username);
   const selectedLeagueData = leagues?.find((league) => league.league_id === selectedLeague);
   const classStrengthSuffix = classStrengthQueryParams();
   const leaguePicksQuery = useQuery<LeaguePicksResponse>({
@@ -863,16 +880,16 @@ export default function TradeFinder() {
       apiFetch(
         `/api/picks/${encodeURIComponent(selectedLeague)}/${encodeURIComponent(username)}${classStrengthSuffix ? `?${classStrengthSuffix.slice(1)}` : ""}`
       ),
-    enabled: phase === "ready" && mode === "find" && !!selectedLeague,
+    enabled: mode === "find" && !!selectedLeague,
     staleTime: 60 * 1000,
   });
   const scoutProfilesQuery = useOpponentProfiles(
-    phase === "ready" && mode === "scout" ? username : "",
+    mode === "scout" ? username : "",
     mode === "scout" ? selectedLeague : ""
   );
   const refreshProfilesMutation = useRefreshOpponentProfiles();
   const exploitAnglesQuery = useOpponentExploits(
-    phase === "ready" && mode === "scout" ? username : "",
+    mode === "scout" ? username : "",
     mode === "scout" ? selectedLeague : "",
     mode === "scout" ? selectedScoutRosterId : null
   );
@@ -883,9 +900,9 @@ export default function TradeFinder() {
     queryFn: () => apiFetch(`/api/trade/assets?q=${encodeURIComponent(targetSearch.trim())}&limit=8`),
   });
 
-  const { data: acquisitionData, isLoading: acquisitionLoading } = useAcquisition(phase === "ready" ? username : "", selectedTarget);
+  const { data: acquisitionData, isLoading: acquisitionLoading } = useAcquisition(username, selectedTarget);
   const { data: shopResult, isLoading: shopLoading, error: shopError } = useShopPlayer(
-    phase === "ready" ? username ?? "" : "",
+    mode === "shop" ? username : "",
     mode === "shop" ? selectedPlayer : "",
     shopAmbition,
     showShopRedraft
@@ -1002,28 +1019,9 @@ export default function TradeFinder() {
     }
   }
 
-  if (phase === "checking" || phase === "syncing") {
-    return (
-      <AppShell>
-        <div style={{ padding: "28px 0 8px" }}>
-          <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>Trade Finder</h1>
-        </div>
-        <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 12, padding: "48px 24px", textAlign: "center", color: "var(--amber)", fontSize: 14 }}>
-          <span className="animate-pulse">Loading...</span>
-        </div>
-      </AppShell>
-    );
-  }
-
   return (
-    <AppShell>
-      <div style={{ padding: "28px 0 8px" }}>
-        <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>Trade Finder</h1>
-        <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 4 }}>
-          Suggested trades and acquisition plans based on roster composition, archetypes, and draft capital
-        </p>
-        <FreshnessBar leagueId={selectedLeague || undefined} />
-      </div>
+    <>
+      <FreshnessBar leagueId={selectedLeague || undefined} />
 
       <div style={{ display: "flex", gap: 0, borderBottom: "1px solid var(--border)", marginBottom: 16, marginTop: 8, flexWrap: "wrap" }}>
         {([
@@ -1312,7 +1310,7 @@ export default function TradeFinder() {
                 <button
                   type="button"
                   onClick={() => {
-                    if (!selectedLeague || phase !== "ready") return;
+                    if (!selectedLeague) return;
                     refreshProfilesMutation.mutate({ leagueId: selectedLeague, username });
                   }}
                   disabled={!selectedLeague || refreshProfilesMutation.isPending}
@@ -1417,7 +1415,7 @@ export default function TradeFinder() {
           )}
         </div>
       )}
-    </AppShell>
+    </>
   );
 }
 
