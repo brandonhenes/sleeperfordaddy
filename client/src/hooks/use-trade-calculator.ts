@@ -2,17 +2,7 @@ import { useMutation } from "@tanstack/react-query";
 import { apiFetch } from "../lib/api";
 import { weightQueryParams } from "../lib/weights";
 import { classStrengthQueryParams } from "../lib/pick-strengths";
-import type { TradeAssetInput, TradeEvaluation, TradeValuationProfile } from "@shared/types";
-
-interface EvaluateTradeInput {
-  sideA: TradeAssetInput[];
-  sideB: TradeAssetInput[];
-  mode?: "sf" | "1qb";
-  leagueId?: string;
-  redraft?: boolean;
-  valuationMode?: TradeValuationProfile;
-  includeComparison?: boolean;
-}
+import type { EvaluateTradeInput, TradeEvaluation } from "@shared/types";
 
 export function useEvaluateTrade() {
   const weights = weightQueryParams();

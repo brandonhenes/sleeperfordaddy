@@ -1,33 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "../lib/api";
-import type { OverviewData, LeagueGroup } from "@shared/types";
-
-interface OverviewResponse extends OverviewData {
-  league_groups: LeagueGroup[];
-}
-
-interface SyncResponse {
-  job_id: string;
-  status: string;
-  message?: string;
-}
-
-interface StartSyncInput {
-  username: string;
-  force?: boolean;
-  scope?: "full" | "latest";
-  leagueId?: string;
-}
-
-interface SyncStatus {
-  job_id?: string;
-  status: string;
-  step?: string;
-  detail?: string;
-  leagues_total?: number;
-  leagues_done?: number;
-  error?: string;
-}
+import type { OverviewResponse, StartSyncInput, SyncResponse, SyncStatus } from "@shared/types";
 
 /** Fetch overview data for a user */
 export function useOverview(username: string | undefined) {

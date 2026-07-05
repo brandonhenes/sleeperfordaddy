@@ -230,6 +230,33 @@ export interface OverviewData {
   totals: { wins: number; losses: number; ties: number; leagues: number };
 }
 
+export interface OverviewResponse extends OverviewData {
+  league_groups: LeagueGroup[];
+}
+
+export interface SyncResponse {
+  job_id: string;
+  status: string;
+  message?: string;
+}
+
+export interface StartSyncInput {
+  username: string;
+  force?: boolean;
+  scope?: "full" | "latest";
+  leagueId?: string;
+}
+
+export interface SyncStatus {
+  job_id?: string;
+  status: string;
+  step?: string;
+  detail?: string;
+  leagues_total?: number;
+  leagues_done?: number;
+  error?: string;
+}
+
 export interface LeagueSeason {
   league_id: string;
   league_name: string;
@@ -281,6 +308,16 @@ export interface TradeValuationWarning {
 }
 
 export type TradeValuationProfile = "composite" | "ktc" | "ktc_league";
+
+export interface EvaluateTradeInput {
+  sideA: TradeAssetInput[];
+  sideB: TradeAssetInput[];
+  mode?: "sf" | "1qb";
+  leagueId?: string;
+  redraft?: boolean;
+  valuationMode?: TradeValuationProfile;
+  includeComparison?: boolean;
+}
 
 export interface TradeValuationProfileSummary {
   profile: TradeValuationProfile | "raw_ktc";
@@ -966,6 +1003,16 @@ export interface OpponentProfilesResponse {
   leagueName: string;
   lastProfiled: string | null;
   isStale: boolean;
+}
+
+export interface RefreshProfilesInput {
+  leagueId: string;
+  username: string;
+}
+
+export interface OpponentExploitResponse {
+  angles: ExploitAngle[];
+  myRosterId: number | null;
 }
 
 // Trade History / Execution Tracker
