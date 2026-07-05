@@ -7,7 +7,7 @@ import OpponentCard from "../components/OpponentCard";
 import OpponentDetail from "../components/OpponentDetail";
 import SyncGate from "../components/SyncGate";
 import VerdictBadge from "../components/VerdictBadge";
-import { PickBadge, PlayerLink } from "../components/ui";
+import { PickBadge, PlayerLink, PositionBadge } from "../components/ui";
 import { useCurrentUsername } from "../hooks/use-current-user";
 import { usePowerRankings, type LeaguePowerRanking } from "../hooks/use-power-rankings";
 import { useTradeSuggestions, useShopPlayer } from "../hooks/use-trade-finder";
@@ -28,7 +28,6 @@ import {
   warningColors,
 } from "../lib/format";
 import { classStrengthQueryParams } from "../lib/pick-strengths";
-import { posColor } from "../lib/position-colors";
 import { buildTradeFinderUrl, parseTradeFinderQuery } from "../lib/trade-finder-url";
 import type {
   PickValue,
@@ -192,7 +191,7 @@ function AssetRow({ asset }: { asset: TradePackageAsset }) {
         </span>
       )}
       {asset.asset_type === "pick" && <span style={{ color: "#06b6d4", fontWeight: 700, fontSize: 10 }}>PICK</span>}
-      {asset.position && <span style={{ color: posColor(asset.position), fontWeight: 700, fontSize: 10 }}>{asset.position}</span>}
+      {asset.position && <PositionBadge position={asset.position} />}
       {pickBreakdown ? (
         <div style={{ flex: 1 }}>
           <PickBadge pick={pickBreakdown} compact />
@@ -625,7 +624,7 @@ function AssetChip({ asset }: { asset: EvaluatedAsset }) {
         </span>
       )}
       {isPick && <span style={{ color: "#06b6d4", fontWeight: 700, fontSize: 10, flexShrink: 0 }}>PICK</span>}
-      {asset.position && <span style={{ color: posColor(asset.position), fontWeight: 700, fontSize: 10, flexShrink: 0 }}>{asset.position}</span>}
+      {asset.position && <PositionBadge position={asset.position} />}
       {pickBreakdown ? (
         <div style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>
           <PickBadge pick={pickBreakdown} compact />

@@ -3,8 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import AppShell from "../components/AppShell";
 import EdgeScoreBadge from "../components/EdgeScoreBadge";
 import FreshnessBar from "../components/FreshnessBar";
-import { PickBadge } from "../components/ui";
-import { posColor } from "../lib/position-colors";
+import { PickBadge, PositionBadge } from "../components/ui";
 import { useEvaluateTrade } from "../hooks/use-trade-calculator";
 import {
   usePowerRankings,
@@ -738,8 +737,8 @@ function PositionGroup({
 
   return (
     <div>
-      <div style={{ background: "var(--dark-base)", color: posColor(position), fontSize: 11, fontWeight: 800, padding: "8px 12px" }}>
-        {position}
+      <div style={{ background: "var(--dark-base)", fontSize: 11, fontWeight: 800, padding: "8px 12px" }}>
+        <PositionBadge position={position} />
       </div>
       {starters.map((player) => (
         <PlayerRow
@@ -852,7 +851,7 @@ function VacuumSearchColumn({
             onClick={() => onAddPlayer(player)}
             style={{ width: "100%", border: "1px solid var(--border)", borderRadius: 8, background: "transparent", color: "var(--text)", display: "flex", gap: 8, alignItems: "center", padding: "7px 10px", textAlign: "left", cursor: "pointer", fontFamily: "inherit" }}
           >
-            <span style={{ fontSize: 10, fontWeight: 800, width: 22, color: posColor(player.position) }}>{player.position}</span>
+            <PositionBadge position={player.position} />
             <span style={{ flex: 1, fontSize: 12 }}>{player.label}</span>
             <span style={{ fontSize: 10, color: "var(--text-muted)" }}>+ {addPickLabel === "Send Pick" ? "SEND" : "GET"}</span>
           </button>
