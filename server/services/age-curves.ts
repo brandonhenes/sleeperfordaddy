@@ -1,16 +1,8 @@
 // ─── Types ───
 
-export interface AgeCurveStatus {
-  age: number | null;
-  position: string;
-  score: number;
-  zone: "Ascent" | "Prime" | "Decline" | "Cliff" | "Unknown";
-  color: "blue" | "green" | "gold" | "orange" | "red" | "gray";
-  label: string;
-  prime_start: number | null;
-  prime_end: number | null;
-  dot_pct: number;
-}
+import type { AgeCurveStatus } from "../../shared/types.js";
+
+export type { AgeCurveStatus };
 
 // ─── Curve Definitions ───
 

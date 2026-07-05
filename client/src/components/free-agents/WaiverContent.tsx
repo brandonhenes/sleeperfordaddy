@@ -13,8 +13,9 @@ import {
   type ResponsiveTableColumn,
 } from "../ui";
 import { useOverview } from "../../hooks/use-sleeper";
-import { useWaiverWire, type WaiverPlayer } from "../../hooks/use-waiver-wire";
+import { useWaiverWire } from "../../hooks/use-waiver-wire";
 import { readStoredUsername } from "../../lib/current-user";
+import type { WaiverPlayer } from "@shared/types";
 
 type PosFilter = "ALL" | "QB" | "RB" | "WR" | "TE";
 

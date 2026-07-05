@@ -1,18 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
+import type { AgeCurveStatus } from "@shared/types";
 import { apiFetch } from "../lib/api";
 import { weightQueryParams } from "../lib/weights";
-
-export interface AgeCurveStatus {
-  age: number | null;
-  position: string;
-  score: number;
-  zone: string;
-  color: string;
-  label: string;
-  dot_pct: number;
-  prime_start: number | null;
-  prime_end: number | null;
-}
 
 export interface PlayerSummary {
   player_id: string | null;

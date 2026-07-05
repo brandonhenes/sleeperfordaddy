@@ -1106,6 +1106,18 @@ export interface BuyOpportunity {
 
 // Market and Free Agents
 
+export interface AgeCurveStatus {
+  age: number | null;
+  position: string;
+  score: number;
+  zone: "Ascent" | "Prime" | "Decline" | "Cliff" | "Unknown";
+  color: "blue" | "green" | "gold" | "orange" | "red" | "gray";
+  label: string;
+  prime_start: number | null;
+  prime_end: number | null;
+  dot_pct: number;
+}
+
 export interface ArbitrageGap {
   player_id: string;
   full_name: string;
@@ -1156,6 +1168,26 @@ export interface SignalSummary {
   consensus_locks: number;
   top_buy: MarketSignal | null;
   top_sell: MarketSignal | null;
+}
+
+export interface WaiverPlayer {
+  player_id: string;
+  full_name: string;
+  position: string;
+  team: string;
+  age: number | null;
+  edge_score: number;
+  fc_score: number | null;
+  ktc_score: number | null;
+  dp_score: number | null;
+  source_agreement: "high" | "medium" | "low";
+  age_curve: AgeCurveStatus;
+  hidden_gem: boolean;
+}
+
+export interface WaiverWireResult {
+  players: WaiverPlayer[];
+  warning: string | null;
 }
 
 // Trade Intelligence

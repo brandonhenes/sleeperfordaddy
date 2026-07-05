@@ -1,30 +1,11 @@
 import { db } from "../db/connection.js";
 import { sql } from "drizzle-orm";
 import { getCompositeValues } from "./composite-values.js";
-import { getAgeCurveStatus, type AgeCurveStatus } from "./age-curves.js";
+import { getAgeCurveStatus } from "./age-curves.js";
 import type { SourceWeights } from "./edge-score.js";
+import type { WaiverPlayer, WaiverWireResult } from "../../shared/types.js";
 import { getLeagueRosters } from "../sleeper/rosters.js";
 import { scoreAgreement } from "../lib/score-agreement.js";
-
-export interface WaiverPlayer {
-  player_id: string;
-  full_name: string;
-  position: string;
-  team: string;
-  age: number | null;
-  edge_score: number;
-  fc_score: number | null;
-  ktc_score: number | null;
-  dp_score: number | null;
-  source_agreement: "high" | "medium" | "low";
-  age_curve: AgeCurveStatus;
-  hidden_gem: boolean;
-}
-
-export interface WaiverWireResult {
-  players: WaiverPlayer[];
-  warning: string | null;
-}
 
 function addIds(target: Set<string>, ids: string[] | null | undefined) {
   if (!ids) return;
