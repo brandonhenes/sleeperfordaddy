@@ -5,6 +5,7 @@ import type { SourceWeights } from "./edge-score.js";
 import { getCompositeValues } from "./composite-values.js";
 import { getAgeCurveStatus, type AgeCurveStatus } from "./age-curves.js";
 import { resolvePlayer } from "./player-resolver.js";
+import { scoreAgreement } from "../lib/score-agreement.js";
 
 export interface PlayerSummary {
   player_id: string | null;
@@ -99,13 +100,6 @@ export interface ComparablePlayer {
   team: string | null;
   age: number | null;
   edge_score: number;
-}
-
-function scoreAgreement(scores: (number | null)[]): "high" | "medium" | "low" {
-  const v = scores.filter((s): s is number => s != null);
-  if (v.length <= 1) return "high";
-  const spread = Math.max(...v) - Math.min(...v);
-  return spread < 5 ? "high" : spread <= 12 ? "medium" : "low";
 }
 
 export async function getPlayerDetail(

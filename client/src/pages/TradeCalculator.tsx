@@ -14,6 +14,13 @@ import {
 } from "../hooks/use-power-rankings";
 import { apiFetch } from "../lib/api";
 import { computeAcceptance, type AcceptanceResult } from "../lib/acceptance";
+import {
+  acceptanceColor,
+  fairnessLabel,
+  formatSignedTradeValue,
+  formatTradeValue,
+  warningColors,
+} from "../lib/format";
 import type {
   EvaluatedAsset,
   TradeAssetInput,
@@ -141,12 +148,6 @@ function fairnessColor(f: TradeEvaluation["fairness"]): string {
   return "var(--red)";
 }
 
-function fairnessLabel(f: TradeEvaluation["fairness"]): string {
-  if (f === "fair") return "FAIR";
-  if (f === "slight_edge") return "SLIGHT EDGE";
-  return "LOPSIDED";
-}
-
 function winnerLabel(winner: TradeEvaluation["winner"]): string {
   if (winner === "even") return "Even";
   if (winner === "sideA") return "Side A (you send)";
@@ -157,40 +158,6 @@ function winnerColor(winner: TradeEvaluation["winner"]): string {
   if (winner === "sideA") return "var(--red)";
   if (winner === "sideB") return "var(--green)";
   return "var(--text-dim)";
-}
-
-function formatTradeValue(value: number | null | undefined): string {
-  if (value == null || !Number.isFinite(value)) return "-";
-  return Math.round(value).toLocaleString();
-}
-
-function formatSignedTradeValue(value: number): string {
-  const sign = value > 0 ? "+" : "";
-  return `${sign}${formatTradeValue(value)}`;
-}
-
-function acceptanceColor(label: AcceptanceResult["label"]): string {
-  if (label === "Likely") return "var(--green)";
-  if (label === "Possible") return "var(--amber)";
-  if (label === "Unlikely") return "#f97316";
-  return "var(--red)";
-}
-
-function warningColors(type: TradeHealthWarning["type"]) {
-  if (type === "block") {
-    return {
-      background: "rgba(239,68,68,0.12)",
-      border: "1px solid rgba(239,68,68,0.28)",
-      color: "#fca5a5",
-      label: "#f87171",
-    };
-  }
-  return {
-    background: "rgba(245,158,11,0.12)",
-    border: "1px solid rgba(245,158,11,0.28)",
-    color: "#fcd34d",
-    label: "#fbbf24",
-  };
 }
 
 function TradeHealthPanel({ warnings }: { warnings: TradeHealthWarning[] }) {

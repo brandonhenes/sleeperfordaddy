@@ -12,6 +12,7 @@ const RosterGrades = lazy(() => import("./pages/RosterGrades"));
 const PowerRankings = lazy(() => import("./pages/PowerRankings"));
 const MarketSignals = lazy(() => import("./pages/MarketSignals"));
 const TradeCalculator = lazy(() => import("./pages/TradeCalculator"));
+const TradeHub = lazy(() => import("./pages/TradeHub"));
 const TradeFinder = lazy(() => import("./pages/TradeFinder"));
 const TradeHistory = lazy(() => import("./pages/TradeHistory"));
 const RookieDraft = lazy(() => import("./pages/RookieDraft"));
@@ -21,6 +22,7 @@ const WaiverWire = lazy(() => import("./pages/WaiverWire"));
 const FreeAgents = lazy(() => import("./pages/FreeAgents"));
 const Settings = lazy(() => import("./pages/Settings"));
 const HowItWorks = lazy(() => import("./pages/HowItWorks"));
+const StoredUserRedirect = lazy(() => import("./pages/StoredUserRedirect"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 function RouteFallback() {
@@ -44,8 +46,17 @@ export default function App() {
         <Route path="/dashboard/:username">
           <Dashboard />
         </Route>
+        <Route path="/dashboard">
+          <StoredUserRedirect to="dashboard" />
+        </Route>
         <Route path="/portfolio/:username">
           <Portfolio />
+        </Route>
+        <Route path="/portfolio">
+          <StoredUserRedirect to="portfolio" />
+        </Route>
+        <Route path="/market/:username">
+          <Market />
         </Route>
         <Route path="/market">
           <Market />
@@ -62,6 +73,9 @@ export default function App() {
         <Route path="/power/:username">
           <PowerRankings />
         </Route>
+        <Route path="/power">
+          <StoredUserRedirect to="power" />
+        </Route>
         <Route path="/signals/:username">
           <MarketSignals />
         </Route>
@@ -71,11 +85,23 @@ export default function App() {
         <Route path="/trade-calculator">
           <TradeCalculator />
         </Route>
+        <Route path="/trade/:username">
+          <TradeHub />
+        </Route>
+        <Route path="/trade">
+          <StoredUserRedirect to="trade" />
+        </Route>
         <Route path="/trade-finder/:username">
           <TradeFinder />
         </Route>
+        <Route path="/trade-finder">
+          <StoredUserRedirect to="trade-finder" />
+        </Route>
         <Route path="/trade-history/:username">
           <TradeHistory />
+        </Route>
+        <Route path="/trade-history">
+          <StoredUserRedirect to="trade-history" />
         </Route>
         <Route path="/rookie-draft">
           <RookieDraft />
@@ -83,14 +109,26 @@ export default function App() {
         <Route path="/history/:username">
           <LeagueHistory />
         </Route>
+        <Route path="/history">
+          <StoredUserRedirect to="history" />
+        </Route>
         <Route path="/injuries/:username">
           <InjuryTracker />
+        </Route>
+        <Route path="/injuries">
+          <StoredUserRedirect to="injuries" />
         </Route>
         <Route path="/waivers/:username">
           <WaiverWire />
         </Route>
+        <Route path="/waivers">
+          <StoredUserRedirect to="waivers" />
+        </Route>
         <Route path="/free-agents/:username">
           <FreeAgents />
+        </Route>
+        <Route path="/free-agents">
+          <StoredUserRedirect to="free-agents" />
         </Route>
         <Route path="/settings">
           <Settings />

@@ -4,6 +4,7 @@ import { getCompositeValues } from "./composite-values.js";
 import { getAgeCurveStatus, type AgeCurveStatus } from "./age-curves.js";
 import type { SourceWeights } from "./edge-score.js";
 import { getLeagueRosters } from "../sleeper/rosters.js";
+import { scoreAgreement } from "../lib/score-agreement.js";
 
 export interface WaiverPlayer {
   player_id: string;
@@ -23,13 +24,6 @@ export interface WaiverPlayer {
 export interface WaiverWireResult {
   players: WaiverPlayer[];
   warning: string | null;
-}
-
-function scoreAgreement(scores: (number | null)[]): "high" | "medium" | "low" {
-  const v = scores.filter((s): s is number => s != null);
-  if (v.length <= 1) return "high";
-  const spread = Math.max(...v) - Math.min(...v);
-  return spread < 5 ? "high" : spread <= 12 ? "medium" : "low";
 }
 
 function addIds(target: Set<string>, ids: string[] | null | undefined) {

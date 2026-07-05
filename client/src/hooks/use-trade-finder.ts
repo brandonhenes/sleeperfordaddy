@@ -1,13 +1,23 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "../lib/api";
 import { classStrengthQueryParams } from "../lib/pick-strengths";
+import { weightQueryParams } from "../lib/weights";
 import type { TradeSuggestion, ShopPlayerResult } from "../../../shared/types";
 
 const SHOP_PLAYER_REQUEST_TIMEOUT_MS = 30_000;
 
+function tradeToolQueryParams(): string {
+  const params = `${classStrengthQueryParams()}${weightQueryParams()}`;
+  return params ? `?${params.slice(1)}` : "";
+}
+
+function tradeToolQuerySuffix(): string {
+  const params = `${classStrengthQueryParams()}${weightQueryParams()}`;
+  return params ? `&${params.slice(1)}` : "";
+}
+
 export function useTradeSuggestions(username: string, leagueId: string) {
-  const classStrengths = classStrengthQueryParams();
-  const suffix = classStrengths ? `?${classStrengths.slice(1)}` : "";
+  const suffix = tradeToolQueryParams();
   return useQuery<TradeSuggestion[]>({
     queryKey: ["trade-finder", username, leagueId, suffix],
     queryFn: () =>
@@ -24,10 +34,7 @@ export function useShopPlayer(
   ambition: number = 2,
   showRedraft = false
 ) {
-  const classStrengths = classStrengthQueryParams();
-  const suffix = classStrengths
-    ? `&${classStrengths.slice(1)}`
-    : "";
+  const suffix = tradeToolQuerySuffix();
   return useQuery<ShopPlayerResult>({
     queryKey: ["shop-player", username, playerId, ambition, suffix, showRedraft],
     queryFn: async () => {

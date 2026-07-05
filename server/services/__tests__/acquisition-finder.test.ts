@@ -100,7 +100,12 @@ describe("acquisition finder valuation bridge", () => {
       "league-1",
       "sf",
       undefined,
-      evaluatePackage
+      evaluatePackage,
+      {
+        fc: 20,
+        ktc: 60,
+        dp: 20,
+      }
     );
 
     expect(calls).toHaveLength(1);
@@ -108,6 +113,11 @@ describe("acquisition finder valuation bridge", () => {
       leagueId: "league-1",
       mode: "sf",
       valueType: "dynasty",
+      weights: {
+        fc: 20,
+        ktc: 60,
+        dp: 20,
+      },
     });
     expect(valued.send_total).toBe(6_200);
     expect(valued.receive_total).toBe(6_900);

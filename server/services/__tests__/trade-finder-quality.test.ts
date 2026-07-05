@@ -552,7 +552,11 @@ describe("Find Trades generator quality", () => {
     const send = [player("Send WR", "WR", 65)];
     const receive = [player("Receive RB", "RB", 66)];
 
-    await scoreTradeFinderPackage(send, receive, "league-1", "sf");
+    await scoreTradeFinderPackage(send, receive, "league-1", "sf", undefined, {
+      fc: 10,
+      ktc: 80,
+      dp: 10,
+    });
 
     expect(evaluateOpportunityPackage).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -560,6 +564,11 @@ describe("Find Trades generator quality", () => {
         receive,
         leagueId: "league-1",
         mode: "sf",
+        weights: {
+          fc: 10,
+          ktc: 80,
+          dp: 10,
+        },
       })
     );
   });

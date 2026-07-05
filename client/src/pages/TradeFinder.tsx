@@ -5,6 +5,7 @@ import AppShell from "../components/AppShell";
 import FreshnessBar from "../components/FreshnessBar";
 import OpponentCard from "../components/OpponentCard";
 import OpponentDetail from "../components/OpponentDetail";
+import VerdictBadge from "../components/VerdictBadge";
 import { PickBadge, PlayerLink } from "../components/ui";
 import { useEnsureUser } from "../hooks/use-ensure-user";
 import { usePowerRankings, type LeaguePowerRanking } from "../hooks/use-power-rankings";
@@ -17,7 +18,16 @@ import {
 } from "../hooks/use-opponent-profiles";
 import { usePortfolio } from "../hooks/use-portfolio";
 import { apiFetch } from "../lib/api";
+import {
+  acceptanceColor,
+  fairnessLabel,
+  formatDateTime,
+  formatTradeValue,
+  humanize,
+  warningColors,
+} from "../lib/format";
 import { classStrengthQueryParams } from "../lib/pick-strengths";
+import { posColor } from "../lib/position-colors";
 import { buildTradeFinderUrl, parseTradeFinderQuery } from "../lib/trade-finder-url";
 import type {
   PickValue,
@@ -25,7 +35,6 @@ import type {
   TradePackage,
   TradePackageAsset,
   AcquisitionOpportunity,
-  OpponentPerspective,
   ShopOpportunity,
   EvaluatedAsset,
   OpponentProfile,
@@ -36,28 +45,6 @@ interface LeaguePicksResponse {
   picks: PickValue[];
   totalPickValue: number;
   picksByRound: Record<string, PickValue[]>;
-}
-
-const POS_COLOR: Record<string, string> = {
-  QB: "#e15241",
-  RB: "#54b948",
-  WR: "#539bf5",
-  TE: "#f0a33b",
-};
-
-function posColor(position: string): string {
-  return POS_COLOR[position] ?? "var(--text-muted)";
-}
-
-function fairnessLabel(fairness: string): string {
-  if (fairness === "fair") return "FAIR";
-  if (fairness === "slight_edge") return "SLIGHT EDGE";
-  return "LOPSIDED";
-}
-
-function formatTradeValue(value: number | null | undefined): string {
-  if (value == null || Number.isNaN(value)) return "—";
-  return Math.round(value).toLocaleString();
 }
 
 function opportunityLabel(type: TradePackage["opportunity_type"]): string | null {
@@ -79,44 +66,6 @@ function qualityTierLabel(tier: TradePackage["quality_tier"]): string | null {
   if (!tier) return null;
   if (tier === "low_confidence") return "Low Confidence";
   return humanize(tier);
-}
-
-function acceptanceColor(label: "Likely" | "Possible" | "Unlikely" | "Hard"): string {
-  if (label === "Likely") return "var(--green)";
-  if (label === "Possible") return "var(--amber)";
-  if (label === "Unlikely") return "#f97316";
-  return "var(--red)";
-}
-
-function warningColors(type: TradeHealthWarning["type"]) {
-  if (type === "block") {
-    return {
-      background: "rgba(239,68,68,0.12)",
-      border: "1px solid rgba(239,68,68,0.28)",
-      color: "#fca5a5",
-      label: "#f87171",
-    };
-  }
-  return {
-    background: "rgba(245,158,11,0.12)",
-    border: "1px solid rgba(245,158,11,0.28)",
-    color: "#fcd34d",
-    label: "#fbbf24",
-  };
-}
-
-function humanize(value: string): string {
-  return value
-    .split("_")
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
-}
-
-function formatDateTime(value: string | null | undefined): string {
-  if (!value) return "Never";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString();
 }
 
 function getActivityWeight(level: OpponentProfile["activityLevel"]): number {
@@ -514,17 +463,6 @@ function DifficultyBadge({ difficulty }: { difficulty: AcquisitionOpportunity["d
       {labels[difficulty.label]} ({difficulty.score})
     </span>
   );
-}
-
-function VerdictBadge({ verdict }: { verdict: OpponentPerspective["verdict"] }) {
-  const map = {
-    likely_accept: { bg: "#22c55e", label: "Likely Accept" },
-    might_accept: { bg: "#f59e0b", label: "Might Accept" },
-    unlikely: { bg: "#f97316", label: "Unlikely" },
-    no_chance: { bg: "#ef4444", label: "No Chance" },
-  };
-  const v = map[verdict];
-  return <span style={{ background: v.bg, color: "#fff", padding: "2px 8px", borderRadius: 4, fontSize: 10, fontWeight: 700 }}>{v.label}</span>;
 }
 
 function AcquisitionCard({ opportunity }: { opportunity: AcquisitionOpportunity }) {

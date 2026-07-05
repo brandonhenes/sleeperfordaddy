@@ -22,6 +22,7 @@ import { computeLeaguePPG } from "./league-ppg.js";
 import type { ValueType } from "./composite-values.js";
 import { getPlayerAvailability, type PlayerAvailability } from "../../shared/player-availability.js";
 import { scorePlayersForLeague } from "./league-scoring.js";
+import { scoreAgreement } from "../lib/score-agreement.js";
 
 const LEAGUE_SCORING_SEASON = 2025;
 
@@ -119,13 +120,6 @@ function computeWindowRaw(players: { value: number; age_score: number }[]): numb
   const denom = valid.reduce((s, p) => s + p.value, 0);
   if (denom === 0) return 0;
   return valid.reduce((s, p) => s + p.value * p.age_score, 0) / denom;
-}
-
-function scoreAgreement(scores: (number | null)[]): "high" | "medium" | "low" {
-  const v = scores.filter((s): s is number => s != null);
-  if (v.length <= 1) return "high";
-  const spread = Math.max(...v) - Math.min(...v);
-  return spread < 5 ? "high" : spread <= 12 ? "medium" : "low";
 }
 
 // ─── Main ───

@@ -10,6 +10,7 @@ import type {
 import { buildLeagueBehaviors, estimateAcceptance, type ManagerBehavior } from "./manager-behavior.js";
 import { loadTradeHealthPlayerInfo, tradeHealthCheck } from "./trade-calculator.js";
 import { enrichScoredPick, type ClassStrengthMap } from "./pick-values.js";
+import { sourceWeightsKey, type SourceWeights } from "./edge-score.js";
 import type { ValueType } from "./composite-values.js";
 import {
   evaluateOpportunityPackage,
@@ -185,7 +186,8 @@ export async function scoreShopPackage(
   mode: "sf" | "1qb",
   classStrengths?: ClassStrengthMap,
   valueType: ValueType = "dynasty",
-  evaluatePackage: EvaluateOpportunityPackageFn = evaluateOpportunityPackage
+  evaluatePackage: EvaluateOpportunityPackageFn = evaluateOpportunityPackage,
+  weights?: SourceWeights
 ): Promise<ShopPackageScore> {
   const valuation = await evaluatePackage({
     send,
@@ -194,6 +196,7 @@ export async function scoreShopPackage(
     mode,
     classStrengths,
     valueType,
+    weights,
   });
   const metadata = opportunityValuationFields(valuation);
   const delta = roundTo(valuation.sendContextTradeValue - valuation.receiveContextTradeValue);
@@ -253,6 +256,7 @@ export interface PackageContext {
   oppPicks: EnrichedPick[];
   classStrengths?: ClassStrengthMap;
   valueType: ValueType;
+  weights?: SourceWeights;
   valuationCache: Map<string, Promise<ShopPackageScore>>;
   evaluationBudget: ShopEvaluationBudget;
   evaluatePackage?: EvaluateOpportunityPackageFn;
@@ -416,6 +420,7 @@ export async function scorePackageForContext(
     ctx.leagueId,
     ctx.mode,
     ctx.valueType,
+    sourceWeightsKey(ctx.weights),
     send.map(assetCacheKey).sort().join("+"),
     receive.map(assetCacheKey).sort().join("+"),
   ].join("|");
@@ -436,7 +441,8 @@ export async function scorePackageForContext(
     ctx.mode,
     ctx.classStrengths,
     ctx.valueType,
-    ctx.evaluatePackage
+    ctx.evaluatePackage,
+    ctx.weights
   ).catch((error) => {
     ctx.valuationCache.delete(cacheKey);
     throw error;
@@ -788,9 +794,10 @@ export async function shopPlayer(
   playerId: string,
   ambition = 2,
   classStrengths?: ClassStrengthMap,
-  valueType: ValueType = "dynasty"
+  valueType: ValueType = "dynasty",
+  weights?: SourceWeights
 ): Promise<ShopPlayerResult | null> {
-  const allLeagues = await getPowerRankings(username, valueType);
+  const allLeagues = await getPowerRankings(username, valueType, weights);
   if (allLeagues.length === 0) return null;
 
   const leaguesWithPlayer: Array<{
@@ -905,6 +912,7 @@ export async function shopPlayer(
         oppPicks: await getLeaguePicks(opp),
         classStrengths,
         valueType,
+        weights,
         valuationCache,
         evaluationBudget,
       };

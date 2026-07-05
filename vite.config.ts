@@ -37,13 +37,13 @@ export default defineConfig({
           {
             name: "Dashboard",
             short_name: "Dashboard",
-            url: "/dashboard/henes35",
+            url: "/dashboard",
             icons: [{ src: "/pwa-192.png", sizes: "192x192", type: "image/png" }],
           },
           {
-            name: "Trade Finder",
+            name: "Trade",
             short_name: "Trades",
-            url: "/trade-finder/henes35",
+            url: "/trade",
             icons: [{ src: "/pwa-192.png", sizes: "192x192", type: "image/png" }],
           },
           {

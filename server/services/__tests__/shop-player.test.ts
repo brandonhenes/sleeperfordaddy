@@ -207,7 +207,12 @@ describe("Shop a Player valuation helpers", () => {
       "sf",
       undefined,
       "redraft",
-      evaluatePackage
+      evaluatePackage,
+      {
+        fc: 15,
+        ktc: 70,
+        dp: 15,
+      }
     );
 
     expect(calls).toHaveLength(1);
@@ -215,6 +220,11 @@ describe("Shop a Player valuation helpers", () => {
       leagueId: "league-1",
       mode: "sf",
       valueType: "redraft",
+      weights: {
+        fc: 15,
+        ktc: 70,
+        dp: 15,
+      },
     });
     expect(scored.sendTotal).toBe(7_000);
     expect(scored.receiveTotal).toBe(6_000);

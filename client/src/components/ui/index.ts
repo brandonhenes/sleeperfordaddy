@@ -5,3 +5,5 @@ export { default as StatCard } from "./StatCard";
 export { default as SectionHeader } from "./SectionHeader";
 export { default as PlayerLink } from "./PlayerLink";
 export { default as PickBadge } from "./PickBadge";
+export { default as Card } from "./Card";
+export { default as PageHeader } from "./PageHeader";

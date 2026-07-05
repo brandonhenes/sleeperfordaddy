@@ -15,6 +15,7 @@ import {
   type RosterRanking,
   type CoreAsset,
 } from "./power-rankings.js";
+import type { SourceWeights } from "./edge-score.js";
 import type { ScoredPick } from "./draft-picks.js";
 import {
   parseLeagueScoring,
@@ -715,7 +716,8 @@ export async function scoreTradeFinderPackage(
   receive: TradePackageAsset[],
   leagueId: string,
   mode: "sf" | "1qb",
-  classStrengths?: ClassStrengthMap
+  classStrengths?: ClassStrengthMap,
+  weights?: SourceWeights
 ): Promise<PackageScore> {
   const valuation = await evaluateOpportunityPackage({
     send,
@@ -723,6 +725,7 @@ export async function scoreTradeFinderPackage(
     leagueId,
     mode,
     classStrengths,
+    weights,
   });
 
   return {
@@ -1385,9 +1388,10 @@ export async function generateTradeFinderPackages(
 export async function findTrades(
   username: string,
   leagueId: string,
-  classStrengths?: ClassStrengthMap
+  classStrengths?: ClassStrengthMap,
+  weights?: SourceWeights
 ): Promise<TradeSuggestion[]> {
-  const allLeagues = await getPowerRankings(username);
+  const allLeagues = await getPowerRankings(username, "dynasty", weights);
   const league = allLeagues.find((l) => l.league_id === leagueId);
   if (!league || league.rosters.length < 2) return [];
 
@@ -1462,7 +1466,16 @@ export async function findTrades(
       leagueScoring,
       usageMap,
       hasCustomScoring,
-      classStrengths
+      classStrengths,
+      (send, receive, packageLeagueId, packageMode, packageClassStrengths) =>
+        scoreTradeFinderPackage(
+          send,
+          receive,
+          packageLeagueId,
+          packageMode,
+          packageClassStrengths,
+          weights
+        )
     );
     const evaluatedPackages = applyAcceptanceAndBehavior(basePackages, userProfile, opp)
       .map(withAcceptanceMetadata)

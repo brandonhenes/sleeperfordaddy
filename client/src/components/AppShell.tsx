@@ -1,8 +1,7 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useParams } from "wouter";
 import NavBar from "./NavBar";
-
-const STORAGE_KEY = "edge_username";
+import { readStoredUsername, writeStoredUsername } from "../lib/current-user";
 
 interface AppShellProps {
   children: ReactNode;
@@ -11,13 +10,15 @@ interface AppShellProps {
 export default function AppShell({ children }: AppShellProps) {
   const params = useParams<{ username?: string }>();
   const paramUser = params.username ? decodeURIComponent(params.username) : "";
+  const [storedUsername, setStoredUsername] = useState(() => readStoredUsername());
 
-  // Persist username so pages without :username in the URL (e.g. /market) still work
-  if (paramUser) {
-    localStorage.setItem(STORAGE_KEY, paramUser);
-  }
+  useEffect(() => {
+    if (!paramUser) return;
+    writeStoredUsername(paramUser);
+    setStoredUsername(paramUser);
+  }, [paramUser]);
 
-  const username = paramUser || localStorage.getItem(STORAGE_KEY) || "";
+  const username = paramUser || storedUsername;
 
   return (
     <div

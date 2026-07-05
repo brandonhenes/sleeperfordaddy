@@ -21,6 +21,7 @@ import type {
 import { resolvePlayer } from "./player-resolver.js";
 import { evaluateOpportunityPackage } from "./trade-opportunity-valuation.js";
 import type { ClassStrengthMap } from "./pick-values.js";
+import type { SourceWeights } from "./edge-score.js";
 
 // ─── Constants ───
 
@@ -113,7 +114,8 @@ export async function valueAcquisitionOfferWithKtcLeague(
   leagueId: string,
   mode: "sf" | "1qb",
   classStrengths?: ClassStrengthMap,
-  evaluatePackage = evaluateOpportunityPackage
+  evaluatePackage = evaluateOpportunityPackage,
+  weights?: SourceWeights
 ): Promise<AcquisitionOffer> {
   try {
     const valuation = await evaluatePackage({
@@ -123,6 +125,7 @@ export async function valueAcquisitionOfferWithKtcLeague(
       mode,
       valueType: "dynasty",
       classStrengths,
+      weights,
     });
     const valued: AcquisitionOffer = {
       ...offer,
@@ -172,10 +175,20 @@ async function valueAcquisitionOffersForLeague(
   offers: AcquisitionOffer[],
   leagueId: string,
   mode: "sf" | "1qb",
-  classStrengths?: ClassStrengthMap
+  classStrengths?: ClassStrengthMap,
+  weights?: SourceWeights
 ): Promise<AcquisitionOffer[]> {
   return Promise.all(
-    offers.map((offer) => valueAcquisitionOfferWithKtcLeague(offer, leagueId, mode, classStrengths))
+    offers.map((offer) =>
+      valueAcquisitionOfferWithKtcLeague(
+        offer,
+        leagueId,
+        mode,
+        classStrengths,
+        evaluateOpportunityPackage,
+        weights
+      )
+    )
   );
 }
 
@@ -758,14 +771,15 @@ async function getTradeHistory(
 export async function findAcquisitionPackages(
   username: string,
   playerId: string,
-  classStrengths?: ClassStrengthMap
+  classStrengths?: ClassStrengthMap,
+  weights?: SourceWeights
 ): Promise<AcquisitionResult> {
   const lookup = decodeURIComponent(playerId).trim();
   const pm = await resolvePlayer(lookup);
   if (!pm) return { target: { player_id: "", player_name: playerId, position: "", team: null, age: null, edge_score: 0 }, opportunities: [], summary: `Player not found.` };
 
   // 2. Get all power rankings
-  const allLeagues = await getPowerRankings(username);
+  const allLeagues = await getPowerRankings(username, "dynasty", weights);
   if (allLeagues.length === 0) {
     return {
       target: { player_id: pm.player_id, player_name: pm.full_name, position: pm.position, team: pm.team, age: pm.age, edge_score: 0 },
@@ -817,7 +831,8 @@ export async function findAcquisitionPackages(
       generatedPackages,
       league.league_id,
       league.mode,
-      classStrengths
+      classStrengths,
+      weights
     );
 
     // Get trade comps for this league
