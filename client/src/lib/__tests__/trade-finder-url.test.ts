@@ -19,6 +19,13 @@ describe("trade finder URL helpers", () => {
     expect(parsed.opponentRosterId).toBe(3);
   });
 
+  it("supports opponentRosterId as a defensive opponent alias", () => {
+    const parsed = parseTradeFinderQuery("mode=find&league=abc&opponentRosterId=6");
+
+    expect(parsed.mode).toBe("find");
+    expect(parsed.opponentRosterId).toBe(6);
+  });
+
   it("keeps missing params null instead of throwing", () => {
     const parsed = parseTradeFinderQuery("?mode=scout");
 
@@ -43,5 +50,31 @@ describe("trade finder URL helpers", () => {
     });
 
     expect(url).toBe("/trade-finder/Brandon%20Henes?mode=scout&league=league-1&opponent=12");
+  });
+
+  it("round-trips find steering controls", () => {
+    const url = buildTradeFinderUrl("Brandon Henes", {
+      mode: "find",
+      leagueId: "league-1",
+      opponentRosterId: 12,
+      targetPlayerId: "player-9",
+      avoidTargetPlayerIds: ["player-1", "player-2"],
+      constraints: ["more_realistic", "no_qbs"],
+      strategyFocus: "tier_down",
+      searchDepth: "deep",
+    });
+
+    const parsed = parseTradeFinderQuery(url.split("?")[1]);
+
+    expect(parsed).toMatchObject({
+      mode: "find",
+      leagueId: "league-1",
+      opponentRosterId: 12,
+      targetPlayerId: "player-9",
+      avoidTargetPlayerIds: ["player-1", "player-2"],
+      constraints: ["more_realistic", "no_qbs"],
+      strategyFocus: "tier_down",
+      searchDepth: "deep",
+    });
   });
 });

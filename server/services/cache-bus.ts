@@ -8,6 +8,8 @@ import { clearOverviewCache } from "./overview.js";
 import { clearArbitrageCache } from "./arbitrage.js";
 import { clearActionCache } from "./action.js";
 import { clearTradeIntelligenceCache } from "./trade-intelligence.js";
+import { clearLeagueSummaryCache } from "./league-summaries.js";
+import { clearTradeHistoryCache } from "./trade-history.js";
 
 export interface CacheBustScope {
   /** Scope per-user caches to this username. Omit to clear all users. */
@@ -46,6 +48,8 @@ export async function bustAllCaches(scope: CacheBustScope = {}): Promise<void> {
   clearOverviewCache(username);
   clearArbitrageCache(username);
   clearActionCache(username);
+  clearLeagueSummaryCache(username);
+  clearTradeHistoryCache(username);
 
   // Keyed by Sleeper user_id, not username.
   clearDynastyLeagueCache(userId);

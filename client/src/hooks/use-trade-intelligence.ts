@@ -23,11 +23,16 @@ export function useTradeIntelligenceChains(
   });
 }
 
-export function useTradeIntelligenceLeague(leagueId: string | undefined) {
+export function useTradeIntelligenceLeague(
+  leagueId: string | undefined,
+  username?: string
+) {
+  const suffix = username ? `?username=${encodeURIComponent(username)}` : "";
+
   return useQuery<TradeIntelligenceLeagueResponse>({
-    queryKey: ["trade-intelligence", "league", leagueId],
+    queryKey: ["trade-intelligence", "league", leagueId, username ?? ""],
     queryFn: () =>
-      apiFetch(`/api/trade-intelligence/${encodeURIComponent(leagueId!)}`),
+      apiFetch(`/api/trade-intelligence/${encodeURIComponent(leagueId!)}${suffix}`),
     enabled: !!leagueId,
     staleTime: 5 * 60 * 1000,
   });

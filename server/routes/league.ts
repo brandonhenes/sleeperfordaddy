@@ -2,8 +2,24 @@ import { Router } from "express";
 import { db } from "../db/connection.js";
 import { sql } from "drizzle-orm";
 import { getLeagueDetail } from "../services/league-detail.js";
+import { getLeagueSummaries } from "../services/league-summaries.js";
 
 const router = Router();
+
+router.get("/api/leagues/:username/summary", async (req, res) => {
+  try {
+    const { username } = req.params;
+    if (!username) {
+      return res.status(400).json({ message: "username is required" });
+    }
+    const scope = req.query.redraft === "true" ? "redraft" as const : "dynasty" as const;
+    const data = await getLeagueSummaries(username, scope);
+    res.json(data);
+  } catch (err) {
+    console.error("[league-summary] Error:", err);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
 
 /** GET /api/league/:leagueId?username=... — League detail page data */
 router.get("/api/league/:leagueId", async (req, res) => {

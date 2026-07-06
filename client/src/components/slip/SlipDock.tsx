@@ -8,7 +8,7 @@ import { computeAcceptance, type AcceptanceResult } from "../../lib/acceptance";
 import { fairnessLabel, formatTradeValue } from "../../lib/format";
 import { posColor } from "../../lib/position-colors";
 import { useCurrentUsername } from "../../hooks/use-current-user";
-import { usePowerRankings } from "../../hooks/use-power-rankings";
+import { useLeagueSummaries } from "../../hooks/use-league-summaries";
 import { useEvaluateTrade } from "../../hooks/use-trade-calculator";
 import { buildTradeMessage } from "../../pages/trade-calculator/trade-message";
 import type { OpponentContextResponse } from "../../pages/trade-calculator/types";
@@ -65,7 +65,7 @@ export default function SlipDock() {
   } = slip;
 
   const [copied, setCopied] = useState(false);
-  const { data: leagues = [] } = usePowerRankings(legs.length > 0 || sheetOpen ? username : "", false);
+  const { data: leagues = [] } = useLeagueSummaries(legs.length > 0 || sheetOpen ? username : "", false);
   const league = leagues.find((l) => l.league_id === leagueId);
 
   const { data: opponentData } = useQuery<OpponentContextResponse>({

@@ -1,4 +1,5 @@
 import { Router } from "express";
+import type { LeaguePowerRanking, OpponentProfile } from "@shared/types";
 import { getPowerRankings } from "../services/power-rankings.js";
 import {
   getExploitAngles,
@@ -7,6 +8,21 @@ import {
 } from "../services/opponent-profiler.js";
 
 const router = Router();
+
+function withCurrentRosterIdentity(
+  profiles: OpponentProfile[],
+  league: LeaguePowerRanking
+): OpponentProfile[] {
+  const liveNameByRosterId = new Map(
+    league.rosters.map((roster) => [roster.roster_id, roster.display_name])
+  );
+
+  return profiles.map((profile) => {
+    const liveName = liveNameByRosterId.get(profile.rosterId)?.trim();
+    if (!liveName || liveName === profile.displayName) return profile;
+    return { ...profile, displayName: liveName };
+  });
+}
 
 router.post("/api/opponents/:leagueId/refresh", async (req, res) => {
   try {
@@ -23,7 +39,10 @@ router.post("/api/opponents/:leagueId/refresh", async (req, res) => {
     }
 
     const myRosterId = league.rosters.find((roster) => roster.is_user)?.roster_id ?? null;
-    const profiles = await profileLeagueOpponents(leagueId, username);
+    const profiles = withCurrentRosterIdentity(
+      await profileLeagueOpponents(leagueId, username),
+      league
+    );
 
     res.status(202).json({
       profiles,
@@ -89,7 +108,10 @@ router.get("/api/opponents/:leagueId/:username", async (req, res) => {
       profiles = await profileLeagueOpponents(leagueId, username);
     }
 
-    const filtered = profiles.filter((profile) => profile.rosterId !== myRosterId);
+    const filtered = withCurrentRosterIdentity(
+      profiles.filter((profile) => profile.rosterId !== myRosterId),
+      league
+    );
     res.json({
       profiles: filtered,
       myRosterId,

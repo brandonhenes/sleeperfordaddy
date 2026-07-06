@@ -25,6 +25,7 @@ import {
   generateTradeFinderPackages,
   isMaterialPickOnlyTrade,
   isPickOnlyTradePackage,
+  rankTradeFinderOpponents,
   scoreTradeFinderPackage,
   shouldSurfaceTradeFinderPackage,
 } from "../trade-finder.js";
@@ -503,6 +504,325 @@ describe("Find Trades generator quality", () => {
     expect(generated.some((pkg) => pkg.you_send.length + pkg.you_receive.length > 2)).toBe(true);
   });
 
+  it("targets a selected partner before package generation", () => {
+    const userWr = coreAsset({ player_id: "user-wr", full_name: "User WR", position: "WR", edge_score: 70 });
+    const user = profile({
+      roster: { ...profile({}).roster, roster_id: 1, is_user: true, display_name: "Me", core_assets: [userWr] },
+      byPos: byPosFromAssets([userWr]),
+      surplus: { QB: [], RB: [], WR: [userWr], TE: [] },
+    });
+    const goodFit = profile({
+      roster: { ...profile({}).roster, roster_id: 2, display_name: "Best Fit", core_assets: [] },
+      needs: ["WR"],
+      needUrgency: { QB: 0, RB: 0, WR: 100, TE: 0 },
+    });
+    const selectedPartner = profile({
+      roster: { ...profile({}).roster, roster_id: 3, display_name: "Selected Partner", core_assets: [] },
+      needs: [],
+    });
+
+    const ranked = rankTradeFinderOpponents(
+      user as never,
+      [goodFit as never, selectedPartner as never],
+      { opponentRosterId: 3 }
+    );
+
+    expect(ranked).toHaveLength(1);
+    expect(ranked[0].opp.roster.roster_id).toBe(3);
+  });
+
+  it("builds QB tier-down packages with a lesser QB anchor before other positions", async () => {
+    const userQb = coreAsset({ player_id: "user-qb", full_name: "Elite User QB", position: "QB", edge_score: 92 });
+    const oppQb = coreAsset({ player_id: "opp-qb", full_name: "Lesser Opp QB", position: "QB", edge_score: 78 });
+    const oppWr = coreAsset({ player_id: "opp-wr", full_name: "Higher Opp WR", position: "WR", edge_score: 82 });
+    const user = profile({
+      roster: { ...profile({}).roster, is_user: true, archetype: "Rebuilder", core_assets: [userQb] },
+      byPos: byPosFromAssets([userQb]),
+      surplus: { QB: [userQb], RB: [], WR: [], TE: [] },
+      tradeablePicks: [],
+    });
+    const opp = profile({
+      roster: {
+        ...profile({}).roster,
+        roster_id: 2,
+        display_name: "Opponent",
+        archetype: "All-In Contender",
+        core_assets: [oppWr, oppQb],
+      },
+      byPos: byPosFromAssets([oppWr, oppQb]),
+      needs: ["QB"],
+      surplus: { QB: [oppQb], RB: [], WR: [oppWr], TE: [] },
+      tradeablePicks: [scoredPick("2027 Mid 2nd", 42, 2, 18)],
+    });
+
+    const generated = await generateTradeFinderPackages(
+      user as never,
+      opp as never,
+      "sf",
+      "league-1",
+      baselineScoring,
+      new Map(),
+      false,
+      undefined,
+      async (send, receive, leagueId, mode) =>
+        scoreTradeFinderPackage(send, receive, leagueId, mode)
+    );
+    const qbTierDown = generated.find(
+      (pkg) =>
+        pkg.label === "QB Tier Down" &&
+        pkg.you_send.some((asset) => asset.player_id === "user-qb")
+    );
+
+    expect(qbTierDown).toBeDefined();
+    expect(qbTierDown?.you_receive.some((asset) => asset.position === "QB")).toBe(true);
+    expect(qbTierDown?.you_receive.some((asset) => asset.position === "WR")).toBe(false);
+  });
+
+  it("targets a selected player when partner-specific target mode is used", async () => {
+    const userRb = coreAsset({ player_id: "user-rb", full_name: "User RB", position: "RB", edge_score: 72 });
+    const userWr = coreAsset({ player_id: "user-wr", full_name: "User WR", position: "WR", edge_score: 69 });
+    const eliteWr = coreAsset({ player_id: "elite-wr", full_name: "Elite WR", position: "WR", edge_score: 88 });
+    const targetTe = coreAsset({ player_id: "target-te", full_name: "Target TE", position: "TE", edge_score: 78 });
+    const user = profile({
+      roster: { ...profile({}).roster, is_user: true, archetype: "Competitor", core_assets: [userRb, userWr] },
+      byPos: byPosFromAssets([userRb, userWr]),
+      needs: ["TE"],
+      surplus: { QB: [], RB: [userRb], WR: [userWr], TE: [] },
+      tradeablePicks: [scoredPick("2027 Mid 2nd", 42, 2, 18)],
+    });
+    const opp = profile({
+      roster: { ...profile({}).roster, roster_id: 2, display_name: "Opponent", archetype: "Rebuilder", core_assets: [eliteWr, targetTe] },
+      byPos: byPosFromAssets([eliteWr, targetTe]),
+      needs: ["RB", "WR"],
+      surplus: { QB: [], RB: [], WR: [eliteWr], TE: [targetTe] },
+      tradeablePicks: [scoredPick("2027 Mid 3rd", 28, 3, 30)],
+    });
+
+    const generated = await generateTradeFinderPackages(
+      user as never,
+      opp as never,
+      "sf",
+      "league-1",
+      baselineScoring,
+      new Map(),
+      false,
+      undefined,
+      async (send, receive, leagueId, mode) =>
+        scoreTradeFinderPackage(send, receive, leagueId, mode),
+      { targetPlayerId: "target-te", maxEvaluationsPerOpponent: 24 }
+    );
+
+    expect(generated.length).toBeGreaterThan(0);
+    expect(generated.every((pkg) => pkg.you_receive.some((asset) => asset.player_id === "target-te"))).toBe(true);
+  });
+
+  it("avoids already surfaced receive targets when asking for different lanes", async () => {
+    const userAssets = [
+      coreAsset({ player_id: "user-rb", full_name: "User RB", position: "RB", edge_score: 72 }),
+      coreAsset({ player_id: "user-wr", full_name: "User WR", position: "WR", edge_score: 70 }),
+      coreAsset({ player_id: "user-te", full_name: "User TE", position: "TE", edge_score: 68 }),
+    ];
+    const avoidedTarget = coreAsset({ player_id: "avoid-wr", full_name: "Avoid WR", position: "WR", edge_score: 88 });
+    const freshTarget = coreAsset({ player_id: "fresh-te", full_name: "Fresh TE", position: "TE", edge_score: 80 });
+    const user = profile({
+      roster: { ...profile({}).roster, is_user: true, archetype: "Competitor", core_assets: userAssets },
+      byPos: byPosFromAssets(userAssets),
+      needs: ["WR", "TE"],
+      surplus: byPosFromAssets(userAssets),
+      tradeablePicks: [scoredPick("2027 Mid 2nd", 42, 2, 18)],
+    });
+    const opp = profile({
+      roster: { ...profile({}).roster, roster_id: 2, display_name: "Opponent", archetype: "Rebuilder", core_assets: [avoidedTarget, freshTarget] },
+      byPos: byPosFromAssets([avoidedTarget, freshTarget]),
+      needs: ["RB", "WR"],
+      surplus: { QB: [], RB: [], WR: [avoidedTarget], TE: [freshTarget] },
+      tradeablePicks: [scoredPick("2027 Mid 3rd", 28, 3, 30)],
+    });
+
+    const generated = await generateTradeFinderPackages(
+      user as never,
+      opp as never,
+      "sf",
+      "league-1",
+      baselineScoring,
+      new Map(),
+      false,
+      undefined,
+      async (send, receive, leagueId, mode) =>
+        scoreTradeFinderPackage(send, receive, leagueId, mode),
+      { avoidTargetPlayerIds: ["avoid-wr"], maxEvaluationsPerOpponent: 24 }
+    );
+
+    expect(generated.length).toBeGreaterThan(0);
+    expect(generated.every((pkg) => !pkg.you_receive.some((asset) => asset.player_id === "avoid-wr"))).toBe(true);
+  });
+
+  it("honors no-firsts steering by removing packages that send a first", async () => {
+    const userAssets = [
+      coreAsset({ player_id: "user-rb", full_name: "User RB", position: "RB", edge_score: 73 }),
+      coreAsset({ player_id: "user-wr", full_name: "User WR", position: "WR", edge_score: 70 }),
+    ];
+    const target = coreAsset({ player_id: "target-wr", full_name: "Target WR", position: "WR", edge_score: 82 });
+    const user = profile({
+      roster: { ...profile({}).roster, is_user: true, archetype: "Competitor", core_assets: userAssets },
+      byPos: byPosFromAssets(userAssets),
+      needs: ["WR"],
+      surplus: byPosFromAssets(userAssets),
+      tradeablePicks: [
+        scoredPick("2027 Mid 1st", 62, 1, 8),
+        scoredPick("2027 Mid 2nd", 42, 2, 18),
+      ],
+    });
+    const opp = profile({
+      roster: { ...profile({}).roster, roster_id: 2, display_name: "Opponent", archetype: "Rebuilder", core_assets: [target] },
+      byPos: byPosFromAssets([target]),
+      needs: ["RB"],
+      surplus: { QB: [], RB: [], WR: [target], TE: [] },
+      tradeablePicks: [],
+    });
+
+    const generated = await generateTradeFinderPackages(
+      user as never,
+      opp as never,
+      "sf",
+      "league-1",
+      baselineScoring,
+      new Map(),
+      false,
+      undefined,
+      async (send, receive, leagueId, mode) =>
+        scoreTradeFinderPackage(send, receive, leagueId, mode),
+      { constraints: ["no_firsts"], maxEvaluationsPerOpponent: 24 }
+    );
+
+    expect(generated.length).toBeGreaterThan(0);
+    expect(generated.every((pkg) => !pkg.you_send.some((asset) => asset.asset_type === "pick" && asset.pick_round === 1))).toBe(true);
+  });
+
+  it("only returns QB tier-down shapes when that steering chip is active", async () => {
+    const userQb = coreAsset({ player_id: "user-qb", full_name: "Elite User QB", position: "QB", edge_score: 92 });
+    const userWr = coreAsset({ player_id: "user-wr", full_name: "User WR", position: "WR", edge_score: 70 });
+    const oppQb = coreAsset({ player_id: "opp-qb", full_name: "Lesser Opp QB", position: "QB", edge_score: 78 });
+    const oppWr = coreAsset({ player_id: "opp-wr", full_name: "Opp WR", position: "WR", edge_score: 82 });
+    const user = profile({
+      roster: { ...profile({}).roster, is_user: true, archetype: "Rebuilder", core_assets: [userQb, userWr] },
+      byPos: byPosFromAssets([userQb, userWr]),
+      surplus: { QB: [userQb], RB: [], WR: [userWr], TE: [] },
+      tradeablePicks: [],
+    });
+    const opp = profile({
+      roster: { ...profile({}).roster, roster_id: 2, display_name: "Opponent", archetype: "All-In Contender", core_assets: [oppWr, oppQb] },
+      byPos: byPosFromAssets([oppWr, oppQb]),
+      needs: ["QB"],
+      surplus: { QB: [oppQb], RB: [], WR: [oppWr], TE: [] },
+      tradeablePicks: [scoredPick("2027 Mid 2nd", 42, 2, 18)],
+    });
+
+    const generated = await generateTradeFinderPackages(
+      user as never,
+      opp as never,
+      "sf",
+      "league-1",
+      baselineScoring,
+      new Map(),
+      false,
+      undefined,
+      async (send, receive, leagueId, mode) =>
+        scoreTradeFinderPackage(send, receive, leagueId, mode),
+      { constraints: ["only_qb_tier_down"], maxEvaluationsPerOpponent: 24 }
+    );
+
+    expect(generated.length).toBeGreaterThan(0);
+    expect(generated.every((pkg) =>
+      pkg.you_send.some((asset) => asset.position === "QB") &&
+      pkg.you_receive.some((asset) => asset.position === "QB") &&
+      pkg.you_receive.length > 1
+    )).toBe(true);
+  });
+
+  it("removes QB-involved packages when no-QB steering is active", async () => {
+    const userQb = coreAsset({ player_id: "user-qb", full_name: "User QB", position: "QB", edge_score: 88 });
+    const userRb = coreAsset({ player_id: "user-rb", full_name: "User RB", position: "RB", edge_score: 74 });
+    const userWr = coreAsset({ player_id: "user-wr", full_name: "User WR", position: "WR", edge_score: 70 });
+    const oppQb = coreAsset({ player_id: "opp-qb", full_name: "Opp QB", position: "QB", edge_score: 86 });
+    const oppWr = coreAsset({ player_id: "opp-wr", full_name: "Opp WR", position: "WR", edge_score: 78 });
+    const oppTe = coreAsset({ player_id: "opp-te", full_name: "Opp TE", position: "TE", edge_score: 76 });
+    const user = profile({
+      roster: { ...profile({}).roster, is_user: true, archetype: "Competitor", core_assets: [userQb, userRb, userWr] },
+      byPos: byPosFromAssets([userQb, userRb, userWr]),
+      needs: ["WR", "TE"],
+      surplus: { QB: [userQb], RB: [userRb], WR: [userWr], TE: [] },
+      tradeablePicks: [scoredPick("2027 Mid 2nd", 42, 2, 18)],
+    });
+    const opp = profile({
+      roster: { ...profile({}).roster, roster_id: 2, display_name: "Opponent", archetype: "Competitor", core_assets: [oppQb, oppWr, oppTe] },
+      byPos: byPosFromAssets([oppQb, oppWr, oppTe]),
+      needs: ["RB"],
+      surplus: { QB: [oppQb], RB: [], WR: [oppWr], TE: [oppTe] },
+      tradeablePicks: [],
+    });
+
+    const generated = await generateTradeFinderPackages(
+      user as never,
+      opp as never,
+      "sf",
+      "league-1",
+      baselineScoring,
+      new Map(),
+      false,
+      undefined,
+      async (send, receive, leagueId, mode) =>
+        scoreTradeFinderPackage(send, receive, leagueId, mode),
+      { constraints: ["no_qbs"], maxEvaluationsPerOpponent: 32 }
+    );
+
+    expect(generated.length).toBeGreaterThan(0);
+    expect(generated.every((pkg) =>
+      [...pkg.you_send, ...pkg.you_receive].every((asset) => asset.position !== "QB")
+    )).toBe(true);
+  });
+
+  it("can focus generation on tier-down strategy lanes", async () => {
+    const userQb = coreAsset({ player_id: "user-qb", full_name: "Elite User QB", position: "QB", edge_score: 92 });
+    const userWr = coreAsset({ player_id: "user-wr", full_name: "User WR", position: "WR", edge_score: 70 });
+    const oppQb = coreAsset({ player_id: "opp-qb", full_name: "Lesser Opp QB", position: "QB", edge_score: 78 });
+    const oppWr = coreAsset({ player_id: "opp-wr", full_name: "Opp WR", position: "WR", edge_score: 82 });
+    const user = profile({
+      roster: { ...profile({}).roster, is_user: true, archetype: "Rebuilder", core_assets: [userQb, userWr] },
+      byPos: byPosFromAssets([userQb, userWr]),
+      surplus: { QB: [userQb], RB: [], WR: [userWr], TE: [] },
+      tradeablePicks: [],
+    });
+    const opp = profile({
+      roster: { ...profile({}).roster, roster_id: 2, display_name: "Opponent", archetype: "All-In Contender", core_assets: [oppWr, oppQb] },
+      byPos: byPosFromAssets([oppWr, oppQb]),
+      needs: ["QB"],
+      surplus: { QB: [oppQb], RB: [], WR: [oppWr], TE: [] },
+      tradeablePicks: [scoredPick("2027 Mid 2nd", 42, 2, 18)],
+    });
+
+    const generated = await generateTradeFinderPackages(
+      user as never,
+      opp as never,
+      "sf",
+      "league-1",
+      baselineScoring,
+      new Map(),
+      false,
+      undefined,
+      async (send, receive, leagueId, mode) =>
+        scoreTradeFinderPackage(send, receive, leagueId, mode),
+      { strategyFocus: "tier_down", maxEvaluationsPerOpponent: 32 }
+    );
+
+    expect(generated.length).toBeGreaterThan(0);
+    expect(generated.every((pkg) =>
+      ["tier_down", "rebuild_sell", "productive_struggle"].includes(pkg.strategy_type ?? "") &&
+      pkg.you_send.length === 1 &&
+      pkg.you_receive.length >= 2
+    )).toBe(true);
+  });
+
   it("keeps need-based metadata consistent with package contents", () => {
     const annotated = annotateTradeFinderPackage(
       packageFrom([player("Send QB", "QB", 68)], [player("Receive WR", "WR", 68)]),
@@ -576,6 +896,74 @@ describe("Find Trades generator quality", () => {
 
     expect(ranked).toContain(consolidation);
     expect(ranked.filter((pkg) => pkg.trade_type === "1-for-1")).toHaveLength(1);
+  });
+
+  it("diversifies receive-side player targets instead of filling a card with one player", () => {
+    const eliteWr = player("Elite WR", "WR", 86, { context_trade_value: 12_000, trade_power: 12_000 });
+    const targetRb = player("Target RB", "RB", 78, { context_trade_value: 9_000, trade_power: 9_000 });
+    const targetTe = player("Target TE", "TE", 76, { context_trade_value: 8_800, trade_power: 8_800 });
+    const repeatedElitePackages = [
+      packageFrom(
+        [
+          player("Send RB", "RB", 72, { context_trade_value: 5_000, trade_power: 5_000 }),
+          player("Send WR Depth A", "WR", 66, { context_trade_value: 4_000, trade_power: 4_000 }),
+        ],
+        [eliteWr],
+        { type: "consolidation", trade_type: "2-for-1", label: "2-for-1 Consolidation" }
+      ),
+      packageFrom(
+        [
+          player("Send WR", "WR", 70, { context_trade_value: 5_000, trade_power: 5_000 }),
+          player("Send RB Depth", "RB", 66, { context_trade_value: 4_000, trade_power: 4_000 }),
+        ],
+        [eliteWr],
+        { type: "consolidation", trade_type: "2-for-1", label: "2-for-1 Consolidation" }
+      ),
+      packageFrom(
+        [
+          player("Send TE", "TE", 68, { context_trade_value: 4_800, trade_power: 4_800 }),
+          player("Send WR Depth B", "WR", 65, { context_trade_value: 3_800, trade_power: 3_800 }),
+        ],
+        [eliteWr],
+        { type: "consolidation", trade_type: "2-for-1", label: "2-for-1 Consolidation" }
+      ),
+    ];
+    const otherTargets = [
+      packageFrom(
+        [
+          player("Send WR 2", "WR", 70, { context_trade_value: 4_700, trade_power: 4_700 }),
+          player("Send TE Depth", "TE", 64, { context_trade_value: 3_100, trade_power: 3_100 }),
+        ],
+        [targetRb],
+        { type: "consolidation", trade_type: "2-for-1", label: "2-for-1 Consolidation" }
+      ),
+      packageFrom(
+        [
+          player("Send RB 2", "RB", 69, { context_trade_value: 4_500, trade_power: 4_500 }),
+          player("Send WR Depth", "WR", 64, { context_trade_value: 3_000, trade_power: 3_000 }),
+        ],
+        [targetTe],
+        { type: "consolidation", trade_type: "2-for-1", label: "2-for-1 Consolidation" }
+      ),
+    ];
+    const annotated = [...repeatedElitePackages, ...otherTargets].map((pkg) =>
+      annotateTradeFinderPackage(pkg, {
+        userNeeds: ["WR", "RB", "TE"],
+        opponentNeeds: ["RB", "WR", "TE"],
+        userArchetype: "Competitor",
+        opponentArchetype: "Rebuilder",
+      })
+    );
+
+    const ranked = dedupeAndRankTradeFinderPackages(annotated, 4);
+    const receivePlayerIds = ranked
+      .map((pkg) => pkg.you_receive.find((asset) => asset.asset_type === "player")?.player_id)
+      .filter(Boolean);
+    const uniqueReceivePlayerIds = new Set(receivePlayerIds);
+
+    expect(ranked).toHaveLength(4);
+    expect(uniqueReceivePlayerIds.size).toBeGreaterThanOrEqual(3);
+    expect(receivePlayerIds.filter((id) => id === eliteWr.player_id)).toHaveLength(2);
   });
 
   it("ranks low-confidence fallback behind better results while allowing it to fill extra slots", () => {

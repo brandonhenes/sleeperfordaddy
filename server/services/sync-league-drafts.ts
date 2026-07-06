@@ -2,6 +2,7 @@ import { db } from "../db/connection.js";
 import { sql } from "drizzle-orm";
 import { getLeagueDrafts, getDraftPicks } from "../sleeper/drafts.js";
 import { getPowerRankings } from "./power-rankings.js";
+import { resolveDraftPickRosterId } from "./draft-result-helpers.js";
 import type { LeagueADP } from "../../shared/types.js";
 
 export async function syncLeagueDraftResults(
@@ -18,10 +19,12 @@ export async function syncLeagueDraftResults(
     : await getPowerRankings(username);
   let totalDrafts = 0;
   let totalPicks = 0;
+  let skippedPicks = 0;
 
   for (const league of allLeagues) {
     try {
       const drafts = await getLeagueDrafts(league.league_id);
+      const ownerToRosterId = await loadOwnerRosterIds(league.league_id);
       for (const draft of drafts) {
         const rounds = Number((draft.settings as Record<string, unknown> | undefined)?.rounds ?? 99);
         if (rounds > 8) continue;
@@ -37,18 +40,25 @@ export async function syncLeagueDraftResults(
         const picks = await getDraftPicks(draft.draft_id);
         if (picks.length === 0) continue;
 
-        const values = picks.map((p) => ({
-          league_id: league.league_id,
-          draft_id: draft.draft_id,
-          season: draft.season,
-          pick_number: p.pick_no,
-          round: p.round,
-          pick_in_round: p.draft_slot,
-          roster_id: p.roster_id,
-          player_id: p.player_id,
-          player_name: `${p.metadata.first_name ?? ""} ${p.metadata.last_name ?? ""}`.trim() || null,
-          position: p.metadata.position ?? null,
-        }));
+        const values = picks.flatMap((p) => {
+          const rosterId = resolveDraftPickRosterId(p, draft, ownerToRosterId);
+          if (rosterId == null) {
+            skippedPicks += 1;
+            return [];
+          }
+          return [{
+            league_id: league.league_id,
+            draft_id: draft.draft_id,
+            season: draft.season,
+            pick_number: p.pick_no,
+            round: p.round,
+            pick_in_round: p.draft_slot,
+            roster_id: rosterId,
+            player_id: p.player_id,
+            player_name: `${p.metadata.first_name ?? ""} ${p.metadata.last_name ?? ""}`.trim() || null,
+            position: p.metadata.position ?? null,
+          }];
+        });
 
         if (values.length === 0) continue;
         const BATCH = 50;
@@ -78,8 +88,21 @@ export async function syncLeagueDraftResults(
     }
   }
 
-  console.log(`[draft-results] Synced ${totalDrafts} drafts with ${totalPicks} picks`);
+  console.log(`[draft-results] Synced ${totalDrafts} drafts with ${totalPicks} picks${skippedPicks > 0 ? `; skipped ${skippedPicks} picks without roster mapping` : ""}`);
   return { drafts: totalDrafts, picks: totalPicks };
+}
+
+async function loadOwnerRosterIds(leagueId: string): Promise<Map<string, number>> {
+  const rows = await db.execute(sql`
+    SELECT owner_id, roster_id
+    FROM rosters
+    WHERE league_id = ${leagueId}
+      AND owner_id IS NOT NULL
+  `);
+  return new Map(
+    (rows as unknown as Array<{ owner_id: string; roster_id: number }>)
+      .map((row) => [row.owner_id, row.roster_id])
+  );
 }
 
 async function hasDraftResultsTable(): Promise<boolean> {

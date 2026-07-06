@@ -3,6 +3,7 @@ import { getDraftPicks, getLeagueDrafts } from "../sleeper/drafts.js";
 import { getLeagueRosters } from "../sleeper/rosters.js";
 import { db } from "../db/connection.js";
 import { sql } from "drizzle-orm";
+import { resolveDraftPickRosterId } from "./draft-result-helpers.js";
 
 // ─── Types ───
 
@@ -208,22 +209,24 @@ async function getRookieDraftOrderForLeague(
     if (byRoster.size > 0) return byRoster;
   }
 
-  // Fallback: user_id -> position from draft_order, mapped to roster_id via rosters.
-  if (!rookieDraft.draft_order) return null;
   const rosters = await getLeagueRosters(leagueId);
   const ownerToRoster = new Map<string, number>();
   for (const r of rosters) {
     if (r.owner_id) ownerToRoster.set(r.owner_id, r.roster_id);
   }
-  const order = new Map<number, number>();
-  for (const [userId, posRaw] of Object.entries(rookieDraft.draft_order)) {
-    const rosterId = ownerToRoster.get(userId);
-    const pos = Number(posRaw);
-    if (rosterId != null && Number.isFinite(pos)) {
-      order.set(rosterId, pos);
+
+  // Fallback: user_id -> position from draft_order, mapped to roster_id via rosters.
+  if (rookieDraft.draft_order) {
+    const order = new Map<number, number>();
+    for (const [userId, posRaw] of Object.entries(rookieDraft.draft_order)) {
+      const rosterId = ownerToRoster.get(userId);
+      const pos = Number(posRaw);
+      if (rosterId != null && Number.isFinite(pos)) {
+        order.set(rosterId, pos);
+      }
     }
+    if (order.size > 0) return order;
   }
-  if (order.size > 0) return order;
 
   // Last fallback: derive slot order from actual picks in round 1.
   const picks = await getDraftPicks(rookieDraft.draft_id);
@@ -237,9 +240,9 @@ async function getRookieDraftOrderForLeague(
 
   const byRoster = new Map<number, number>();
   for (const p of firstRound) {
-    const rosterId = Number(p.roster_id);
+    const rosterId = resolveDraftPickRosterId(p, rookieDraft, ownerToRoster);
     const slot = Number(p.draft_slot);
-    if (!Number.isFinite(rosterId) || !Number.isFinite(slot)) continue;
+    if (rosterId == null || !Number.isFinite(slot)) continue;
     if (!byRoster.has(rosterId)) byRoster.set(rosterId, slot);
   }
 

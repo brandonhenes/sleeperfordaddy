@@ -1,4 +1,6 @@
-import { useState } from "react";
+import type { Dispatch, SetStateAction } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import { PickBadge, PlayerLink, PositionBadge } from "../../components/ui";
 import {
   acceptanceColor,
@@ -6,11 +8,17 @@ import {
   humanize,
   warningColors,
 } from "../../lib/format";
+import { buildTradeCalculatorUrl } from "../../lib/trade-calculator-url";
 import type {
   TradeHealthWarning,
+  TradeFinderConstraint,
+  TradeFinderSearchDepth,
   TradePackage,
   TradePackageAsset,
+  TradePartnerTarget,
   TradeSuggestion,
+  TradeAssetInput,
+  TradeStrategyType,
 } from "@shared/types";
 
 function opportunityLabel(type: TradePackage["opportunity_type"]): string | null {
@@ -300,11 +308,358 @@ function PackageView({ pkg }: { pkg: TradePackage }) {
   );
 }
 
-export default function PartnerCard({ suggestion }: { suggestion: TradeSuggestion }) {
-  const [open, setOpen] = useState(false);
+interface PartnerCardSteering {
+  targetPlayerId: string | null;
+  setTargetPlayerId: Dispatch<SetStateAction<string | null>>;
+  avoidTargetPlayerIds: string[];
+  setAvoidTargetPlayerIds: Dispatch<SetStateAction<string[]>>;
+  laneConstraints: TradeFinderConstraint[];
+  setLaneConstraints: Dispatch<SetStateAction<TradeFinderConstraint[]>>;
+  strategyFocus: TradeStrategyType | null;
+  setStrategyFocus: Dispatch<SetStateAction<TradeStrategyType | null>>;
+  searchDepth: TradeFinderSearchDepth;
+  setSearchDepth: Dispatch<SetStateAction<TradeFinderSearchDepth>>;
+  partnerTargets: TradePartnerTarget[];
+  partnerTargetsLoading: boolean;
+  leagueId: string;
+  opponentRosterId: number | null;
+}
+
+const constraintLabels: Array<{ value: TradeFinderConstraint; label: string }> = [
+  { value: "cheaper", label: "Cheaper" },
+  { value: "no_firsts", label: "No 1sts" },
+  { value: "more_picks_back", label: "More picks back" },
+  { value: "only_qb_tier_down", label: "QB tier-down" },
+  { value: "no_qbs", label: "No QB trades" },
+  { value: "no_aging_rbs", label: "No aging RBs" },
+  { value: "win_now_only", label: "Win-now only" },
+  { value: "more_realistic", label: "More realistic" },
+];
+
+const strategyLabels: Array<{ value: TradeStrategyType; label: string }> = [
+  { value: "consolidation", label: "Consolidate" },
+  { value: "tier_down", label: "Tier down" },
+  { value: "win_now_buy", label: "Win-now" },
+  { value: "productive_struggle", label: "Productive struggle" },
+  { value: "pick_arbitrage", label: "Pick arbitrage" },
+  { value: "position_arbitrage", label: "Position edge" },
+  { value: "roster_spot_arbitrage", label: "Roster spots" },
+  { value: "liquidity_upgrade", label: "Liquidity" },
+];
+
+function assetShort(asset: TradePackageAsset): string {
+  if (asset.asset_type === "pick") return asset.label;
+  return asset.label;
+}
+
+function assetSummary(assets: TradePackageAsset[], max = 2): string {
+  if (assets.length === 0) return "No assets";
+  const shown = assets.slice(0, max).map(assetShort);
+  const extra = assets.length - shown.length;
+  return extra > 0 ? `${shown.join(" + ")} + ${extra} more` : shown.join(" + ");
+}
+
+function primaryReceiveAsset(pkg: TradePackage): TradePackageAsset | null {
+  const players = pkg.you_receive.filter((asset) => asset.asset_type === "player");
+  const candidates = players.length > 0 ? players : pkg.you_receive;
+  return [...candidates].sort((a, b) => b.edge_score - a.edge_score)[0] ?? null;
+}
+
+function receivePlayerIds(pkg: TradePackage): string[] {
+  return pkg.you_receive
+    .filter((asset) => asset.asset_type === "player" && asset.player_id)
+    .map((asset) => String(asset.player_id));
+}
+
+function packageAssetToTradeInput(asset: TradePackageAsset): TradeAssetInput {
+  if (asset.asset_type === "player") {
+    return { type: "player", player_id: asset.player_id ?? undefined };
+  }
+  return {
+    type: "pick",
+    pick_season: asset.pick_season,
+    pick_round: asset.pick_round,
+    pick_tier: asset.pick_tier,
+    pick_slot: asset.pick_slot,
+    pick_label: asset.label,
+    pick_original_owner_id: asset.pick_original_owner_id,
+  };
+}
+
+function normalizeStrategyFocus(strategy: TradeStrategyType | null | undefined): TradeStrategyType | null {
+  if (!strategy) return null;
+  if (strategy === "rebuild_sell" || strategy === "productive_struggle") return "tier_down";
+  if (strategy === "roster_spot_arbitrage") return "consolidation";
+  if (strategy === "roster_fit_trade") return "position_arbitrage";
+  return strategy;
+}
+
+function componentColor(value: number | undefined): string {
+  if (value == null) return "var(--text-muted)";
+  if (value >= 70) return "var(--green)";
+  if (value >= 45) return "var(--amber)";
+  return "var(--text-muted)";
+}
+
+function laneTitle(pkg: TradePackage): string {
+  const target = primaryReceiveAsset(pkg);
+  const strategy = pkg.strategy_label || opportunityLabel(pkg.opportunity_type) || pkg.label;
+  return target ? `${strategy}: ${target.label}` : strategy;
+}
+
+function laneConfidence(pkg: TradePackage): string {
+  if (pkg.quality_tier === "low_confidence") return "Thin";
+  if (pkg.quality_tier === "strong") return "Strong";
+  if (pkg.quality_tier === "speculative") return "Maybe";
+  if (pkg.acceptance?.label) return pkg.acceptance.label;
+  return "Thin";
+}
+
+function LaneAssetBox({
+  label,
+  assets,
+  side,
+}: {
+  label: string;
+  assets: TradePackageAsset[];
+  side: "send" | "receive";
+}) {
+  return (
+    <div style={{ border: "1px solid var(--border)", borderLeft: `3px solid ${side === "send" ? "#ef4444" : "#22c55e"}`, borderRadius: 10, padding: 12, background: "var(--dark-base)" }}>
+      <div style={{ color: "var(--text-muted)", fontSize: 10, fontWeight: 800, textTransform: "uppercase", marginBottom: 8 }}>
+        {label}
+      </div>
+      {assets.map((asset, index) => (
+        <div key={`${side}-${asset.label}-${index}`} style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "7px 0", borderTop: index === 0 ? "none" : "1px solid var(--border)", fontSize: 12, alignItems: "center" }}>
+          <span style={{ fontWeight: 800, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{asset.label}</span>
+          <span style={{ color: "var(--text-muted)", whiteSpace: "nowrap" }}>{asset.position ?? "Pick"} {Math.round(asset.edge_score)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SteeringPanel({
+  steering,
+  packages,
+  activePackage,
+}: {
+  steering: PartnerCardSteering;
+  packages: TradePackage[];
+  activePackage: TradePackage | null;
+}) {
+  const [targetSearch, setTargetSearch] = useState("");
+  const selectedTarget = steering.partnerTargets.find((target) => target.player_id === steering.targetPlayerId) ?? null;
+  const visibleTargets = useMemo(() => {
+    const needle = targetSearch.trim().toLowerCase();
+    const base = needle
+      ? steering.partnerTargets.filter((target) =>
+          `${target.full_name} ${target.position} ${target.tags.join(" ")}`.toLowerCase().includes(needle)
+        )
+      : steering.partnerTargets;
+    return base.slice(0, 8);
+  }, [steering.partnerTargets, targetSearch]);
+
+  function toggleConstraint(value: TradeFinderConstraint) {
+    steering.setLaneConstraints((current) =>
+      current.includes(value)
+        ? current.filter((entry) => entry !== value)
+        : [...current, value]
+    );
+  }
+
+  function findDifferentTargets() {
+    const ids = [...new Set(packages.flatMap(receivePlayerIds))];
+    steering.setTargetPlayerId(null);
+    steering.setAvoidTargetPlayerIds(ids);
+  }
+
+  function findSameStrategyDifferentTarget() {
+    const ids = [...new Set((activePackage ? [activePackage] : packages).flatMap(receivePlayerIds))];
+    const nextStrategy = normalizeStrategyFocus(activePackage?.strategy_type ?? steering.strategyFocus);
+    if (nextStrategy) steering.setStrategyFocus(nextStrategy);
+    steering.setTargetPlayerId(null);
+    steering.setAvoidTargetPlayerIds(ids);
+    steering.setSearchDepth("deep");
+  }
+
+  function clearSteering() {
+    steering.setTargetPlayerId(null);
+    steering.setAvoidTargetPlayerIds([]);
+    steering.setLaneConstraints([]);
+    steering.setStrategyFocus(null);
+    steering.setSearchDepth("quick");
+    setTargetSearch("");
+  }
+
+  return (
+    <div style={{ border: "1px solid rgba(59,130,246,0.35)", background: "rgba(59,130,246,0.08)", borderRadius: 12, padding: 12, marginBottom: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 900, color: "#93c5fd", textTransform: "uppercase" }}>Steer the search</div>
+          <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 3 }}>
+            {selectedTarget ? `Targeting ${selectedTarget.full_name}` : steering.avoidTargetPlayerIds.length > 0 ? "Avoiding current receive targets" : "Refine this partner's lanes"}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={clearSteering}
+          style={{ border: "1px solid var(--border)", background: "var(--dark-base)", color: "var(--text-muted)", borderRadius: 8, padding: "7px 10px", fontSize: 11, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}
+        >
+          Back to default lanes
+        </button>
+      </div>
+
+      <div style={{ display: "grid", gap: 8 }}>
+        <input
+          value={targetSearch}
+          onChange={(event) => setTargetSearch(event.target.value)}
+          placeholder={
+            steering.partnerTargetsLoading
+              ? "Loading their roster..."
+              : steering.partnerTargets.length === 0
+                ? "No targetable players loaded"
+                : "Search a player to target..."
+          }
+          disabled={steering.partnerTargetsLoading || steering.partnerTargets.length === 0}
+          style={{ width: "100%", minHeight: 40, border: "1px solid var(--border)", background: "var(--dark-base)", color: "var(--text)", borderRadius: 9, padding: "8px 10px", fontSize: 13, fontFamily: "inherit", boxSizing: "border-box" }}
+        />
+        {visibleTargets.length > 0 && (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(145px, 1fr))", gap: 7 }}>
+            {visibleTargets.map((target) => {
+              const active = target.player_id === steering.targetPlayerId;
+              return (
+                <button
+                  key={target.player_id}
+                  type="button"
+                  onClick={() => {
+                    steering.setTargetPlayerId(active ? null : target.player_id);
+                    steering.setAvoidTargetPlayerIds([]);
+                  }}
+                  style={{ textAlign: "left", border: active ? "1px solid rgba(34,197,94,0.75)" : "1px solid var(--border)", background: active ? "rgba(34,197,94,0.13)" : "rgba(7,8,11,0.55)", color: "var(--text)", borderRadius: 9, padding: 9, fontSize: 11, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}
+                >
+                  <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{target.full_name}</span>
+                  <span style={{ display: "block", color: "var(--text-muted)", marginTop: 2 }}>{target.position} {Math.round(target.edge_score)}{target.tags[0] ? ` · ${target.tags[0]}` : ""}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+        <button
+          type="button"
+          onClick={() => steering.setSearchDepth((current) => current === "deep" ? "quick" : "deep")}
+          style={{ border: steering.searchDepth === "deep" ? "1px solid rgba(34,197,94,0.65)" : "1px solid rgba(59,130,246,0.45)", background: steering.searchDepth === "deep" ? "rgba(34,197,94,0.13)" : "rgba(59,130,246,0.12)", color: steering.searchDepth === "deep" ? "var(--green)" : "#93c5fd", borderRadius: 999, padding: "7px 10px", fontSize: 11, fontWeight: 900, cursor: "pointer", fontFamily: "inherit" }}
+        >
+          {steering.searchDepth === "deep" ? "Deep search on" : "Expand search"}
+        </button>
+        {strategyLabels.map((strategy) => {
+          const active = steering.strategyFocus === strategy.value;
+          return (
+            <button
+              key={strategy.value}
+              type="button"
+              onClick={() => steering.setStrategyFocus((current) => current === strategy.value ? null : strategy.value)}
+              style={{ border: active ? "1px solid rgba(34,197,94,0.65)" : "1px solid var(--border)", background: active ? "rgba(34,197,94,0.13)" : "var(--dark-base)", color: active ? "var(--green)" : "var(--text-muted)", borderRadius: 999, padding: "7px 10px", fontSize: 11, fontWeight: 900, cursor: "pointer", fontFamily: "inherit" }}
+            >
+              {strategy.label}
+            </button>
+          );
+        })}
+      </div>
+
+      <select
+        value={steering.targetPlayerId ?? ""}
+        onChange={(event) => {
+          steering.setTargetPlayerId(event.target.value || null);
+          steering.setAvoidTargetPlayerIds([]);
+        }}
+        disabled={steering.partnerTargetsLoading || steering.partnerTargets.length === 0}
+        style={{ display: "none", width: "100%", minHeight: 40, border: "1px solid var(--border)", background: "var(--dark-base)", color: "var(--text)", borderRadius: 9, padding: "8px 10px", fontSize: 13, fontFamily: "inherit" }}
+      >
+        <option value="">
+          {steering.partnerTargetsLoading
+            ? "Loading their roster..."
+            : steering.partnerTargets.length === 0
+              ? "No targetable players loaded"
+              : "Target a player on this team..."}
+        </option>
+        {steering.partnerTargets.map((target) => (
+          <option key={target.player_id} value={target.player_id}>
+            {target.full_name} ({target.position} {Math.round(target.edge_score)}{target.tags.length > 0 ? ` · ${target.tags.slice(0, 2).join(", ")}` : ""})
+          </option>
+        ))}
+      </select>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+        <button
+          type="button"
+          onClick={findSameStrategyDifferentTarget}
+          style={{ border: "1px solid rgba(34,197,94,0.55)", background: "rgba(34,197,94,0.12)", color: "var(--green)", borderRadius: 999, padding: "7px 10px", fontSize: 11, fontWeight: 900, cursor: "pointer", fontFamily: "inherit" }}
+        >
+          Same strategy, new target
+        </button>
+        <button
+          type="button"
+          onClick={findDifferentTargets}
+          style={{ border: "1px solid rgba(59,130,246,0.45)", background: "rgba(59,130,246,0.12)", color: "#93c5fd", borderRadius: 999, padding: "7px 10px", fontSize: 11, fontWeight: 900, cursor: "pointer", fontFamily: "inherit" }}
+        >
+          Different targets
+        </button>
+        {constraintLabels.map((constraint) => {
+          const active = steering.laneConstraints.includes(constraint.value);
+          return (
+            <button
+              key={constraint.value}
+              type="button"
+              onClick={() => toggleConstraint(constraint.value)}
+              style={{ border: active ? "1px solid rgba(59,130,246,0.65)" : "1px solid var(--border)", background: active ? "rgba(59,130,246,0.18)" : "var(--dark-base)", color: active ? "#93c5fd" : "var(--text-muted)", borderRadius: 999, padding: "7px 10px", fontSize: 11, fontWeight: 900, cursor: "pointer", fontFamily: "inherit" }}
+            >
+              {constraint.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+export default function PartnerCard({
+  suggestion,
+  username,
+  leagueId,
+  steering,
+}: {
+  suggestion: TradeSuggestion;
+  username: string;
+  leagueId: string;
+  steering?: PartnerCardSteering;
+}) {
+  const [open, setOpen] = useState(() => Boolean(steering));
   const [activePackage, setActivePackage] = useState(0);
   const { partner, packages } = suggestion;
-  const pkg = packages[activePackage];
+  const pkg = packages[Math.min(activePackage, Math.max(0, packages.length - 1))];
+  const calculatorUrl = pkg
+    ? buildTradeCalculatorUrl({
+        username,
+        leagueId,
+        opponentRosterId: partner.roster_id,
+        send: pkg.you_send.map(packageAssetToTradeInput),
+        receive: pkg.you_receive.map(packageAssetToTradeInput),
+        sendLabels: pkg.you_send.map((asset) => asset.label),
+        receiveLabels: pkg.you_receive.map((asset) => asset.label),
+      })
+    : "/trade-calculator";
+
+  useEffect(() => {
+    if (activePackage > packages.length - 1) setActivePackage(0);
+  }, [activePackage, packages.length]);
+
+  useEffect(() => {
+    if (steering) setOpen(true);
+  }, [steering]);
 
   return (
     <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 12, marginBottom: 12, overflow: "hidden" }}>
@@ -362,26 +717,119 @@ export default function PartnerCard({ suggestion }: { suggestion: TradeSuggestio
           </span>
         )}
         <div style={{ fontSize: 12, color: "var(--text-muted)", maxWidth: 300, flex: "1 1 220px", textAlign: "right", lineHeight: 1.4 }}>{partner.compatibility_reason}</div>
-        <span style={{ fontSize: 12, color: "var(--text-muted)", marginLeft: 8 }}>{open ? "\u00e2\u2013\u00b2" : "\u00e2\u2013\u00bc"}</span>
+        <span style={{ color: "var(--text-muted)", marginLeft: 8, display: "inline-flex" }}>
+          {open ? <ChevronUp size={16} aria-hidden /> : <ChevronDown size={16} aria-hidden />}
+        </span>
       </button>
 
       {open && (
         <div style={{ padding: "0 18px 18px" }}>
+          {steering && <SteeringPanel steering={steering} packages={packages} activePackage={pkg ?? null} />}
+
           {packages.length > 1 && (
-            <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
-              {packages.map((p, i) => (
-                <button
-                  key={`package-tab-${i}-${p.type}`}
-                  onClick={() => setActivePackage(i)}
-                  style={{ background: activePackage === i ? "var(--amber)" : "var(--dark-base)", color: activePackage === i ? "var(--dark-base)" : "var(--text-muted)", border: "1px solid var(--border)", borderRadius: 6, padding: "6px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}
-                >
-                  {p.label}
-                </button>
-              ))}
+            <div style={{ display: "grid", gap: 10, marginBottom: 14 }}>
+              {packages.map((p, i) => {
+                const active = activePackage === i;
+                const confidence = laneConfidence(p);
+                return (
+                  <button
+                    key={`package-lane-${i}-${p.type}`}
+                    onClick={() => setActivePackage(i)}
+                    style={{
+                      width: "100%",
+                      textAlign: "left",
+                      background: active ? "rgba(59,130,246,0.12)" : "var(--dark-base)",
+                      color: "var(--text)",
+                      border: active ? "1px solid rgba(59,130,246,0.65)" : "1px solid var(--border)",
+                      borderRadius: 10,
+                      padding: 12,
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", marginBottom: 7 }}>
+                      <span style={{ fontSize: 13, fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {laneTitle(p)}
+                      </span>
+                      <span style={{ border: "1px solid var(--border)", borderRadius: 999, padding: "3px 8px", color: confidence === "Likely" || confidence === "Strong" ? "var(--green)" : confidence === "Hard" || confidence === "Thin" ? "var(--text-muted)" : "var(--amber)", fontSize: 10, fontWeight: 900, whiteSpace: "nowrap", textTransform: "uppercase" }}>
+                        {confidence}
+                      </span>
+                    </div>
+                    <div style={{ display: "grid", gap: 3, color: "var(--text-muted)", fontSize: 12, lineHeight: 1.35 }}>
+                      <span>Send: {assetSummary(p.you_send, 2)}</span>
+                      <span>Get: {assetSummary(p.you_receive, 2)}</span>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           )}
 
-          {pkg && <PackageView pkg={pkg} />}
+          {pkg && (
+            <div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
+                <LaneAssetBox label="You Send" assets={pkg.you_send} side="send" />
+                <LaneAssetBox label="You Get" assets={pkg.you_receive} side="receive" />
+              </div>
+
+              <div style={{ border: "1px solid var(--border)", background: "var(--dark-base)", borderRadius: 10, padding: 12, marginTop: 10 }}>
+                <div style={{ fontSize: 11, fontWeight: 900, color: "#93c5fd", textTransform: "uppercase", marginBottom: 6 }}>
+                  Why this lane exists
+                </div>
+                <div style={{ fontSize: 12, color: "var(--text-dim)", lineHeight: 1.5 }}>
+                  {pkg.trade_thesis ?? pkg.why_you_do_it}
+                </div>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10, marginTop: 10 }}>
+                <div style={{ border: "1px solid var(--border)", background: "var(--dark-base)", borderRadius: 10, padding: 12 }}>
+                  <div style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 900, textTransform: "uppercase" }}>Value</div>
+                  <div style={{ marginTop: 4, fontSize: 13, fontWeight: 900, color: pkg.delta >= 0 ? "var(--green)" : "var(--red)" }}>
+                    {pkg.delta >= 0 ? "You win" : "You overpay"} by {Math.abs(pkg.delta).toFixed(0)} TP
+                  </div>
+                </div>
+                <div style={{ border: "1px solid var(--border)", background: "var(--dark-base)", borderRadius: 10, padding: 12 }}>
+                  <div style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 900, textTransform: "uppercase" }}>Acceptance</div>
+                  <div style={{ marginTop: 4, fontSize: 13, fontWeight: 900 }}>
+                    {pkg.acceptance ? `${pkg.acceptance.label} (${Math.round(pkg.acceptance.probability)}%)` : humanize(pkg.quality_tier ?? "speculative")}
+                  </div>
+                </div>
+              </div>
+
+              {pkg.ranking_components && (
+                <div style={{ border: "1px solid var(--border)", background: "var(--dark-base)", borderRadius: 10, padding: 12, marginTop: 10 }}>
+                  <div style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 900, textTransform: "uppercase", marginBottom: 8 }}>Lane score</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8 }}>
+                    {[
+                      ["Value", pkg.ranking_components.valuation_edge],
+                      ["Fit", pkg.ranking_components.roster_fit],
+                      ["Accept", pkg.ranking_components.acceptance_likelihood],
+                      ["Liquid", pkg.ranking_components.liquidity],
+                    ].map(([label, value]) => (
+                      <div key={String(label)} style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 9, color: "var(--text-muted)", fontWeight: 800, textTransform: "uppercase" }}>{label}</div>
+                        <div style={{ fontSize: 12, fontWeight: 900, color: componentColor(Number(value)) }}>{value}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <a
+                href={calculatorUrl}
+                style={{ display: "block", textAlign: "center", marginTop: 10, border: "1px solid rgba(59,130,246,0.55)", background: "rgba(59,130,246,0.12)", color: "#93c5fd", borderRadius: 10, padding: "10px 12px", fontSize: 12, fontWeight: 900, textDecoration: "none" }}
+              >
+                Open lane in Calculator
+              </a>
+
+              <details style={{ marginTop: 12 }}>
+                <summary style={{ cursor: "pointer", color: "var(--text-muted)", fontSize: 12, fontWeight: 900, padding: "8px 0" }}>
+                  Full valuation details
+                </summary>
+                <PackageView pkg={pkg} />
+              </details>
+            </div>
+          )}
         </div>
       )}
     </div>

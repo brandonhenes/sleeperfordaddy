@@ -2,6 +2,10 @@ import type {
   CoreAsset,
   LeaguePowerRanking,
   TradeBoardLine,
+  TradeFinderConstraint,
+  TradeFinderSearchDepth,
+  TradePartnerTarget,
+  TradeStrategyType,
   RosterRanking,
   ScoredPick,
   TradeSuggestion,
@@ -57,7 +61,7 @@ import {
 // Constants
 
 const POSITIONS = ["QB", "RB", "WR", "TE"] as const;
-type Pos = (typeof POSITIONS)[number];
+export type Pos = (typeof POSITIONS)[number];
 
 const MIN_STARTERS: Record<Pos, number> = { QB: 1, RB: 2, WR: 2, TE: 1 };
 const MIN_EDGE_SCORE = 42;
@@ -109,6 +113,12 @@ function tradeFinderResultCacheKey(
     username.toLowerCase(),
     leagueId,
     options.cacheNamespace ?? "full",
+    options.opponentRosterId ?? "all",
+    options.targetPlayerId ?? "any-target",
+    [...new Set(options.avoidTargetPlayerIds ?? [])].sort().join(",") || "avoid-none",
+    [...new Set(options.constraints ?? [])].sort().join(",") || "constraints-none",
+    options.strategyFocus ?? "strategy-any",
+    options.searchDepth ?? "quick",
     options.maxOpponents ?? TRADE_FINDER_MAX_OPPONENTS,
     options.maxEvaluationsPerOpponent ?? TRADE_FINDER_MAX_EVALUATIONS_PER_OPPONENT,
     options.maxPackagesPerPartner ?? TRADE_FINDER_MAX_PACKAGES_PER_PARTNER,
@@ -206,7 +216,7 @@ const ARCHETYPE_WANTS: Record<string, string> = {
 
 // Types
 
-interface RosterProfile {
+export interface RosterProfile {
   roster: RosterRanking;
   byPos: Record<Pos, CoreAsset[]>;
   needs: Pos[];
@@ -223,6 +233,12 @@ type EnrichedPick = ScoredPick & {
 
 interface TradeFinderRuntimeOptions {
   cacheNamespace?: string;
+  opponentRosterId?: number;
+  targetPlayerId?: string;
+  avoidTargetPlayerIds?: string[];
+  constraints?: TradeFinderConstraint[];
+  strategyFocus?: TradeStrategyType;
+  searchDepth?: TradeFinderSearchDepth;
   maxEvaluationsPerOpponent?: number;
   maxOpponents?: number;
   maxPackagesPerPartner?: number;
@@ -364,6 +380,13 @@ function packageShapeKey(pkg: Pick<TradePackage, "you_send" | "you_receive" | "o
   return `${pkg.opportunity_type ?? "unknown"}:${send}->${receive}`;
 }
 
+function primaryReceiveAssetKey(pkg: Pick<TradePackage, "you_receive">): string {
+  const playerTargets = pkg.you_receive.filter((asset) => asset.asset_type === "player");
+  const candidates = playerTargets.length > 0 ? playerTargets : pkg.you_receive;
+  const target = bestAsset(candidates);
+  return target ? assetShapeKey(target) : "none";
+}
+
 function classStrengthsKey(classStrengths?: ClassStrengthMap): string {
   if (!classStrengths) return "default";
   return Object.entries(classStrengths)
@@ -465,12 +488,131 @@ function isAgingOrFragilePlayer(asset: CoreAsset): boolean {
   return asset.availability !== "active";
 }
 
+function isTierDownAnchor(outgoing: CoreAsset, candidate: CoreAsset): boolean {
+  return (
+    candidate.player_id !== outgoing.player_id &&
+    candidate.edge_score >= 55 &&
+    candidate.edge_score <= outgoing.edge_score - 3 &&
+    candidate.edge_score >= outgoing.edge_score - 20
+  );
+}
+
+function tierDownAnchorFor(
+  outgoing: CoreAsset,
+  candidates: CoreAsset[],
+  allowCrossPosition: boolean
+): CoreAsset | null {
+  const samePosition = candidates.find(
+    (candidate) =>
+      candidate.position === outgoing.position &&
+      isTierDownAnchor(outgoing, candidate)
+  );
+  if (samePosition) return samePosition;
+  if (!allowCrossPosition) return null;
+  return candidates.find(
+    (candidate) =>
+      candidate.position !== outgoing.position &&
+      isTierDownAnchor(outgoing, candidate)
+  ) ?? null;
+}
+
 function packageHasPickReturn(pkg: Pick<TradePackage, "you_receive">): boolean {
   return pkg.you_receive.some((asset) => asset.asset_type === "pick");
 }
 
 function packageHasPickSend(pkg: Pick<TradePackage, "you_send">): boolean {
   return pkg.you_send.some((asset) => asset.asset_type === "pick");
+}
+
+function packageHasFirstRoundPickSend(pkg: Pick<TradePackage, "you_send">): boolean {
+  return pkg.you_send.some(
+    (asset) => asset.asset_type === "pick" && assetRound(asset) === 1
+  );
+}
+
+function packageHasQuarterback(pkg: Pick<TradePackage, "you_send" | "you_receive">): boolean {
+  return [...pkg.you_send, ...pkg.you_receive].some(
+    (asset) => asset.asset_type === "player" && asset.position === "QB"
+  );
+}
+
+function packageReceivesPlayer(pkg: Pick<TradePackage, "you_receive">): boolean {
+  return pkg.you_receive.some((asset) => asset.asset_type === "player");
+}
+
+function packageMatchesStrategyFocus(pkg: TradePackage, focus: TradeStrategyType): boolean {
+  if (pkg.strategy_type === focus) return true;
+  if (focus === "tier_down") {
+    return ["tier_down", "rebuild_sell", "productive_struggle"].includes(pkg.strategy_type ?? "") &&
+      pkg.you_send.length === 1 &&
+      pkg.you_receive.length >= 2;
+  }
+  if (focus === "consolidation") {
+    return ["consolidation", "roster_spot_arbitrage"].includes(pkg.strategy_type ?? "") &&
+      pkg.you_send.length >= 2 &&
+      pkg.you_receive.length === 1;
+  }
+  if (focus === "win_now_buy") {
+    return pkg.strategy_type === "position_arbitrage" && packageReceivesPlayer(pkg);
+  }
+  return false;
+}
+
+function packageReceivePlayerIds(pkg: Pick<TradePackage, "you_receive">): string[] {
+  return pkg.you_receive
+    .filter((asset) => asset.asset_type === "player" && asset.player_id)
+    .map((asset) => String(asset.player_id));
+}
+
+function packageTargetsPlayer(pkg: Pick<TradePackage, "you_receive">, playerId: string): boolean {
+  return packageReceivePlayerIds(pkg).includes(playerId);
+}
+
+function packageIsQbTierDown(pkg: Pick<TradePackage, "you_send" | "you_receive">): boolean {
+  const sendsQb = pkg.you_send.some(
+    (asset) => asset.asset_type === "player" && asset.position === "QB"
+  );
+  const receivesQb = pkg.you_receive.some(
+    (asset) => asset.asset_type === "player" && asset.position === "QB"
+  );
+  return sendsQb && receivesQb && pkg.you_receive.length > 1;
+}
+
+function packageSendsAgingRb(pkg: Pick<TradePackage, "you_send">, user: RosterProfile): boolean {
+  const userAssets = new Map(user.roster.core_assets.map((asset) => [asset.player_id, asset]));
+  return pkg.you_send.some((asset) => {
+    if (asset.asset_type !== "player" || asset.position !== "RB" || !asset.player_id) return false;
+    const source = userAssets.get(asset.player_id);
+    return Boolean(source && (source.age ?? 0) >= 27);
+  });
+}
+
+function packagePassesTradeFinderControls(
+  pkg: TradePackage,
+  user: RosterProfile,
+  options: TradeFinderRuntimeOptions
+): boolean {
+  if (options.targetPlayerId && !packageTargetsPlayer(pkg, options.targetPlayerId)) return false;
+
+  const avoidTargets = new Set(options.avoidTargetPlayerIds ?? []);
+  if (!options.targetPlayerId && avoidTargets.size > 0) {
+    if (packageReceivePlayerIds(pkg).some((playerId) => avoidTargets.has(playerId))) return false;
+  }
+
+  const constraints = new Set(options.constraints ?? []);
+  if (constraints.has("no_firsts") && packageHasFirstRoundPickSend(pkg)) return false;
+  if (constraints.has("cheaper") && packageHasFirstRoundPickSend(pkg)) return false;
+  if (constraints.has("only_qb_tier_down") && !packageIsQbTierDown(pkg)) return false;
+  if (constraints.has("no_aging_rbs") && packageSendsAgingRb(pkg, user)) return false;
+  if (constraints.has("no_qbs") && packageHasQuarterback(pkg)) return false;
+  if (constraints.has("more_picks_back") && !packageHasPickReturn(pkg)) return false;
+  if (constraints.has("win_now_only") && (!packageReceivesPlayer(pkg) || isPickOnlyTradePackage(pkg))) return false;
+  if (constraints.has("more_realistic")) {
+    if (pkg.fairness === "lopsided") return false;
+    if ((pkg.valuation_edge ?? pkg.delta) < -MAJOR_VALUATION_EDGE) return false;
+  }
+  if (options.strategyFocus && !packageMatchesStrategyFocus(pkg, options.strategyFocus)) return false;
+  return true;
 }
 
 export function isMaterialPickOnlyTrade(pkg: Pick<TradePackage, "you_send" | "you_receive" | "delta" | "valuation_percent_gap">): boolean {
@@ -808,6 +950,22 @@ export function shouldSurfaceTradeFinderPackage(pkg: TradePackage): boolean {
   return hardRejectReason(pkg) == null;
 }
 
+function shouldSurfaceTargetFallbackPackage(pkg: TradePackage): boolean {
+  if (hasInvalidAssetData(pkg)) return false;
+  if (isPickOnlyTradePackage(pkg) && !isMaterialPickOnlyTrade(pkg)) return false;
+  if (anchorRuleViolation(pkg)) return false;
+  if (!hasUsefulReturn(pkg)) return false;
+  return packageContainsPlayer(pkg) && pkg.you_receive.some((asset) => asset.asset_type === "player");
+}
+
+function shouldSurfaceWithOptionalTargetFallback(
+  pkg: TradePackage,
+  allowTargetFallback: boolean
+): boolean {
+  return shouldSurfaceTradeFinderPackage(pkg) ||
+    (allowTargetFallback && shouldSurfaceTargetFallbackPackage(pkg));
+}
+
 function withQualityMetadata(pkg: TradePackage): TradePackage {
   const quality = qualityScore(pkg);
   const withComponents = {
@@ -821,11 +979,14 @@ function withQualityMetadata(pkg: TradePackage): TradePackage {
 
 export function dedupeAndRankTradeFinderPackages(
   packages: TradePackage[],
-  maxPackages = 4
+  maxPackages = 4,
+  allowTargetFallback = false
 ): TradePackage[] {
   const seen = new Set<string>();
   const typeCounts = new Map<TradeOpportunityType, number>();
-  const validPackages = packages.filter(shouldSurfaceTradeFinderPackage);
+  const validPackages = packages.filter((pkg) =>
+    shouldSurfaceWithOptionalTargetFallback(pkg, allowTargetFallback)
+  );
   const hasMultiAssetPlayerPackage = validPackages.some(
     (pkg) => !isPickOnlyTradePackage(pkg) && pkg.you_send.length + pkg.you_receive.length > 2
   );
@@ -836,6 +997,8 @@ export function dedupeAndRankTradeFinderPackages(
   const effectiveMaxPackages = betterThanLow.length > 0
     ? maxPackages
     : Math.min(maxPackages, 2);
+  const uniqueReceiveTargets = new Set(pool.map(primaryReceiveAssetKey)).size;
+  const shouldDiversifyReceiveTargets = uniqueReceiveTargets >= 3 && effectiveMaxPackages >= 3;
   const tierRank: Record<TradePackageQualityTier, number> = {
     strong: 3,
     speculative: 2,
@@ -856,6 +1019,7 @@ export function dedupeAndRankTradeFinderPackages(
   );
   const selected: TradePackage[] = [];
   const labelCounts = new Map<string, number>();
+  const receiveTargetCounts = new Map<string, number>();
 
   for (const pkg of sorted) {
     if (selected.length >= effectiveMaxPackages) break;
@@ -863,9 +1027,15 @@ export function dedupeAndRankTradeFinderPackages(
     if (seen.has(key)) continue;
     const type = pkg.opportunity_type ?? "buy_target";
     const typeCount = typeCounts.get(type) ?? 0;
-    const labelCount = labelCounts.get(pkg.label) ?? 0;
+    const receiveTargetKey = primaryReceiveAssetKey(pkg);
+    const labelKey = `${pkg.label}|${receiveTargetKey}`;
+    const labelCount = labelCounts.get(labelKey) ?? 0;
+    const receiveTargetCount = receiveTargetCounts.get(receiveTargetKey) ?? 0;
     if (labelCount >= 1 && selected.length < effectiveMaxPackages - 1) continue;
     if (typeCount >= 2 && selected.length < effectiveMaxPackages - 1) continue;
+    if (shouldDiversifyReceiveTargets && receiveTargetCount >= 1 && selected.length < uniqueReceiveTargets) {
+      continue;
+    }
     if (isPickOnlyTradePackage(pkg) && selected.some(isPickOnlyTradePackage)) continue;
     if (
       hasMultiAssetPlayerPackage &&
@@ -877,7 +1047,8 @@ export function dedupeAndRankTradeFinderPackages(
 
     seen.add(key);
     typeCounts.set(type, typeCount + 1);
-    labelCounts.set(pkg.label, labelCount + 1);
+    labelCounts.set(labelKey, labelCount + 1);
+    receiveTargetCounts.set(receiveTargetKey, receiveTargetCount + 1);
     selected.push(pkg);
   }
 
@@ -886,8 +1057,14 @@ export function dedupeAndRankTradeFinderPackages(
       if (selected.length >= effectiveMaxPackages) break;
       const key = packageShapeKey(pkg);
       if (seen.has(key)) continue;
-      const labelCount = labelCounts.get(pkg.label) ?? 0;
+      const receiveTargetKey = primaryReceiveAssetKey(pkg);
+      const labelKey = `${pkg.label}|${receiveTargetKey}`;
+      const labelCount = labelCounts.get(labelKey) ?? 0;
+      const receiveTargetCount = receiveTargetCounts.get(receiveTargetKey) ?? 0;
       if (labelCount >= 2) continue;
+      if (shouldDiversifyReceiveTargets && receiveTargetCount >= 2) {
+        continue;
+      }
       if (
         hasMultiAssetPlayerPackage &&
         pkg.trade_type === "1-for-1" &&
@@ -896,7 +1073,8 @@ export function dedupeAndRankTradeFinderPackages(
         continue;
       }
       seen.add(key);
-      labelCounts.set(pkg.label, labelCount + 1);
+      labelCounts.set(labelKey, labelCount + 1);
+      receiveTargetCounts.set(receiveTargetKey, receiveTargetCount + 1);
       selected.push(pkg);
     }
   }
@@ -1018,6 +1196,15 @@ export async function scoreTradeFinderPackage(
 }
 
 type TradeFinderPackageScorer = typeof scoreTradeFinderPackage;
+
+function strategyTemplateAllowed(
+  focus: TradeFinderRuntimeOptions["strategyFocus"],
+  strategies: TradeStrategyType[]
+): boolean {
+  if (!focus) return true;
+  if (focus === "market_value") return true;
+  return strategies.includes(focus);
+}
 
 function valuationFields(scored: PackageScore): Pick<
   TradePackage,
@@ -1232,6 +1419,29 @@ function scoreCompatibility(
   return { score: Math.min(100, Math.round(score)), reason };
 }
 
+export function rankTradeFinderOpponents(
+  userProfile: RosterProfile,
+  opponents: RosterProfile[],
+  options: TradeFinderRuntimeOptions = {}
+): Array<{ opp: RosterProfile; score: number; reason: string }> {
+  const scopedOpponents =
+    options.opponentRosterId != null
+      ? opponents.filter((opp) => opp.roster.roster_id === options.opponentRosterId)
+      : opponents;
+  const limit =
+    options.opponentRosterId != null
+      ? 1
+      : options.maxOpponents ?? TRADE_FINDER_MAX_OPPONENTS;
+
+  return scopedOpponents
+    .map((opp) => {
+      const { score, reason } = scoreCompatibility(userProfile, opp);
+      return { opp, score, reason };
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+}
+
 // Package Generation
 
 export async function generateTradeFinderPackages(
@@ -1315,9 +1525,18 @@ export async function generateTradeFinderPackages(
       );
     })
     .slice(0, 10);
-  const oppTargets = oppPlayers
-    .filter((asset) => asset.edge_score >= 60)
-    .slice(0, 10);
+  const avoidedTargetIds = new Set(options.avoidTargetPlayerIds ?? []);
+  const targetPlayer = options.targetPlayerId
+    ? oppPlayers.find((asset) => asset.player_id === options.targetPlayerId)
+    : null;
+  const oppTargets = (targetPlayer
+    ? [targetPlayer]
+    : oppPlayers.filter(
+        (asset) =>
+          asset.edge_score >= 60 &&
+          !avoidedTargetIds.has(asset.player_id)
+      )
+  ).slice(0, targetPlayer ? 1 : 10);
   const userPicks = user.tradeablePicks
     .filter((pick) => pick.edge_score >= 18)
     .slice(0, 6);
@@ -1331,67 +1550,157 @@ export async function generateTradeFinderPackages(
     userWindow === "Competitor";
   const userWantsFuture = wantsFutureAssets(userWindow);
 
-  let consolidationGenerated = 0;
-  for (const target of oppTargets.filter((asset) => asset.edge_score >= 68)) {
-    if (consolidationGenerated >= TRADE_FINDER_MAX_CONSOLIDATION_TEMPLATES) break;
-    for (let i = 0; i < userDepth.length && consolidationGenerated < TRADE_FINDER_MAX_CONSOLIDATION_TEMPLATES; i++) {
-      for (let j = i + 1; j < Math.min(userDepth.length, i + 5) && consolidationGenerated < TRADE_FINDER_MAX_CONSOLIDATION_TEMPLATES; j++) {
-        const first = userDepth[i];
-        const second = userDepth[j];
-        if (target.edge_score < Math.max(first.edge_score, second.edge_score) + 4) continue;
+  if (targetPlayer && strategyTemplateAllowed(options.strategyFocus, [
+    "consolidation",
+    "position_arbitrage",
+    "roster_fit_trade",
+    "roster_spot_arbitrage",
+    "manager_exploit",
+    "liquidity_upgrade",
+  ])) {
+    let targetedGenerated = 0;
+    const target = targetPlayer;
+    const targetAsset = assetFromPlayerWithScoring(target, scoring, usage, hasCustom);
+    const targetCandidates = userPlayers
+      .filter(
+        (asset) =>
+          asset.player_id !== target.player_id &&
+          asset.edge_score >= MIN_EDGE_SCORE &&
+          asset.edge_score <= target.edge_score + 8
+      )
+      .slice(0, 10);
+
+    const directSwap = targetCandidates.find(
+      (asset) => Math.abs(asset.edge_score - target.edge_score) <= 7
+    );
+    if (directSwap && targetedGenerated < 1) {
+      const added = await addStrategicPackage({
+        type: "balanced",
+        label: "Target Swap",
+        send: [assetFromPlayerWithScoring(directSwap, scoring, usage, hasCustom)],
+        receive: [targetAsset],
+        why_you_do_it: `Target ${target.full_name} directly with a comparable ${directSwap.position}`,
+        why_they_accept: opp.needs.includes(directSwap.position as Pos)
+          ? `Fills their ${directSwap.position} need with a comparable asset.`
+          : "A comparable one-for-one starting point.",
+        sweetener_hint: "Use this only if you prefer this specific player over the one you send.",
+      });
+      if (added) targetedGenerated += 1;
+    }
+
+    for (const candidate of targetCandidates) {
+      if (targetedGenerated >= 4) break;
+      const pick = userPicks.find(
+        (candidatePick) =>
+          !((candidatePick.pick_breakdown?.round ?? candidatePick.round) === 1 && target.edge_score < ELITE_EDGE_SCORE) &&
+          candidate.edge_score + candidatePick.edge_score >= target.edge_score * 0.88
+      ) ?? userPicks.find((candidatePick) => candidate.edge_score + candidatePick.edge_score >= target.edge_score * 0.78);
+      if (!pick) continue;
+      const added = await addStrategicPackage({
+        type: "player_plus_pick",
+        label: "Target Player + Pick",
+        send: [
+          assetFromPlayerWithScoring(candidate, scoring, usage, hasCustom),
+          assetFromPick(pick),
+        ],
+        receive: [targetAsset],
+        why_you_do_it: `Use ${candidate.position} value plus a pick to target ${target.full_name}`,
+        why_they_accept: opp.needs.includes(candidate.position as Pos)
+          ? `Fills their ${candidate.position} need and adds draft capital.`
+          : `Turns ${target.full_name} into a player-plus-pick return.`,
+        sweetener_hint: "If this is too rich, toggle No 1sts or Cheaper and regenerate.",
+      });
+      if (added) targetedGenerated += 1;
+    }
+
+    for (let i = 0; i < targetCandidates.length && targetedGenerated < 6; i++) {
+      for (let j = i + 1; j < Math.min(targetCandidates.length, i + 5) && targetedGenerated < 6; j++) {
+        const first = targetCandidates[i];
+        const second = targetCandidates[j];
         const sendEdge = first.edge_score + second.edge_score;
-        if (sendEdge < target.edge_score * 1.15 || sendEdge > target.edge_score * 2.1) continue;
-        const sentPositions = [first.position, second.position].join(" + ");
+        if (sendEdge < target.edge_score * 1.12 || sendEdge > target.edge_score * 2.2) continue;
         const added = await addStrategicPackage({
           type: "consolidation",
-          label: "2-for-1 Consolidation",
+          label: "Target 2-for-1",
           send: [
             assetFromPlayerWithScoring(first, scoring, usage, hasCustom),
             assetFromPlayerWithScoring(second, scoring, usage, hasCustom),
           ],
-          receive: [assetFromPlayerWithScoring(target, scoring, usage, hasCustom)],
-          why_you_do_it: `Turn two usable roster spots into a better weekly ${target.position} asset`,
-          why_they_accept: `Gets ${sentPositions} depth for one asset. ${ARCHETYPE_WANTS[opp.roster.archetype] ?? "Flexibility matters for them."}`,
-          sweetener_hint: "Consolidation is worth paying a small premium when the target actually starts for you.",
+          receive: [targetAsset],
+          why_you_do_it: `Package two assets to make a direct run at ${target.full_name}`,
+          why_they_accept: `Gets two playable pieces for one player. ${ARCHETYPE_WANTS[opp.roster.archetype] ?? "Flexibility matters for them."}`,
+          sweetener_hint: "Two-for-one target offers work best when both pieces solve something for them.",
         });
-        if (added) consolidationGenerated += 1;
+        if (added) targetedGenerated += 1;
+      }
+    }
+  }
+
+  let consolidationGenerated = 0;
+  if (strategyTemplateAllowed(options.strategyFocus, ["consolidation", "roster_spot_arbitrage", "liquidity_upgrade"])) {
+    for (const target of oppTargets.filter((asset) => asset.edge_score >= 68)) {
+      if (consolidationGenerated >= TRADE_FINDER_MAX_CONSOLIDATION_TEMPLATES) break;
+      for (let i = 0; i < userDepth.length && consolidationGenerated < TRADE_FINDER_MAX_CONSOLIDATION_TEMPLATES; i++) {
+        for (let j = i + 1; j < Math.min(userDepth.length, i + 5) && consolidationGenerated < TRADE_FINDER_MAX_CONSOLIDATION_TEMPLATES; j++) {
+          const first = userDepth[i];
+          const second = userDepth[j];
+          if (target.edge_score < Math.max(first.edge_score, second.edge_score) + 4) continue;
+          const sendEdge = first.edge_score + second.edge_score;
+          if (sendEdge < target.edge_score * 1.15 || sendEdge > target.edge_score * 2.1) continue;
+          const sentPositions = [first.position, second.position].join(" + ");
+          const added = await addStrategicPackage({
+            type: "consolidation",
+            label: "2-for-1 Consolidation",
+            send: [
+              assetFromPlayerWithScoring(first, scoring, usage, hasCustom),
+              assetFromPlayerWithScoring(second, scoring, usage, hasCustom),
+            ],
+            receive: [assetFromPlayerWithScoring(target, scoring, usage, hasCustom)],
+            why_you_do_it: `Turn two usable roster spots into a better weekly ${target.position} asset`,
+            why_they_accept: `Gets ${sentPositions} depth for one asset. ${ARCHETYPE_WANTS[opp.roster.archetype] ?? "Flexibility matters for them."}`,
+            sweetener_hint: "Consolidation is worth paying a small premium when the target actually starts for you.",
+          });
+          if (added) consolidationGenerated += 1;
+        }
       }
     }
   }
 
   let playerPickGenerated = 0;
-  for (const target of oppTargets.filter((asset) => asset.edge_score >= 64)) {
-    if (playerPickGenerated >= TRADE_FINDER_MAX_PLAYER_PICK_TEMPLATES) break;
-    const candidates = userDepth.filter(
-      (asset) =>
-        asset.player_id !== target.player_id &&
-        asset.edge_score >= 50 &&
-        asset.edge_score <= target.edge_score - 4
-    );
-    for (const userPlayer of candidates.slice(0, 5)) {
+  if (strategyTemplateAllowed(options.strategyFocus, ["consolidation", "position_arbitrage", "roster_fit_trade", "manager_exploit"])) {
+    for (const target of oppTargets.filter((asset) => asset.edge_score >= 64)) {
       if (playerPickGenerated >= TRADE_FINDER_MAX_PLAYER_PICK_TEMPLATES) break;
-      const neededPick = userPicks.find((pick) => userPlayer.edge_score + pick.edge_score >= target.edge_score * 0.9);
-      if (!neededPick) continue;
-      const added = await addStrategicPackage({
-        type: "player_plus_pick",
-        label: "Player + Pick Upgrade",
-        send: [
-          assetFromPlayerWithScoring(userPlayer, scoring, usage, hasCustom),
-          assetFromPick(neededPick),
-        ],
-        receive: [assetFromPlayerWithScoring(target, scoring, usage, hasCustom)],
-        why_you_do_it: `Use ${userPlayer.position} value plus a pick to climb into a stronger ${target.position}`,
-        why_they_accept: opp.needs.includes(userPlayer.position as Pos)
-          ? `Fills their ${userPlayer.position} need and adds draft capital.`
-          : `Turns one player into a player-plus-pick return.`,
-        sweetener_hint: "This is the default dynasty upgrade shape: useful player plus pick for the better anchor.",
-      });
-      if (added) playerPickGenerated += 1;
+      const candidates = userDepth.filter(
+        (asset) =>
+          asset.player_id !== target.player_id &&
+          asset.edge_score >= 50 &&
+          asset.edge_score <= target.edge_score - 4
+      );
+      for (const userPlayer of candidates.slice(0, 5)) {
+        if (playerPickGenerated >= TRADE_FINDER_MAX_PLAYER_PICK_TEMPLATES) break;
+        const neededPick = userPicks.find((pick) => userPlayer.edge_score + pick.edge_score >= target.edge_score * 0.9);
+        if (!neededPick) continue;
+        const added = await addStrategicPackage({
+          type: "player_plus_pick",
+          label: "Player + Pick Upgrade",
+          send: [
+            assetFromPlayerWithScoring(userPlayer, scoring, usage, hasCustom),
+            assetFromPick(neededPick),
+          ],
+          receive: [assetFromPlayerWithScoring(target, scoring, usage, hasCustom)],
+          why_you_do_it: `Use ${userPlayer.position} value plus a pick to climb into a stronger ${target.position}`,
+          why_they_accept: opp.needs.includes(userPlayer.position as Pos)
+            ? `Fills their ${userPlayer.position} need and adds draft capital.`
+            : `Turns one player into a player-plus-pick return.`,
+          sweetener_hint: "This is the default dynasty upgrade shape: useful player plus pick for the better anchor.",
+        });
+        if (added) playerPickGenerated += 1;
+      }
     }
   }
 
   let rosterSpotGenerated = 0;
-  if (userPicks.length > 0) {
+  if (userPicks.length > 0 && strategyTemplateAllowed(options.strategyFocus, ["roster_spot_arbitrage", "consolidation"])) {
     for (const target of oppTargets.filter((asset) => asset.edge_score >= 75)) {
       if (rosterSpotGenerated >= TRADE_FINDER_MAX_ROSTER_SPOT_TEMPLATES) break;
       const depthPair = userDepth
@@ -1417,29 +1726,37 @@ export async function generateTradeFinderPackages(
   }
 
   let tierDownGenerated = 0;
-  if (userWantsFuture || userWindow === "Dead Zone") {
+  if ((userWantsFuture || userWindow === "Dead Zone") && strategyTemplateAllowed(options.strategyFocus, [
+    "tier_down",
+    "rebuild_sell",
+    "productive_struggle",
+    "liquidity_upgrade",
+    "sell_high",
+  ])) {
     const sellAnchors = userPlayers.filter((asset) => asset.edge_score >= 75).slice(0, 5);
     for (const outgoing of sellAnchors) {
       if (tierDownGenerated >= TRADE_FINDER_MAX_TIER_DOWN_TEMPLATES) break;
-      const anchor = oppPlayers.find(
-        (asset) =>
-          asset.player_id !== outgoing.player_id &&
-          asset.edge_score >= 60 &&
-          asset.edge_score <= outgoing.edge_score - 4 &&
-          asset.edge_score >= outgoing.edge_score - 20
-      );
+      const allowCrossPosition =
+        outgoing.position !== "QB" &&
+        (isAgingOrFragilePlayer(outgoing) || user.needs.length > 0);
+      const anchor = tierDownAnchorFor(outgoing, oppPlayers, allowCrossPosition);
       const pick = oppPicks.find((candidate) => candidate.edge_score >= 28);
       if (!anchor || !pick) continue;
+      const samePositionAnchor = anchor.position === outgoing.position;
       const added = await addStrategicPackage({
         type: "player_plus_pick",
-        label: "Tier Down",
+        label: samePositionAnchor ? `${outgoing.position} Tier Down` : "Tier Down",
         send: [assetFromPlayerWithScoring(outgoing, scoring, usage, hasCustom)],
         receive: [
           assetFromPlayerWithScoring(anchor, scoring, usage, hasCustom),
           assetFromPick(pick),
         ],
-        why_you_do_it: `Tier down from ${outgoing.full_name} into an anchor plus liquid draft capital`,
-        why_they_accept: `Consolidates a player-plus-pick package into the better single asset.`,
+        why_you_do_it: samePositionAnchor
+          ? `Tier down from ${outgoing.full_name} into a lesser ${outgoing.position} plus liquid draft capital`
+          : `Tier down from ${outgoing.full_name} into an anchor plus liquid draft capital`,
+        why_they_accept: samePositionAnchor
+          ? `They upgrade at ${outgoing.position} while paying with a lesser ${anchor.position} and a pick.`
+          : `Consolidates a player-plus-pick package into the better single asset.`,
         sweetener_hint: "Tier-down only works if the return includes a real anchor, not just volume.",
       });
       if (added) tierDownGenerated += 1;
@@ -1447,7 +1764,7 @@ export async function generateTradeFinderPackages(
   }
 
   let rentalGenerated = 0;
-  if (userIsContender && userPicks.length > 0) {
+  if (userIsContender && userPicks.length > 0 && strategyTemplateAllowed(options.strategyFocus, ["win_now_buy"])) {
     const rentalTargets = oppTargets.filter(
       (asset) =>
         asset.edge_score >= 66 &&
@@ -1475,56 +1792,59 @@ export async function generateTradeFinderPackages(
     }
   }
 
-  for (const userPos of POSITIONS) {
-    if (user.surplus[userPos].length === 0) continue;
-    for (const oppPos of POSITIONS) {
-      if (userPos === oppPos) continue;
-      if (opp.surplus[oppPos].length === 0) continue;
+  if (strategyTemplateAllowed(options.strategyFocus, ["position_arbitrage", "roster_fit_trade", "manager_exploit"])) {
+    for (const userPos of POSITIONS) {
+      if (user.surplus[userPos].length === 0) continue;
+      for (const oppPos of POSITIONS) {
+        if (userPos === oppPos) continue;
+        if (opp.surplus[oppPos].length === 0) continue;
 
-      const userGives = user.surplus[userPos][0];
-      const oppGives = opp.surplus[oppPos][0];
-      if (userGives.edge_score < MIN_EDGE_SCORE || oppGives.edge_score < MIN_EDGE_SCORE) {
-        continue;
+        const userGives = user.surplus[userPos][0];
+        const oppGives = opp.surplus[oppPos][0];
+        if (userGives.edge_score < MIN_EDGE_SCORE || oppGives.edge_score < MIN_EDGE_SCORE) {
+          continue;
+        }
+
+        const send = [assetFromPlayerWithScoring(userGives, scoring, usage, hasCustom)];
+        const receive = [assetFromPlayerWithScoring(oppGives, scoring, usage, hasCustom)];
+        const scored = await scorePackageWithBudget(send, receive);
+        if (!scored) continue;
+        if (scored.sendTotal <= 0 || scored.receiveTotal <= 0) continue;
+
+        packages.push({
+          type: "balanced",
+          trade_type: tradeTypeForPackage("balanced"),
+          label: "Balanced Swap",
+          you_send: scored.sendAssets,
+          you_receive: scored.receiveAssets,
+          send_total: scored.sendTotal,
+          receive_total: scored.receiveTotal,
+          delta: scored.delta,
+          send_edge: scored.sendEdge,
+          receive_edge: scored.receiveEdge,
+          delta_edge: scored.deltaEdge,
+          package_penalty_pct_send: scored.packagePenaltySend,
+          package_penalty_pct_receive: scored.packagePenaltyReceive,
+          ...valuationFields(scored),
+          fairness: scored.fairness,
+          why_you_do_it: user.needs.includes(oppPos as Pos)
+            ? `Fills your ${oppPos} need with their surplus`
+            : `Upgrades ${oppPos} depth, trades ${userPos} surplus`,
+          why_they_accept: opp.needs.includes(userPos as Pos)
+            ? `Fills their ${userPos} need. ${ARCHETYPE_WANTS[opp.roster.archetype] ?? ""}`
+            : `Upgrades their ${userPos}, trades ${oppPos} depth`,
+          sweetener_hint: Math.abs(scored.deltaEdge) > 3 && Math.abs(scored.deltaEdge) <= 10
+            ? `Add a late-round pick to ${scored.deltaEdge > 0 ? "sweeten for them" : "balance for you"}`
+            : null,
+          acceptance: null,
+          healthCheck: [],
+        });
       }
-
-      const send = [assetFromPlayerWithScoring(userGives, scoring, usage, hasCustom)];
-      const receive = [assetFromPlayerWithScoring(oppGives, scoring, usage, hasCustom)];
-      const scored = await scorePackageWithBudget(send, receive);
-      if (!scored) continue;
-      if (scored.sendTotal <= 0 || scored.receiveTotal <= 0) continue;
-
-      packages.push({
-        type: "balanced",
-        trade_type: tradeTypeForPackage("balanced"),
-        label: "Balanced Swap",
-        you_send: scored.sendAssets,
-        you_receive: scored.receiveAssets,
-        send_total: scored.sendTotal,
-        receive_total: scored.receiveTotal,
-        delta: scored.delta,
-        send_edge: scored.sendEdge,
-        receive_edge: scored.receiveEdge,
-        delta_edge: scored.deltaEdge,
-        package_penalty_pct_send: scored.packagePenaltySend,
-        package_penalty_pct_receive: scored.packagePenaltyReceive,
-        ...valuationFields(scored),
-        fairness: scored.fairness,
-        why_you_do_it: user.needs.includes(oppPos as Pos)
-          ? `Fills your ${oppPos} need with their surplus`
-          : `Upgrades ${oppPos} depth, trades ${userPos} surplus`,
-        why_they_accept: opp.needs.includes(userPos as Pos)
-          ? `Fills their ${userPos} need. ${ARCHETYPE_WANTS[opp.roster.archetype] ?? ""}`
-          : `Upgrades their ${userPos}, trades ${oppPos} depth`,
-        sweetener_hint: Math.abs(scored.deltaEdge) > 3 && Math.abs(scored.deltaEdge) <= 10
-          ? `Add a late-round pick to ${scored.deltaEdge > 0 ? "sweeten for them" : "balance for you"}`
-          : null,
-        acceptance: null,
-        healthCheck: [],
-      });
     }
   }
 
-  for (const oppPos of POSITIONS) {
+  if (strategyTemplateAllowed(options.strategyFocus, ["consolidation", "roster_fit_trade", "roster_spot_arbitrage"])) {
+    for (const oppPos of POSITIONS) {
     if (opp.surplus[oppPos].length === 0) continue;
     if (!user.needs.includes(oppPos as Pos)) continue;
 
@@ -1586,9 +1906,11 @@ export async function generateTradeFinderPackages(
       acceptance: null,
       healthCheck: [],
     });
+    }
   }
 
-  for (const oppPos of POSITIONS) {
+  if (strategyTemplateAllowed(options.strategyFocus, ["roster_fit_trade", "position_arbitrage", "manager_exploit"])) {
+    for (const oppPos of POSITIONS) {
     if (opp.surplus[oppPos].length === 0) continue;
     if (!user.needs.includes(oppPos as Pos)) continue;
 
@@ -1642,15 +1964,23 @@ export async function generateTradeFinderPackages(
         break;
       }
     }
+    }
   }
 
-  for (const userPos of POSITIONS) {
+  if (strategyTemplateAllowed(options.strategyFocus, ["tier_down", "rebuild_sell", "productive_struggle", "sell_high", "liquidity_upgrade"])) {
+    for (const userPos of POSITIONS) {
     const sellCandidates = user.surplus[userPos].filter(
       (asset) => asset.edge_score >= ANCHOR_EDGE_SCORE
     );
     if (sellCandidates.length === 0) continue;
 
-    for (const oppPos of POSITIONS) {
+    const orderedReturnPositions: Pos[] = [
+      userPos,
+      ...POSITIONS.filter((pos) => pos !== userPos),
+    ];
+
+    for (const oppPos of orderedReturnPositions) {
+      if (userPos === "QB" && oppPos !== "QB") continue;
       if (opp.surplus[oppPos].length === 0) continue;
 
       const outgoing = sellCandidates.find(
@@ -1661,12 +1991,8 @@ export async function generateTradeFinderPackages(
       );
       if (!outgoing) continue;
 
-      const anchor = opp.surplus[oppPos].find(
-        (asset) =>
-          asset.player_id !== outgoing.player_id &&
-          asset.edge_score >= 55 &&
-          asset.edge_score <= outgoing.edge_score - 3 &&
-          asset.edge_score >= outgoing.edge_score - 18
+      const anchor = opp.surplus[oppPos].find((asset) =>
+        isTierDownAnchor(outgoing, asset)
       );
       const pick = opp.tradeablePicks.find((candidate) => candidate.edge_score >= 18);
       if (!anchor || !pick) continue;
@@ -1688,7 +2014,11 @@ export async function generateTradeFinderPackages(
       packages.push({
         type: "player_plus_pick",
         trade_type: tradeTypeForPackage("player_plus_pick"),
-        label: isAgingOrFragilePlayer(outgoing) ? "Sell for Youth" : "Player + Pick Return",
+        label: anchor.position === outgoing.position
+          ? `${outgoing.position} Tier Down`
+          : isAgingOrFragilePlayer(outgoing)
+            ? "Sell for Youth"
+            : "Player + Pick Return",
         you_send: scored.sendAssets,
         you_receive: scored.receiveAssets,
         send_total: scored.sendTotal,
@@ -1701,9 +2031,11 @@ export async function generateTradeFinderPackages(
         package_penalty_pct_receive: scored.packagePenaltyReceive,
         ...valuationFields(scored),
         fairness: scored.fairness,
-        why_you_do_it: isAgingOrFragilePlayer(outgoing)
-          ? `Move an aging or availability-risk ${userPos} for a younger ${oppPos} anchor plus pick liquidity`
-          : `Turn ${userPos} surplus into a ${oppPos} anchor plus draft liquidity`,
+        why_you_do_it: anchor.position === outgoing.position
+          ? `Tier down from your ${userPos} into a lesser ${oppPos} plus draft liquidity`
+          : isAgingOrFragilePlayer(outgoing)
+            ? `Move an aging or availability-risk ${userPos} for a younger ${oppPos} anchor plus pick liquidity`
+            : `Turn ${userPos} surplus into a ${oppPos} anchor plus draft liquidity`,
         why_they_accept: opp.needs.includes(userPos as Pos)
           ? `Fills their ${userPos} need while they pay with ${oppPos} surplus and a pick.`
           : `Consolidates a player-plus-pick package into the better single player.`,
@@ -1714,9 +2046,10 @@ export async function generateTradeFinderPackages(
         healthCheck: [],
       });
     }
+    }
   }
 
-  if (user.tradeablePicks.length > 0) {
+  if (user.tradeablePicks.length > 0 && strategyTemplateAllowed(options.strategyFocus, ["win_now_buy", "roster_fit_trade", "position_arbitrage"])) {
     for (const oppPos of POSITIONS) {
       if (!user.needs.includes(oppPos as Pos)) continue;
       if (opp.surplus[oppPos].length === 0) continue;
@@ -1790,7 +2123,11 @@ export async function generateTradeFinderPackages(
     }
   }
 
-  if (user.tradeablePicks.length >= 2 && opp.tradeablePicks.length > 0) {
+  if (
+    user.tradeablePicks.length >= 2 &&
+    opp.tradeablePicks.length > 0 &&
+    strategyTemplateAllowed(options.strategyFocus, ["pick_arbitrage"])
+  ) {
     let pickOnlyGenerated = 0;
     const premiumTargetPicks = opp.tradeablePicks
       .filter((targetPick) => isPremiumPick(assetFromPick(targetPick)))
@@ -1878,15 +2215,53 @@ export async function generateTradeFinderPackages(
   };
   const qualified = packages
     .map((pkg) => annotateTradeFinderPackage(pkg, context))
-    .filter(shouldSurfaceTradeFinderPackage);
+    .filter((pkg) => packagePassesTradeFinderControls(pkg, user, options))
+    .filter((pkg) => shouldSurfaceWithOptionalTargetFallback(pkg, Boolean(options.targetPlayerId)));
 
   return dedupeAndRankTradeFinderPackages(
     qualified,
-    maxPackagesPerPartner
+    maxPackagesPerPartner,
+    Boolean(options.targetPlayerId)
   );
 }
 
 // Main
+
+export async function getTradePartnerTargets(
+  username: string,
+  leagueId: string,
+  opponentRosterId: number,
+  weights?: SourceWeights
+): Promise<TradePartnerTarget[]> {
+  const allLeagues = await getPowerRankings(username, "dynasty", weights, undefined, {
+    leagueIds: [leagueId],
+    forceDbOnly: true,
+  });
+  const league = allLeagues.find((l) => l.league_id === leagueId);
+  const roster = league?.rosters.find((r) => r.roster_id === opponentRosterId);
+  if (!league || !roster || roster.is_user) return [];
+
+  return roster.core_assets
+    .filter((asset) => POSITIONS.includes(asset.position as Pos) && asset.edge_score >= MIN_EDGE_SCORE)
+    .sort((a, b) => b.edge_score - a.edge_score)
+    .slice(0, 24)
+    .map((asset) => {
+      const tags: string[] = [];
+      if (asset.edge_score >= ELITE_EDGE_SCORE) tags.push("Elite");
+      if (asset.position === "QB" && league.mode === "sf") tags.push("SF anchor");
+      if (asset.position === "TE") tags.push("TEP angle");
+      if (asset.availability !== "active") tags.push("discount watch");
+      return {
+        player_id: asset.player_id,
+        full_name: asset.full_name,
+        position: asset.position,
+        edge_score: asset.edge_score,
+        age: asset.age,
+        availability: asset.availability,
+        tags,
+      };
+    });
+}
 
 export async function findTrades(
   username: string,
@@ -2068,13 +2443,7 @@ async function buildTradeSuggestionsForLeague(
 
   const opponents = profiles.filter((p) => !p.roster.is_user);
 
-  const ranked = opponents
-    .map((opp) => {
-      const { score, reason } = scoreCompatibility(userProfile, opp);
-      return { opp, score, reason };
-    })
-    .sort((a, b) => b.score - a.score)
-    .slice(0, options.maxOpponents ?? TRADE_FINDER_MAX_OPPONENTS);
+  const ranked = rankTradeFinderOpponents(userProfile, opponents, options);
 
   const packageScoreCache = new Map<string, Promise<PackageScore>>();
   const scoreTradeFinderPackageCached: TradeFinderPackageScorer = (
@@ -2164,10 +2533,11 @@ async function buildTradeSuggestionsForLeague(
       }))
       .filter((pkg) => !pkg.healthCheck.some((warning) => warning.type === "block"))
       .map((pkg) => annotateTradeFinderPackage(pkg, qualityContext))
-      .filter(shouldSurfaceTradeFinderPackage);
+      .filter((pkg) => shouldSurfaceWithOptionalTargetFallback(pkg, Boolean(options.targetPlayerId)));
     const packages = dedupeAndRankTradeFinderPackages(
       evaluatedPackages,
-      options.maxPackagesPerPartner ?? TRADE_FINDER_MAX_PACKAGES_PER_PARTNER
+      options.maxPackagesPerPartner ?? TRADE_FINDER_MAX_PACKAGES_PER_PARTNER,
+      Boolean(options.targetPlayerId)
     );
     if (packages.length === 0) return null;
 
@@ -2246,13 +2616,7 @@ async function findTradesUncached(
 
   const opponents = profiles.filter((p) => !p.roster.is_user);
 
-  const ranked = opponents
-    .map((opp) => {
-      const { score, reason } = scoreCompatibility(userProfile, opp);
-      return { opp, score, reason };
-    })
-    .sort((a, b) => b.score - a.score)
-    .slice(0, options.maxOpponents ?? TRADE_FINDER_MAX_OPPONENTS);
+  const ranked = rankTradeFinderOpponents(userProfile, opponents, options);
 
   const packageScoreCache = new Map<string, Promise<PackageScore>>();
   const scoreTradeFinderPackageCached: TradeFinderPackageScorer = (
@@ -2342,10 +2706,11 @@ async function findTradesUncached(
       }))
       .filter((pkg) => !pkg.healthCheck.some((warning) => warning.type === "block"))
       .map((pkg) => annotateTradeFinderPackage(pkg, qualityContext))
-      .filter(shouldSurfaceTradeFinderPackage);
+      .filter((pkg) => shouldSurfaceWithOptionalTargetFallback(pkg, Boolean(options.targetPlayerId)));
     const packages = dedupeAndRankTradeFinderPackages(
       evaluatedPackages,
-      options.maxPackagesPerPartner ?? TRADE_FINDER_MAX_PACKAGES_PER_PARTNER
+      options.maxPackagesPerPartner ?? TRADE_FINDER_MAX_PACKAGES_PER_PARTNER,
+      Boolean(options.targetPlayerId)
     );
     if (packages.length === 0) return null;
 

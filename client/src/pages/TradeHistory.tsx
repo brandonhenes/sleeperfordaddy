@@ -60,6 +60,8 @@ function TradeHistoryReady({ username }: { username: string }) {
   const [intelLeagueId, setIntelLeagueId] = useState("");
 
   const chains = useMemo(() => chainsQuery.data ?? [], [chainsQuery.data]);
+  const fallbackLeagues = useMemo(() => data?.stats.by_league ?? [], [data?.stats.by_league]);
+  const usingFallbackLeagues = chains.length === 0 && fallbackLeagues.length > 0;
   const selectedChain = useMemo(
     () => chains.find((chain) => chain.root_id === selectedChainId) ?? null,
     [chains, selectedChainId]
@@ -84,6 +86,13 @@ function TradeHistoryReady({ username }: { username: string }) {
   }, [chains, selectedChainId]);
 
   useEffect(() => {
+    if (usingFallbackLeagues) {
+      if (!fallbackLeagues.some((league) => league.league_id === intelLeagueId)) {
+        setIntelLeagueId(fallbackLeagues[0]?.league_id ?? "");
+      }
+      return;
+    }
+
     if (!selectedChain) {
       if (intelLeagueId) setIntelLeagueId("");
       return;
@@ -92,25 +101,27 @@ function TradeHistoryReady({ username }: { username: string }) {
     if (!selectedChain.seasons.some((season) => season.league_id === intelLeagueId)) {
       setIntelLeagueId(selectedChain.seasons[0]?.league_id ?? "");
     }
-  }, [selectedChain, intelLeagueId]);
+  }, [fallbackLeagues, intelLeagueId, selectedChain, usingFallbackLeagues]);
 
   const intelLeagueName = useMemo(() => {
+    if (usingFallbackLeagues) {
+      return fallbackLeagues.find((league) => league.league_id === intelLeagueId)?.league_name ?? "";
+    }
     if (!selectedChain) return "";
     if (!selectedSeason) return selectedChain.name;
     return `${selectedChain.name} (${selectedSeason.season})`;
-  }, [selectedChain, selectedSeason]);
+  }, [fallbackLeagues, intelLeagueId, selectedChain, selectedSeason, usingFallbackLeagues]);
 
-  if (isLoading || chainsQuery.isLoading) {
+  if (isLoading) {
     return <LoadingSkeleton label="Loading trade history" rows={3} />;
   }
 
-  if (error || chainsQuery.error || !data) {
+  if (error || !data) {
     return (
       <ErrorState
         title="Could not load trade history"
         message={
           (error as Error)?.message ??
-          (chainsQuery.error as Error)?.message ??
           "Unable to load trade history."
         }
       />
@@ -121,7 +132,16 @@ function TradeHistoryReady({ username }: { username: string }) {
     return <EmptyState title="No trades found for this user yet." />;
   }
 
-  if (chains.length === 0) {
+  if (chainsQuery.error && !usingFallbackLeagues) {
+    return (
+      <ErrorState
+        title="Could not load league filters"
+        message={(chainsQuery.error as Error)?.message ?? "Unable to load league history filters."}
+      />
+    );
+  }
+
+  if (chains.length === 0 && !usingFallbackLeagues && !chainsQuery.isLoading) {
     return <EmptyState title="No league chains found for this user yet." />;
   }
 
@@ -147,8 +167,12 @@ function TradeHistoryReady({ username }: { username: string }) {
             LEAGUE
           </div>
           <select
-            value={selectedChainId}
+            value={usingFallbackLeagues ? intelLeagueId : selectedChainId}
             onChange={(event) => {
+              if (usingFallbackLeagues) {
+                setIntelLeagueId(event.target.value);
+                return;
+              }
               const nextRootId = event.target.value;
               const nextChain =
                 chains.find((chain) => chain.root_id === nextRootId) ?? null;
@@ -166,15 +190,26 @@ function TradeHistoryReady({ username }: { username: string }) {
               fontFamily: "inherit",
             }}
           >
-            {chains.map((chain) => (
-              <option key={chain.root_id} value={chain.root_id}>
-                {chain.name}
-              </option>
-            ))}
+            {usingFallbackLeagues
+              ? fallbackLeagues.map((league) => (
+                <option key={league.league_id} value={league.league_id}>
+                  {league.league_name}
+                </option>
+              ))
+              : chains.map((chain) => (
+                <option key={chain.root_id} value={chain.root_id}>
+                  {chain.name}
+                </option>
+              ))}
           </select>
+          {chainsQuery.isLoading && (
+            <div style={{ marginTop: 6, color: "var(--text-muted)", fontSize: 11 }}>
+              Loading league-year history in the background...
+            </div>
+          )}
         </div>
 
-        {selectedChain ? (
+        {selectedChain && !usingFallbackLeagues ? (
           <div>
             <div style={{ color: "var(--text-muted)", fontSize: 11, fontWeight: 700, letterSpacing: 0.5, marginBottom: 6 }}>
               YEAR

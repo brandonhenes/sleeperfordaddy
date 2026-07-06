@@ -34,12 +34,11 @@ export default function DraftHubControls({
     <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
       <div
         style={{
-          display: "flex",
-          gap: 0,
-          border: "1px solid var(--border)",
-          borderRadius: 6,
-          overflow: "hidden",
-          marginRight: 12,
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(92px, 1fr))",
+          gap: 6,
+          width: "100%",
+          maxWidth: 560,
         }}
       >
         {VIEW_MODES.map((mode) => (
@@ -49,12 +48,15 @@ export default function DraftHubControls({
             style={{
               background: viewMode === mode.key ? "var(--amber)" : "var(--card)",
               color: viewMode === mode.key ? "var(--dark-base)" : "var(--text-muted)",
-              border: "none",
+              border: `1px solid ${viewMode === mode.key ? "var(--amber)" : "var(--border)"}`,
+              borderRadius: 6,
               padding: "7px 16px",
               fontSize: 12,
               fontWeight: 600,
               cursor: "pointer",
               fontFamily: "inherit",
+              whiteSpace: "nowrap",
+              minHeight: 32,
             }}
           >
             {mode.label}
@@ -95,7 +97,6 @@ export default function DraftHubControls({
               fontSize: 12,
               fontWeight: 600,
               cursor: "pointer",
-              marginLeft: 8,
             }}
           >
             {"\u2605"} Watchlist ({watchlistCount})

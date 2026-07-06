@@ -4,7 +4,7 @@ import FreshnessBar from "../components/FreshnessBar";
 import { useProspects } from "../hooks/use-market";
 import type { MockDraftPick, Prospect, ProspectRanking } from "@shared/types";
 import { useRookieDraftContext } from "../hooks/use-rookie-draft";
-import { usePowerRankings } from "../hooks/use-power-rankings";
+import { useLeagueSummaries } from "../hooks/use-league-summaries";
 import { useMockDraftSetup } from "../hooks/use-mock-draft";
 import { useActiveDrafts, useLiveDraft } from "../hooks/use-live-draft";
 import { useHitRates, useRookieADP } from "../hooks/use-draft-data";
@@ -49,7 +49,7 @@ export default function RookieDraft() {
   const [mockStarted, setMockStarted] = useState(false);
   const [liveDraftId, setLiveDraftId] = useState<string | null>(null);
   const [liveLeagueId, setLiveLeagueId] = useState<string | null>(null);
-  const { data: leagues } = usePowerRankings(username);
+  const { data: leagues } = useLeagueSummaries(username);
   const { data: mockSetup } = useMockDraftSetup(username, mockLeagueId);
   const { data: activeDrafts } = useActiveDrafts(username);
   const { data: liveDraftState } = useLiveDraft(username, liveDraftId, liveLeagueId);

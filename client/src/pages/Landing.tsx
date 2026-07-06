@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { useEnsureUser } from "../hooks/use-ensure-user";
+import { readStoredUsername, writeStoredUsername } from "../lib/current-user";
 
 export default function Landing() {
   const [username, setUsername] = useState("");
@@ -9,9 +10,16 @@ export default function Landing() {
 
   const { phase, syncProgress, errorMsg, retry } = useEnsureUser(activeUser);
 
-  // Navigate to dashboard when ready
+  useEffect(() => {
+    const stored = readStoredUsername();
+    if (stored) {
+      navigate(`/dashboard/${encodeURIComponent(stored)}`);
+    }
+  }, [navigate]);
+
   useEffect(() => {
     if (phase === "ready" && activeUser) {
+      writeStoredUsername(activeUser);
       navigate(`/dashboard/${encodeURIComponent(activeUser)}`);
     }
   }, [phase, activeUser, navigate]);
@@ -36,10 +44,13 @@ export default function Landing() {
         alignItems: "center",
         justifyContent: "center",
         fontFamily: "'JetBrains Mono', -apple-system, system-ui, sans-serif",
+        padding: 20,
       }}
     >
       <div style={{ textAlign: "center", marginBottom: 48 }}>
-        <div style={{ fontSize: 48, marginBottom: 16 }}>⚡</div>
+        <div style={{ fontSize: 48, marginBottom: 16, color: "var(--amber)", fontWeight: 900 }}>
+          EDGE
+        </div>
         <div
           style={{
             fontSize: 13,
@@ -77,7 +88,7 @@ export default function Landing() {
 
       <form
         onSubmit={handleSubmit}
-        style={{ display: "flex", gap: 8, alignItems: "center" }}
+        style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "center" }}
       >
         <input
           value={username}
@@ -91,7 +102,7 @@ export default function Landing() {
             padding: "14px 20px",
             color: "var(--text)",
             fontSize: 15,
-            width: 300,
+            width: "min(300px, 100%)",
             fontFamily: "inherit",
             opacity: isLoading ? 0.6 : 1,
           }}
@@ -114,7 +125,7 @@ export default function Landing() {
             opacity: !username.trim() || isLoading ? 0.6 : 1,
           }}
         >
-          {isLoading ? "Loading..." : "Scout →"}
+          {isLoading ? "Loading..." : "Scout ->"}
         </button>
       </form>
 
@@ -129,7 +140,7 @@ export default function Landing() {
             gap: 8,
           }}
         >
-          <span className="animate-pulse">●</span>
+          <span className="animate-pulse">o</span>
           Syncing {activeUser}'s leagues...
           {syncProgress
             ? ` (${syncProgress.done}/${syncProgress.total})`
@@ -163,11 +174,11 @@ export default function Landing() {
         </div>
       )}
 
-      <div style={{ marginTop: 32, display: "flex", gap: 32 }}>
+      <div style={{ marginTop: 32, display: "flex", gap: 16, flexWrap: "wrap", justifyContent: "center" }}>
         {[
-          "📊 Portfolio Tracking",
-          "📈 Market Intelligence",
-          "🎯 Trade Engine",
+          "Portfolio Tracking",
+          "Market Intelligence",
+          "Trade Engine",
         ].map((f) => (
           <span
             key={f}

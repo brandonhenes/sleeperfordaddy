@@ -1,6 +1,7 @@
 import { getLeagueDrafts, getDraftPicks } from "../sleeper/drafts.js";
 import { getProspects } from "./market.js";
 import { getPowerRankings } from "./power-rankings.js";
+import { resolveDraftPickRosterId } from "./draft-result-helpers.js";
 import type {
   ActiveDraftSummary,
   BestAvailableProspect,
@@ -59,24 +60,30 @@ export async function getLiveDraftState(
 
   const nameMap = new Map<number, string>();
   const isUserMap = new Map<number, boolean>();
+  const ownerToRoster = new Map<string, number>();
   for (const r of league.rosters) {
     nameMap.set(r.roster_id, r.display_name);
     isUserMap.set(r.roster_id, r.is_user);
+    if (r.owner_id) ownerToRoster.set(r.owner_id, r.roster_id);
   }
 
   const picksMade: LiveDraftPickMade[] = rawPicks
     .sort((a, b) => a.pick_no - b.pick_no)
-    .map((p) => ({
-      pick_number: p.pick_no,
-      round: p.round,
-      pick_in_round: p.draft_slot,
-      player_name: `${p.metadata.first_name ?? ""} ${p.metadata.last_name ?? ""}`.trim() || p.player_id,
-      player_id: p.player_id,
-      position: p.metadata.position ?? null,
-      roster_id: p.roster_id,
-      display_name: nameMap.get(p.roster_id) ?? `Roster ${p.roster_id}`,
-      is_user_pick: isUserMap.get(p.roster_id) ?? false,
-    }));
+    .flatMap((p) => {
+      const rosterId = resolveDraftPickRosterId(p, draft, ownerToRoster);
+      if (rosterId == null) return [];
+      return [{
+        pick_number: p.pick_no,
+        round: p.round,
+        pick_in_round: p.draft_slot,
+        player_name: `${p.metadata.first_name ?? ""} ${p.metadata.last_name ?? ""}`.trim() || p.player_id,
+        player_id: p.player_id,
+        position: p.metadata.position ?? null,
+        roster_id: rosterId,
+        display_name: nameMap.get(rosterId) ?? `Roster ${rosterId}`,
+        is_user_pick: isUserMap.get(rosterId) ?? false,
+      }];
+    });
 
   const currentPick = picksMade.length + 1;
   const totalPicks = totalRounds * totalRosters;

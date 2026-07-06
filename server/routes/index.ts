@@ -22,6 +22,7 @@ import notificationsRoutes from "./notifications.js";
 import tradeHistoryRoutes from "./trade-history.js";
 import settingsRoutes from "./settings.js";
 import tradeIntelligenceRoutes from "./trade-intelligence.js";
+import leagueRoutes from "./league.js";
 
 const router = Router();
 
@@ -53,6 +54,7 @@ router.use(waiverWireRoutes);
 router.use(notificationsRoutes);
 router.use(tradeHistoryRoutes);
 router.use(settingsRoutes);
+router.use(leagueRoutes);
 router.use("/api/trade-intelligence", tradeIntelligenceRoutes);
 
 export default router;

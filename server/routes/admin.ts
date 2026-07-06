@@ -224,7 +224,7 @@ router.post("/api/admin/sync-values", async (_req, res) => {
   });
 });
 
-/** POST /api/admin/backfill-fc-ids â€" one-time source coverage backfill */
+/** POST /api/admin/backfill-fc-ids - one-time source coverage backfill */
 router.post("/api/admin/backfill-fc-ids", async (_req, res) => {
   const fc = await runTrackedSync("backfill-fc", () => backfillFantasyCalcSleeperIds());
   const ktc = await runTrackedSync("backfill-ktc", () => backfillKtcSleeperIds());

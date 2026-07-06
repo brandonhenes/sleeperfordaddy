@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import TradeCard from "./TradeCard";
 import EmptyState from "./EmptyState";
 import { ErrorState, LoadingSkeleton, SectionHeader } from "./ui";
-import { usePowerRankings } from "../hooks/use-power-rankings";
 import {
   useTradeIntelligenceLeague,
   useTradeIntelligenceTradeDetail,
@@ -62,24 +61,14 @@ export default function TradeGradesTab({ selectedLeagueId, leagueName, username 
     setExpandedTrade(null);
   }, [selectedLeagueId]);
 
-  const leagueQuery = useTradeIntelligenceLeague(selectedLeagueId || undefined);
+  const leagueQuery = useTradeIntelligenceLeague(selectedLeagueId || undefined, username);
   const tradeDetailQuery = useTradeIntelligenceTradeDetail(
     expandedTrade?.leagueId,
     expandedTrade?.tradeId,
     !!expandedTrade
   );
 
-  const { data: powerData } = usePowerRankings(
-    selectedLeagueId ? username : ""
-  );
-
-  const myRosterId = useMemo(() => {
-    if (!powerData || !selectedLeagueId) return null;
-    const league = powerData.find((l) => l.league_id === selectedLeagueId);
-    if (!league) return null;
-    const me = league.rosters.find((r) => r.is_user);
-    return me?.roster_id ?? null;
-  }, [powerData, selectedLeagueId]);
+  const myRosterId = leagueQuery.data?.my_roster_id ?? null;
 
   const rosterNames = useMemo(
     () => buildRosterNameMap(leagueQuery.data?.rosters),

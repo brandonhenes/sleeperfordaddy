@@ -99,7 +99,7 @@ export interface SleeperDraft {
 export interface SleeperDraftPick {
   player_id: string;
   picked_by: string;
-  roster_id: number;
+  roster_id: number | null;
   round: number;
   draft_slot: number;
   pick_no: number;
@@ -579,6 +579,26 @@ export type TradeStrategyType =
   | "liquidity_upgrade"
   | "market_value";
 export type TradeStrategyFit = "strong" | "reasonable" | "thin" | "bad";
+export type TradeFinderConstraint =
+  | "cheaper"
+  | "no_firsts"
+  | "only_qb_tier_down"
+  | "no_aging_rbs"
+  | "more_realistic"
+  | "more_picks_back"
+  | "no_qbs"
+  | "win_now_only";
+export type TradeFinderSearchDepth = "quick" | "deep";
+
+export interface TradePartnerTarget {
+  player_id: string;
+  full_name: string;
+  position: string;
+  edge_score: number;
+  age: number | null;
+  availability: PlayerAvailability;
+  tags: string[];
+}
 
 export interface TradePackageRankingComponents {
   valuation_edge: number;
@@ -1347,6 +1367,15 @@ export interface LeaguePowerRanking {
   rosters: RosterRanking[];
 }
 
+export interface LeagueSummary {
+  league_id: string;
+  league_name: string;
+  mode: "sf" | "1qb";
+  draft_data_available: boolean;
+  scoring_label: string;
+  total_rosters: number;
+}
+
 // Action Engine
 
 export interface SellCandidate {
@@ -2009,6 +2038,7 @@ export interface TradeIntelligenceLeagueResponse {
   outcomes: TradeOutcome[];
   assets: TradeAssetWithPlayer[];
   rosters: TradeIntelligenceRoster[];
+  my_roster_id?: number | null;
 }
 
 export interface TradeIntelligenceTradeDetailResponse {

@@ -33,6 +33,7 @@ import { syncNflverseStats } from "./sync-nflverse-stats.js";
 import { syncNflDraftHistory } from "./sync-nfl-draft.js";
 import { syncLeagueDraftResults } from "./sync-league-drafts.js";
 import { captureDraftBoardSnapshot } from "./sync-draft-board-snapshot.js";
+import { resolveDraftPickRosterId } from "./draft-result-helpers.js";
 import { syncProspectEnrichment, generateScoutingReports } from "./sync-prospect-enrichment.js";
 import { isDynastyLeagueFromSleeperSettings } from "./dynasty-leagues.js";
 import { bustAllCaches } from "./cache-bus.js";
@@ -839,15 +840,19 @@ async function syncDraftOrder(leagueId: string, rosterList: SleeperRoster[]) {
   if (!order) {
     const picks = await getDraftPicks(rookieDraft.draft_id);
     if (picks && picks.length > 0) {
+      const ownerToRoster = new Map<string, number>();
+      for (const r of rosterList) {
+        if (r.owner_id) ownerToRoster.set(r.owner_id, r.roster_id);
+      }
       const firstRound = picks
         .filter((p) => Number(p.round) === 1)
         .sort((a, b) => Number(a.pick_no) - Number(b.pick_no));
       if (firstRound.length > 0) {
         const byRoster = new Map<number, number>();
         for (const p of firstRound) {
-          const rosterId = Number(p.roster_id);
+          const rosterId = resolveDraftPickRosterId(p, rookieDraft, ownerToRoster);
           const slot = Number(p.draft_slot);
-          if (Number.isFinite(rosterId) && Number.isFinite(slot) && !byRoster.has(rosterId)) {
+          if (rosterId != null && Number.isFinite(slot) && !byRoster.has(rosterId)) {
             byRoster.set(rosterId, slot);
           }
         }

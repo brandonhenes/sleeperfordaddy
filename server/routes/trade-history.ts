@@ -9,7 +9,8 @@ router.get("/api/trades/:username/aging", async (req, res) => {
     if (!username) {
       return res.status(400).json({ message: "username is required" });
     }
-    const data = await getTradeAging(username);
+    const limit = Number(req.query.limit ?? 1200);
+    const data = await getTradeAging(username, { assetLimit: limit });
     res.json(data);
   } catch (error) {
     console.error("[trades/aging] Error:", error);
@@ -23,7 +24,8 @@ router.get("/api/trade-history", async (req, res) => {
     if (!username) {
       return res.status(400).json({ message: "username is required" });
     }
-    const data = await getTradeHistory(username);
+    const limit = Number(req.query.limit ?? 150);
+    const data = await getTradeHistory(username, { tradeLimit: limit });
     res.json(data);
   } catch (error) {
     console.error("[trade-history] Error:", error);

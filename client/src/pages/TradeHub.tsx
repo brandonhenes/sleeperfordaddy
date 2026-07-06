@@ -5,7 +5,7 @@ import FreshnessBar from "../components/FreshnessBar";
 import { Card, PageHeader } from "../components/ui";
 import { SlipTicketRow } from "../components/slip/SlipDock";
 import { useCurrentUsername } from "../hooks/use-current-user";
-import { usePowerRankings } from "../hooks/use-power-rankings";
+import { useLeagueSummaries } from "../hooks/use-league-summaries";
 import { useTradeBoardLines } from "../hooks/use-trade-finder";
 import { useBuyingWindows } from "../hooks/use-injury-tracker";
 import { acceptanceBand, useSlip, type SlipLeg } from "../lib/slip";
@@ -166,7 +166,7 @@ function ClosingSoonCard({ window: w }: { window: BuyingWindow }) {
 
 export default function TradeHub() {
   const { username } = useCurrentUsername();
-  const { data: leagues = [], isLoading: leaguesLoading } = usePowerRankings(username, false);
+  const { data: leagues = [], isLoading: leaguesLoading } = useLeagueSummaries(username, false);
   const { data: windows = [] } = useBuyingWindows(username);
   const slip = useSlip();
 

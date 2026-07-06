@@ -35,6 +35,25 @@ async function getUserId(username: string): Promise<string | null> {
   return (rows as unknown as UserRow[])[0]?.user_id ?? null;
 }
 
+async function getRosterIdForUser(
+  leagueId: string,
+  username: string | undefined
+): Promise<number | null> {
+  const trimmed = username?.trim();
+  if (!trimmed) return null;
+  const userId = await getUserId(trimmed);
+  if (!userId) return null;
+
+  const rows = await db.execute(sql`
+    SELECT roster_id::int AS roster_id
+    FROM rosters
+    WHERE league_id = ${leagueId}
+      AND owner_id = ${userId}
+    LIMIT 1
+  `);
+  return (rows as unknown as { roster_id: number }[])[0]?.roster_id ?? null;
+}
+
 async function getAssetsForTrades(
   tradeIds: string[],
   leagueIds: string[]
@@ -376,7 +395,9 @@ router.get("/:leagueId", async (req, res) => {
       return res.status(400).json({ message: "leagueId is required" });
     }
 
-    const outcomeRows = await db.execute(sql`
+    const username = typeof req.query.username === "string" ? req.query.username : undefined;
+    const [outcomeRows, myRosterId] = await Promise.all([
+      db.execute(sql`
       SELECT
         t.id::int AS id,
         t.trade_id,
@@ -410,11 +431,13 @@ router.get("/:leagueId", async (req, res) => {
         ON l.league_id = t.league_id
       WHERE t.league_id = ${leagueId}
       ORDER BY t.trade_date DESC, t.trade_id DESC, t.roster_id ASC, t.counterparty_roster_id ASC
-    `);
+      `),
+      getRosterIdForUser(leagueId, username),
+    ]);
 
     const outcomes = outcomeRows as unknown as Array<{ trade_id: string; league_id: string }>;
     if (outcomes.length === 0) {
-      return res.json({ outcomes: [], assets: [], rosters: [] });
+      return res.json({ outcomes: [], assets: [], rosters: [], my_roster_id: myRosterId });
     }
 
     const tradeIds = [...new Set(outcomes.map((row) => row.trade_id))];
@@ -427,6 +450,7 @@ router.get("/:leagueId", async (req, res) => {
       outcomes: outcomeRows,
       assets,
       rosters,
+      my_roster_id: myRosterId,
     });
   } catch (error) {
     console.error("[trade-intelligence/league] Error:", error);

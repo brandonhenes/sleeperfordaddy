@@ -1,8 +1,8 @@
 import { PositionBadge } from "../../components/ui";
-import type { LeaguePowerRanking, MockDraftPick, MockDraftProspect, MockDraftSetup } from "@shared/types";
+import type { LeagueSummary, MockDraftPick, MockDraftProspect, MockDraftSetup } from "@shared/types";
 
 interface MockDraftViewProps {
-  leagues: LeaguePowerRanking[] | undefined;
+  leagues: LeagueSummary[] | undefined;
   mockLeagueId: string;
   setMockLeagueId: (id: string) => void;
   mockSetup: MockDraftSetup | undefined;
@@ -62,7 +62,7 @@ export default function MockDraftView({
             <option value="">Choose a league...</option>
             {leagues?.map((l) => (
               <option key={l.league_id} value={l.league_id}>
-                {l.league_name} ({l.mode.toUpperCase()}, {l.rosters.length} teams)
+                {l.league_name} ({l.mode.toUpperCase()}, {l.total_rosters} teams)
               </option>
             ))}
           </select>

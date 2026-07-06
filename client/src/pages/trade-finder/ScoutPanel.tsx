@@ -2,7 +2,7 @@ import type { Dispatch, Ref, SetStateAction } from "react";
 import OpponentCard from "../../components/OpponentCard";
 import OpponentDetail from "../../components/OpponentDetail";
 import { formatDateTime } from "../../lib/format";
-import type { ExploitAngle, LeaguePowerRanking, OpponentProfile, OpponentProfilesResponse } from "@shared/types";
+import type { ExploitAngle, LeaguePowerRanking, LeagueSummary, OpponentProfile, OpponentProfilesResponse } from "@shared/types";
 
 export interface ScoutProfileWithScore {
   profile: OpponentProfile;
@@ -72,7 +72,7 @@ export function scoreScoutProfiles(
 
 interface ScoutPanelProps {
   username: string;
-  leagues: LeaguePowerRanking[] | undefined;
+  leagues: LeagueSummary[] | undefined;
   leaguesLoading: boolean;
   selectedLeague: string;
   setSelectedLeague: Dispatch<SetStateAction<string>>;

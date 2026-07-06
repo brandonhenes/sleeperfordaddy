@@ -4,8 +4,12 @@ import AppShell from "../components/AppShell";
 import FreshnessBar from "../components/FreshnessBar";
 import { PageHeader } from "../components/ui";
 import { useCurrentUsername } from "../hooks/use-current-user";
-import { usePowerRankings } from "../hooks/use-power-rankings";
-import { useTradeSuggestions, useShopPlayer } from "../hooks/use-trade-finder";
+import { useLeagueSummaries } from "../hooks/use-league-summaries";
+import {
+  useShopPlayer,
+  useTradePartnerTargets,
+  useTradeSuggestions,
+} from "../hooks/use-trade-finder";
 import { useAcquisition } from "../hooks/use-acquisition";
 import {
   useOpponentExploits,
@@ -24,6 +28,7 @@ import FindTradesPanel from "./trade-finder/FindTradesPanel";
 import { type LeaguePicksResponse } from "./trade-finder/PickInventoryPanel";
 import ScoutPanel, { scoreScoutProfiles } from "./trade-finder/ScoutPanel";
 import ShopPlayerPanel, { type ShopPathFilter } from "./trade-finder/ShopPlayerPanel";
+import type { TradeFinderConstraint, TradeFinderSearchDepth, TradeStrategyType } from "@shared/types";
 
 export default function TradeFinder() {
   const { username } = useCurrentUsername();
@@ -40,23 +45,73 @@ export default function TradeFinder() {
 }
 
 function TradeFinderReady({ username }: { username: string }) {
-  const [selectedLeague, setSelectedLeague] = useState<string>("");
-  const [mode, setMode] = useState<"find" | "acquire" | "shop" | "scout">("find");
+  const [initialRoute] = useState(() =>
+    typeof window === "undefined"
+      ? parseTradeFinderQuery("")
+      : parseTradeFinderQuery(window.location.search)
+  );
+  const [selectedLeague, setSelectedLeague] = useState<string>(initialRoute.leagueId ?? "");
+  const [mode, setMode] = useState<"find" | "acquire" | "shop" | "scout">(initialRoute.mode ?? "find");
   const [targetSearch, setTargetSearch] = useState("");
   const [selectedTarget, setSelectedTarget] = useState<SelectedAcquisitionTarget | null>(null);
-  const [selectedPlayer, setSelectedPlayer] = useState("");
+  const [selectedPlayer, setSelectedPlayer] = useState(initialRoute.mode === "shop" ? initialRoute.playerId ?? "" : "");
   const [shopAmbition, setShopAmbition] = useState(2);
   const [showShopRedraft, setShowShopRedraft] = useState(false);
   const [shopPathFilter, setShopPathFilter] = useState<ShopPathFilter>(null);
-  const [selectedScoutRosterId, setSelectedScoutRosterId] = useState<number | null>(null);
-  const [pendingScoutRosterId, setPendingScoutRosterId] = useState<number | null>(null);
-  const [scoutRouteWarning, setScoutRouteWarning] = useState<string | null>(null);
+  const [selectedScoutRosterId, setSelectedScoutRosterId] = useState<number | null>(
+    initialRoute.mode === "find" || initialRoute.mode === "scout" ? initialRoute.opponentRosterId : null
+  );
+  const [targetPlayerId, setTargetPlayerId] = useState<string | null>(
+    initialRoute.mode === "find" ? initialRoute.targetPlayerId : null
+  );
+  const [avoidTargetPlayerIds, setAvoidTargetPlayerIds] = useState<string[]>(
+    initialRoute.mode === "find" ? initialRoute.avoidTargetPlayerIds : []
+  );
+  const [laneConstraints, setLaneConstraints] = useState<TradeFinderConstraint[]>(
+    initialRoute.mode === "find" ? initialRoute.constraints : []
+  );
+  const [strategyFocus, setStrategyFocus] = useState<TradeStrategyType | null>(
+    initialRoute.mode === "find" ? initialRoute.strategyFocus : null
+  );
+  const [searchDepth, setSearchDepth] = useState<TradeFinderSearchDepth>(
+    initialRoute.mode === "find" ? initialRoute.searchDepth : "quick"
+  );
+  const [pendingScoutRosterId, setPendingScoutRosterId] = useState<number | null>(
+    initialRoute.mode === "scout" ? initialRoute.opponentRosterId : null
+  );
+  const [scoutRouteWarning, setScoutRouteWarning] = useState<string | null>(
+    initialRoute.invalidOpponentParam
+      ? `${initialRoute.mode === "scout" ? "Scout" : "Trade Finder"} link has an invalid opponent id: ${initialRoute.invalidOpponentParam}.`
+      : null
+  );
   const scoutDetailRef = useRef<HTMLDivElement | null>(null);
 
-  const { data: leagues, isLoading: leaguesLoading } = usePowerRankings(username, showShopRedraft);
-  const { data: suggestions, isLoading: suggestionsLoading, error: suggestionsError } = useTradeSuggestions(username, selectedLeague);
+  const { data: leagues, isLoading: leaguesLoading } = useLeagueSummaries(username, showShopRedraft);
+  const tradeControls = {
+    targetPlayerId: selectedScoutRosterId == null ? null : targetPlayerId,
+    avoidTargetPlayerIds: selectedScoutRosterId == null ? [] : avoidTargetPlayerIds,
+    constraints: laneConstraints,
+    strategyFocus,
+    searchDepth,
+  };
+  const {
+    data: suggestions,
+    isLoading: suggestionsLoading,
+    isFetching: suggestionsFetching,
+    error: suggestionsError,
+  } = useTradeSuggestions(
+    username,
+    selectedLeague,
+    selectedScoutRosterId,
+    tradeControls
+  );
+  const partnerTargetsQuery = useTradePartnerTargets(
+    mode === "find" ? username : "",
+    mode === "find" ? selectedLeague : "",
+    mode === "find" ? selectedScoutRosterId : null
+  );
   const { data: portfolio } = usePortfolio(username);
-  const selectedLeagueData = leagues?.find((league) => league.league_id === selectedLeague);
+  const selectedLeagueData = undefined;
   const classStrengthSuffix = classStrengthQueryParams();
   const leaguePicksQuery = useQuery<LeaguePicksResponse>({
     queryKey: ["league-picks", username, selectedLeague, classStrengthSuffix],
@@ -68,8 +123,8 @@ function TradeFinderReady({ username }: { username: string }) {
     staleTime: 60 * 1000,
   });
   const scoutProfilesQuery = useOpponentProfiles(
-    mode === "scout" ? username : "",
-    mode === "scout" ? selectedLeague : ""
+    mode === "find" || mode === "scout" ? username : "",
+    mode === "find" || mode === "scout" ? selectedLeague : ""
   );
   const refreshProfilesMutation = useRefreshOpponentProfiles();
   const exploitAnglesQuery = useOpponentExploits(
@@ -102,6 +157,14 @@ function TradeFinderReady({ username }: { username: string }) {
       selectedScoutRosterId == null || suggestion.partner.roster_id === selectedScoutRosterId
   );
 
+  function applyFindRouteControls(routeState: ReturnType<typeof parseTradeFinderQuery>) {
+    setTargetPlayerId(routeState.targetPlayerId);
+    setAvoidTargetPlayerIds(routeState.avoidTargetPlayerIds);
+    setLaneConstraints(routeState.constraints);
+    setStrategyFocus(routeState.strategyFocus);
+    setSearchDepth(routeState.searchDepth);
+  }
+
   useEffect(() => {
     if (typeof window === "undefined") return;
     const routeState = parseTradeFinderQuery(window.location.search);
@@ -132,16 +195,109 @@ function TradeFinderReady({ username }: { username: string }) {
       return;
     }
 
-    if (routeState.mode === "find" || routeState.mode === "acquire") {
+    if (routeState.mode === "find") {
+      setMode("find");
+      if (routeState.invalidOpponentParam) {
+        setScoutRouteWarning(`Trade Finder link has an invalid opponent id: ${routeState.invalidOpponentParam}.`);
+      } else if (routeState.opponentRosterId != null) {
+        setSelectedScoutRosterId(routeState.opponentRosterId);
+      }
+      applyFindRouteControls(routeState);
+      return;
+    }
+
+    if (routeState.mode === "acquire") {
       setMode(routeState.mode);
     }
   }, []);
 
   useEffect(() => {
-    if (pendingScoutRosterId != null) return;
+    if (typeof window === "undefined") return;
+
+    const applyRoute = () => {
+      const routeState = parseTradeFinderQuery(window.location.search);
+      if (routeState.leagueId) setSelectedLeague(routeState.leagueId);
+
+      if (routeState.mode === "shop") {
+        setMode("shop");
+        setSelectedPlayer(routeState.playerId ?? "");
+        return;
+      }
+
+      if (routeState.mode === "scout") {
+        setMode("scout");
+        setSelectedScoutRosterId(routeState.opponentRosterId);
+        setPendingScoutRosterId(routeState.opponentRosterId);
+        setScoutRouteWarning(routeState.invalidOpponentParam ? `Scout link has an invalid opponent id: ${routeState.invalidOpponentParam}.` : null);
+        return;
+      }
+
+      if (routeState.mode === "find") {
+        setMode("find");
+        setSelectedScoutRosterId(routeState.opponentRosterId);
+        setPendingScoutRosterId(null);
+        setScoutRouteWarning(routeState.invalidOpponentParam ? `Trade Finder link has an invalid opponent id: ${routeState.invalidOpponentParam}.` : null);
+        applyFindRouteControls(routeState);
+        return;
+      }
+
+      if (routeState.mode === "acquire") {
+        setMode("acquire");
+      }
+    };
+
+    window.addEventListener("popstate", applyRoute);
+    return () => window.removeEventListener("popstate", applyRoute);
+  }, []);
+
+  useEffect(() => {
+    if (selectedLeague || !leagues || leagues.length === 0) return;
+    if (typeof window !== "undefined") {
+      const routeState = parseTradeFinderQuery(window.location.search);
+      if (routeState.leagueId) return;
+      const lastLeagueId = window.localStorage.getItem(`edge:trade-finder:last-league:${username}`);
+      if (lastLeagueId && leagues.some((league) => league.league_id === lastLeagueId)) {
+        setSelectedLeague(lastLeagueId);
+        return;
+      }
+    }
+    setSelectedLeague(leagues[0].league_id);
+  }, [leagues, selectedLeague, username]);
+
+  useEffect(() => {
+    if (!selectedLeague || typeof window === "undefined") return;
+    window.localStorage.setItem(`edge:trade-finder:last-league:${username}`, selectedLeague);
+  }, [selectedLeague, username]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || mode !== "find" || !selectedLeague) return;
+    window.history.replaceState(null, "", buildTradeFinderUrl(username, {
+      mode: "find",
+      leagueId: selectedLeague,
+      opponentRosterId: selectedScoutRosterId,
+      targetPlayerId: selectedScoutRosterId == null ? null : targetPlayerId,
+      avoidTargetPlayerIds: selectedScoutRosterId == null ? [] : avoidTargetPlayerIds,
+      constraints: laneConstraints,
+      strategyFocus,
+      searchDepth,
+    }));
+  }, [
+    mode,
+    selectedLeague,
+    selectedScoutRosterId,
+    targetPlayerId,
+    avoidTargetPlayerIds,
+    laneConstraints,
+    strategyFocus,
+    searchDepth,
+    username,
+  ]);
+
+  useEffect(() => {
+    if (mode !== "scout" || pendingScoutRosterId != null) return;
     setSelectedScoutRosterId(null);
     setScoutRouteWarning(null);
-  }, [pendingScoutRosterId, selectedLeague]);
+  }, [mode, pendingScoutRosterId, selectedLeague]);
 
   useEffect(() => {
     if (mode !== "scout") return;
@@ -200,6 +356,45 @@ function TradeFinderReady({ username }: { username: string }) {
     }
   }
 
+  function pushFindUrl(
+    nextLeague: string,
+    nextOpponentRosterId: number | null,
+    resetControls = false
+  ) {
+    if (typeof window === "undefined" || !username) return;
+    window.history.pushState(null, "", buildTradeFinderUrl(username, {
+      mode: "find",
+      leagueId: nextLeague,
+      opponentRosterId: nextOpponentRosterId,
+      targetPlayerId: resetControls || nextOpponentRosterId == null ? null : targetPlayerId,
+      avoidTargetPlayerIds: resetControls || nextOpponentRosterId == null ? [] : avoidTargetPlayerIds,
+      constraints: resetControls ? [] : laneConstraints,
+      strategyFocus: resetControls ? null : strategyFocus,
+      searchDepth: resetControls ? "quick" : searchDepth,
+    }));
+  }
+
+  function selectFindLeague(nextLeague: string) {
+    setSelectedLeague(nextLeague);
+    setSelectedScoutRosterId(null);
+    setTargetPlayerId(null);
+    setAvoidTargetPlayerIds([]);
+    setLaneConstraints([]);
+    setStrategyFocus(null);
+    setSearchDepth("quick");
+    if (nextLeague) pushFindUrl(nextLeague, null, true);
+  }
+
+  function selectFindOpponent(nextOpponentRosterId: number | null) {
+    setSelectedScoutRosterId(nextOpponentRosterId);
+    setTargetPlayerId(null);
+    setAvoidTargetPlayerIds([]);
+    setLaneConstraints([]);
+    setStrategyFocus(null);
+    setSearchDepth("quick");
+    if (selectedLeague) pushFindUrl(selectedLeague, nextOpponentRosterId, true);
+  }
+
   return (
     <>
       <FreshnessBar leagueId={selectedLeague || undefined} />
@@ -223,17 +418,35 @@ function TradeFinderReady({ username }: { username: string }) {
 
       {mode === "find" && (
         <FindTradesPanel
+          username={username}
           leagues={leagues}
           leaguesLoading={leaguesLoading}
           selectedLeague={selectedLeague}
-          setSelectedLeague={setSelectedLeague}
+          setSelectedLeague={selectFindLeague}
           selectedScoutProfile={selectedScoutProfile}
-          onClearScoutFilter={() => setSelectedScoutRosterId(null)}
+          opponentProfiles={scoutProfilesWithScores.map(({ profile }) => profile)}
+          opponentProfilesLoading={scoutProfilesQuery.isLoading}
+          selectedOpponentRosterId={selectedScoutRosterId}
+          setSelectedOpponentRosterId={selectFindOpponent}
+          targetPlayerId={targetPlayerId}
+          setTargetPlayerId={setTargetPlayerId}
+          avoidTargetPlayerIds={avoidTargetPlayerIds}
+          setAvoidTargetPlayerIds={setAvoidTargetPlayerIds}
+          laneConstraints={laneConstraints}
+          setLaneConstraints={setLaneConstraints}
+          strategyFocus={strategyFocus}
+          setStrategyFocus={setStrategyFocus}
+          searchDepth={searchDepth}
+          setSearchDepth={setSearchDepth}
+          partnerTargets={partnerTargetsQuery.data ?? []}
+          partnerTargetsLoading={partnerTargetsQuery.isLoading}
+          onClearScoutFilter={() => selectFindOpponent(null)}
           leaguePicksData={leaguePicksQuery.data}
           leaguePicksLoading={leaguePicksQuery.isLoading}
           suggestions={suggestions}
           filteredSuggestions={filteredSuggestions}
           suggestionsLoading={suggestionsLoading}
+          suggestionsRefreshing={suggestionsFetching && !suggestionsLoading}
           suggestionsError={suggestionsError}
         />
       )}

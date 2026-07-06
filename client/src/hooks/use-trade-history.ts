@@ -6,9 +6,9 @@ export function useTradeHistory(username: string | undefined) {
   return useQuery<TradeHistoryResponse>({
     queryKey: ["trade-history", username],
     queryFn: () =>
-      apiFetch(`/api/trade-history?username=${encodeURIComponent(username!)}`),
+      apiFetch(`/api/trade-history?username=${encodeURIComponent(username!)}&limit=150`),
     enabled: !!username,
-    staleTime: 5 * 60 * 1000,
+    staleTime: 10 * 60 * 1000,
   });
 }
 
@@ -16,8 +16,8 @@ export function useTradeAging(username: string | undefined) {
   return useQuery<TradeAgingRow[]>({
     queryKey: ["trade-aging", username],
     queryFn: () =>
-      apiFetch(`/api/trades/${encodeURIComponent(username!)}/aging`),
+      apiFetch(`/api/trades/${encodeURIComponent(username!)}/aging?limit=1200`),
     enabled: !!username,
-    staleTime: 5 * 60 * 1000,
+    staleTime: 10 * 60 * 1000,
   });
 }

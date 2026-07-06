@@ -63,6 +63,73 @@ interface LeagueUserRow {
   team_name: string | null;
 }
 
+interface TradeHistoryOptions {
+  tradeLimit?: number;
+}
+
+interface TradeAgingOptions {
+  tradeIds?: string[];
+  assetLimit?: number;
+}
+
+const DEFAULT_HISTORY_TRADE_LIMIT = 150;
+const DEFAULT_AGING_ASSET_LIMIT = 1200;
+const CACHE_TTL_MS = 10 * 60 * 1000;
+const CACHE_MAX_ENTRIES = 24;
+
+const historyCache = new Map<string, { data: TradeHistoryResponse; expires: number }>();
+const agingCache = new Map<string, { data: TradeAgingRow[]; expires: number }>();
+
+export function clearTradeHistoryCache(username?: string) {
+  if (!username) {
+    historyCache.clear();
+    agingCache.clear();
+    return;
+  }
+
+  const prefix = `${username.toLowerCase()}:`;
+  for (const key of historyCache.keys()) {
+    if (key.startsWith(prefix)) historyCache.delete(key);
+  }
+  for (const key of agingCache.keys()) {
+    if (key.startsWith(prefix)) agingCache.delete(key);
+  }
+}
+
+function clampLimit(value: number | undefined, fallback: number, max: number): number {
+  if (!Number.isFinite(value) || value == null) return fallback;
+  return Math.max(1, Math.min(max, Math.floor(value)));
+}
+
+function joinValues(values: Array<string | number>) {
+  return sql.join(values.map((value) => sql`${value}`), sql`, `);
+}
+
+function getCached<T>(cache: Map<string, { data: T; expires: number }>, key: string): T | null {
+  const hit = cache.get(key);
+  if (!hit) return null;
+  if (hit.expires <= Date.now()) {
+    cache.delete(key);
+    return null;
+  }
+  cache.delete(key);
+  cache.set(key, hit);
+  return hit.data;
+}
+
+function setCached<T>(cache: Map<string, { data: T; expires: number }>, key: string, data: T) {
+  cache.set(key, { data, expires: Date.now() + CACHE_TTL_MS });
+  const now = Date.now();
+  for (const [cacheKey, value] of cache.entries()) {
+    if (value.expires <= now) cache.delete(cacheKey);
+  }
+  while (cache.size > CACHE_MAX_ENTRIES) {
+    const oldestKey = cache.keys().next().value;
+    if (!oldestKey) break;
+    cache.delete(oldestKey);
+  }
+}
+
 function round1(value: number): number {
   return Math.round(value * 10) / 10;
 }
@@ -123,9 +190,20 @@ async function getUserIdForUsername(username: string): Promise<string | null> {
   return (userRows as unknown as UserRow[])[0]?.user_id ?? null;
 }
 
-export async function getTradeAging(username: string): Promise<TradeAgingRow[]> {
+export async function getTradeAging(
+  username: string,
+  options: TradeAgingOptions = {}
+): Promise<TradeAgingRow[]> {
   const userId = await getUserIdForUsername(username);
   if (!userId) return [];
+  const assetLimit = clampLimit(options.assetLimit, DEFAULT_AGING_ASSET_LIMIT, 5000);
+  const tradeIds = [...new Set(options.tradeIds ?? [])].filter(Boolean);
+  const cacheKey = `${username.toLowerCase()}:${assetLimit}:${tradeIds.length > 0 ? tradeIds.join(",") : "all"}`;
+  const cached = getCached(agingCache, cacheKey);
+  if (cached) return cached;
+  const tradeIdFilter = tradeIds.length > 0
+    ? sql`AND ta.trade_id IN (${joinValues(tradeIds)})`
+    : sql``;
 
   const rows = await db.execute(sql`
     SELECT
@@ -154,13 +232,25 @@ export async function getTradeAging(username: string): Promise<TradeAgingRow[]> 
       WHERE league_id = COALESCE(t.league_id, ta.league_id)
         AND owner_id = ${userId}
     )
+    ${tradeIdFilter}
     ORDER BY ta.trade_date DESC, ta.trade_id DESC, ta.direction ASC, ta.asset_name ASC NULLS LAST
+    LIMIT ${assetLimit}
   `);
 
-  return rows as unknown as TradeAgingRow[];
+  const data = rows as unknown as TradeAgingRow[];
+  setCached(agingCache, cacheKey, data);
+  return data;
 }
 
-export async function getTradeHistory(username: string): Promise<TradeHistoryResponse> {
+export async function getTradeHistory(
+  username: string,
+  options: TradeHistoryOptions = {}
+): Promise<TradeHistoryResponse> {
+  const tradeLimit = clampLimit(options.tradeLimit, DEFAULT_HISTORY_TRADE_LIMIT, 500);
+  const cacheKey = `${username.toLowerCase()}:${tradeLimit}`;
+  const cached = getCached(historyCache, cacheKey);
+  if (cached) return cached;
+
   const userId = await getUserIdForUsername(username);
   if (!userId) return { trades: [], stats: emptyStats() };
 
@@ -176,10 +266,27 @@ export async function getTradeHistory(username: string): Promise<TradeHistoryRes
   const leagueIds = [...new Set(userRosters.map((roster) => roster.league_id))];
   const leagueIdSql = sql.join(leagueIds.map((leagueId) => sql`${leagueId}`), sql`, `);
 
+  const recentTradeRows = await db.execute(sql`
+    SELECT trade_id, MAX(created_at_ms::bigint) AS latest_created_at_ms
+    FROM trade_assets
+    WHERE (${sql.join(tradeAssetFilters, sql` OR `)})
+      AND asset_type IN ('player', 'pick')
+    GROUP BY trade_id
+    ORDER BY latest_created_at_ms DESC, trade_id DESC
+    LIMIT ${tradeLimit}
+  `);
+  const recentTradeIds = (recentTradeRows as unknown as { trade_id: string }[])
+    .map((row) => row.trade_id)
+    .filter(Boolean);
+  if (recentTradeIds.length === 0) return { trades: [], stats: emptyStats() };
+  const recentTradeIdSql = joinValues(recentTradeIds);
+
   const tradeAssetRows = await db.execute(sql`
     SELECT trade_id, league_id, roster_id, direction, asset_type, asset_key, asset_name, created_at_ms, counterparty_roster_ids
     FROM trade_assets
-    WHERE ${sql.join(tradeAssetFilters, sql` OR `)}
+    WHERE (${sql.join(tradeAssetFilters, sql` OR `)})
+      AND trade_id IN (${recentTradeIdSql})
+      AND asset_type IN ('player', 'pick')
     ORDER BY created_at_ms DESC, trade_id DESC
   `);
   const userTradeAssets = (tradeAssetRows as unknown as TradeAssetRow[]).filter(
@@ -187,7 +294,10 @@ export async function getTradeHistory(username: string): Promise<TradeHistoryRes
   );
   if (userTradeAssets.length === 0) return { trades: [], stats: emptyStats() };
 
-  const agingRows = (await getTradeAging(username)) as TradeAgingSourceRow[];
+  const agingRows = (await getTradeAging(username, {
+    tradeIds: recentTradeIds,
+    assetLimit: Math.max(DEFAULT_AGING_ASSET_LIMIT, recentTradeIds.length * 12),
+  })) as TradeAgingSourceRow[];
   if (agingRows.length === 0) return { trades: [], stats: emptyStats() };
 
   const tradeMap = new Map<string, {
@@ -318,10 +428,12 @@ export async function getTradeHistory(username: string): Promise<TradeHistoryRes
 
   trades.sort((left, right) => right.trade_timestamp - left.trade_timestamp);
 
-  return {
+  const data = {
     trades,
     stats: computeStats(trades),
   };
+  setCached(historyCache, cacheKey, data);
+  return data;
 }
 
 function computeStats(trades: TradeGrade[]): TradeHistoryStats {

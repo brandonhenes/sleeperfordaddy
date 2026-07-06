@@ -5,6 +5,8 @@ import { useEvaluateTrade } from "../hooks/use-trade-calculator";
 import { usePowerRankings } from "../hooks/use-power-rankings";
 import { useCurrentUsername } from "../hooks/use-current-user";
 import { apiFetch } from "../lib/api";
+import { writeStoredUsername } from "../lib/current-user";
+import { parseTradeCalculatorQuery } from "../lib/trade-calculator-url";
 import { computeAcceptance } from "../lib/acceptance";
 import type {
   CoreAsset,
@@ -82,14 +84,27 @@ function RosterSideTabs({
 }
 
 export default function TradeCalculator() {
+  const [initialRoute] = useState(() =>
+    typeof window === "undefined"
+      ? parseTradeCalculatorQuery("")
+      : parseTradeCalculatorQuery(window.location.search)
+  );
   const [showRedraft, setShowRedraft] = useState(false);
   const [valuationMode, setValuationMode] = useState<TradeValuationProfile>("ktc_league");
-  const [selectedLeague, setSelectedLeague] = useState("");
-  const [selectedOpponent, setSelectedOpponent] = useState<number | null>(null);
-  const [sendAssets, setSendAssets] = useState<TradeAssetInput[]>([]);
-  const [receiveAssets, setReceiveAssets] = useState<TradeAssetInput[]>([]);
-  const [sendLabels, setSendLabels] = useState<string[]>([]);
-  const [receiveLabels, setReceiveLabels] = useState<string[]>([]);
+  const [selectedLeague, setSelectedLeague] = useState(initialRoute.leagueId ?? "");
+  const [selectedOpponent, setSelectedOpponent] = useState<number | null>(initialRoute.opponentRosterId);
+  const [sendAssets, setSendAssets] = useState<TradeAssetInput[]>(initialRoute.send);
+  const [receiveAssets, setReceiveAssets] = useState<TradeAssetInput[]>(initialRoute.receive);
+  const [sendLabels, setSendLabels] = useState<string[]>(
+    initialRoute.sendLabels.length > 0
+      ? initialRoute.sendLabels
+      : initialRoute.send.map((asset) => asset.pick_label ?? (asset.player_id ? `Player ${asset.player_id}` : "Pick"))
+  );
+  const [receiveLabels, setReceiveLabels] = useState<string[]>(
+    initialRoute.receiveLabels.length > 0
+      ? initialRoute.receiveLabels
+      : initialRoute.receive.map((asset) => asset.pick_label ?? (asset.player_id ? `Player ${asset.player_id}` : "Pick"))
+  );
   const [sendSearch, setSendSearch] = useState("");
   const [receiveSearch, setReceiveSearch] = useState("");
   const [sendPickSeason, setSendPickSeason] = useState(PICK_YEARS[0]);
@@ -107,16 +122,17 @@ export default function TradeCalculator() {
     typeof window !== "undefined" ? window.innerWidth < 1180 : false
   ));
 
-  const { username: storedUsername } = useCurrentUsername();
-  const { data: leagues = [] } = usePowerRankings(storedUsername, showRedraft);
+  const { username: currentUsername } = useCurrentUsername();
+  const effectiveUsername = currentUsername || initialRoute.username || "";
+  const { data: leagues = [] } = usePowerRankings(effectiveUsername, showRedraft);
   const selectedLeagueData = leagues.find((l) => l.league_id === selectedLeague);
   const userRoster = selectedLeagueData?.rosters.find((r) => r.is_user) ?? null;
   const oppRoster = selectedLeagueData?.rosters.find((r) => r.roster_id === selectedOpponent) ?? null;
 
   const { data: opponentData } = useQuery<OpponentContextResponse>({
-    queryKey: ["opponent-context", storedUsername, selectedLeague, showRedraft],
-    queryFn: () => apiFetch(`/api/trade/opponent-context/${encodeURIComponent(storedUsername)}/${encodeURIComponent(selectedLeague)}${showRedraft ? "?redraft=true" : ""}`),
-    enabled: !!storedUsername && !!selectedLeague,
+    queryKey: ["opponent-context", effectiveUsername, selectedLeague, showRedraft],
+    queryFn: () => apiFetch(`/api/trade/opponent-context/${encodeURIComponent(effectiveUsername)}/${encodeURIComponent(selectedLeague)}${showRedraft ? "?redraft=true" : ""}`),
+    enabled: !!effectiveUsername && !!selectedLeague,
     staleTime: 5 * 60 * 1000,
   });
   const opponents = opponentData?.opponents ?? [];
@@ -134,6 +150,11 @@ export default function TradeCalculator() {
   });
 
   useEffect(() => {
+    if (initialRoute.username) writeStoredUsername(initialRoute.username);
+  }, [initialRoute.username]);
+
+  useEffect(() => {
+    if (initialRoute.leagueId && selectedLeague === initialRoute.leagueId) return;
     setSelectedOpponent(null);
     setSendAssets([]);
     setReceiveAssets([]);
@@ -141,7 +162,7 @@ export default function TradeCalculator() {
     setReceiveLabels([]);
     setActiveRosterSide("send");
     setSheetOpen(false);
-  }, [selectedLeague]);
+  }, [initialRoute.leagueId, selectedLeague]);
 
   useEffect(() => {
     if (opponents.length > 0 && !selectedOpponent) {
