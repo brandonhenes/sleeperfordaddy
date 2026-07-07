@@ -425,6 +425,8 @@ export interface TradeHealthAssetInput {
   position: string | null;
   label: string;
   edge_score: number;
+  ppg?: number | null;
+  league_rating?: LeaguePlayerRating | null;
 }
 
 export interface TradeHealthPlayerInfo {
@@ -453,6 +455,34 @@ function tradeDirectionForPlayer(info: TradeHealthPlayerInfo): "increasing" | "s
   if (zone === "Ascent" && trend > 0) return "increasing";
   if ((zone === "Decline" || zone === "Cliff") && trend <= 0) return "decreasing";
   return "stable";
+}
+
+function projectedPpgForHealthAsset(asset: TradeHealthAssetInput): number {
+  const direct = asset.ppg;
+  if (direct != null && Number.isFinite(direct)) return Math.max(0, direct);
+  return 0;
+}
+
+function winNowPointsBuySignal(
+  sideAPlayers: Array<{ asset: TradeHealthAssetInput; info: TradeHealthPlayerInfo }>,
+  sideBPlayers: Array<{ asset: TradeHealthAssetInput; info: TradeHealthPlayerInfo }>,
+  fairness?: TradeEvaluation["fairness"]
+): { qualifies: boolean; ppgGain: number; receivePpg: number; sendPpg: number } {
+  const sendPpg = sideAPlayers.reduce((sum, entry) => sum + projectedPpgForHealthAsset(entry.asset), 0);
+  const receivePpg = sideBPlayers.reduce((sum, entry) => sum + projectedPpgForHealthAsset(entry.asset), 0);
+  const ppgGain = receivePpg - sendPpg;
+  const fairEnough = fairness === "fair" || fairness === "slight_edge";
+  const currentProductionPieces = sideBPlayers.filter(({ asset }) => {
+    const position = (asset.position ?? "").toUpperCase();
+    return ["RB", "WR", "TE"].includes(position) && projectedPpgForHealthAsset(asset) >= 7;
+  }).length;
+
+  return {
+    qualifies: fairEnough && sideBPlayers.length >= 2 && currentProductionPieces >= 2 && (ppgGain >= 8 || (ppgGain >= 6 && receivePpg >= 24)),
+    ppgGain,
+    receivePpg,
+    sendPpg,
+  };
 }
 
 export async function loadTradeHealthPlayerInfo(
@@ -606,11 +636,25 @@ export function tradeHealthCheck(
   if (ascendingAssets.length > 0 && sideBDecliningOnly) {
     const ascending = ascendingAssets[0];
     const veteran = sideBPlayers[0];
-    pushWarning({
-      type: "block",
-      rule: "ascending_for_declining",
-      message: `${formatPlayerName(ascending.asset, ascending.info)} is ${ascending.info.age ?? "young"} and ascending. ${formatPlayerName(veteran.asset, veteran.info)} is ${veteran.info.age ?? "older"} and declining. Do not trade ascending youth for declining veterans.`,
-    });
+    const pointsBuy = winNowPointsBuySignal(sideAPlayers, sideBPlayers, fairness);
+    if (pointsBuy.qualifies) {
+      pushWarning({
+        type: "warning",
+        rule: "ascending_for_declining",
+        message: `${formatPlayerName(ascending.asset, ascending.info)} is ${ascending.info.age ?? "young"} and ascending. ${formatPlayerName(veteran.asset, veteran.info)} is ${veteran.info.age ?? "older"} and declining. This is only viable as an intentional win-now points buy, not a neutral dynasty value move.`,
+      });
+      pushWarning({
+        type: "warning",
+        rule: "win_now_points_buy",
+        message: `Win-now points buy: the return projects for ${roundTo(pointsBuy.receivePpg, 1)} league PPG versus ${roundTo(pointsBuy.sendPpg, 1)} sent (+${roundTo(pointsBuy.ppgGain, 1)}). Only pursue if you are buying a title window.`,
+      });
+    } else {
+      pushWarning({
+        type: "block",
+        rule: "ascending_for_declining",
+        message: `${formatPlayerName(ascending.asset, ascending.info)} is ${ascending.info.age ?? "young"} and ascending. ${formatPlayerName(veteran.asset, veteran.info)} is ${veteran.info.age ?? "older"} and declining. Do not trade ascending youth for declining veterans.`,
+      });
+    }
   }
 
   for (const { asset, info } of sideBPlayers) {

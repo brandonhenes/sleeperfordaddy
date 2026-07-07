@@ -399,6 +399,7 @@ export default function TradeCalculator() {
         valuationMode={valuationMode}
         onValuationModeChange={setValuationMode}
         selectedLeague={selectedLeague}
+        returnTo={initialRoute.returnTo}
       />
 
       <LeagueOpponentSelectors

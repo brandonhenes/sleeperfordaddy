@@ -6,6 +6,7 @@ import {
   buildLeaguePlayerRating,
   buildValuationComparison,
   toKtcEvaluatedAsset,
+  tradeHealthCheck,
   type RawEval,
 } from "../trade-calculator.js";
 
@@ -147,6 +148,86 @@ describe("Trade Calculator valuation profiles", () => {
       "Hard To Replace",
       "Underpriced Here",
     ]));
+  });
+
+  it("downgrades young-for-old protection when the trade is a real win-now points buy", () => {
+    const warnings = tradeHealthCheck(
+      [{ player_id: "future-qb", position: "QB", label: "Future QB", edge_score: 86, ppg: 13.2 }],
+      [
+        { player_id: "veteran-rb-1", position: "RB", label: "Veteran RB 1", edge_score: 91, ppg: 19.5 },
+        { player_id: "veteran-rb-2", position: "RB", label: "Veteran RB 2", edge_score: 75, ppg: 9.6 },
+      ],
+      new Map([
+        ["future-qb", {
+          player_id: "future-qb",
+          full_name: "Future QB",
+          position: "QB",
+          age: 22,
+          trend_30day: 3,
+          current_fc_value: null,
+          historical_peak_fc_value: null,
+          edge_score: 86,
+        }],
+        ["veteran-rb-1", {
+          player_id: "veteran-rb-1",
+          full_name: "Veteran RB 1",
+          position: "RB",
+          age: 27,
+          trend_30day: -2,
+          current_fc_value: null,
+          historical_peak_fc_value: null,
+          edge_score: 91,
+        }],
+        ["veteran-rb-2", {
+          player_id: "veteran-rb-2",
+          full_name: "Veteran RB 2",
+          position: "RB",
+          age: 27,
+          trend_30day: -2,
+          current_fc_value: null,
+          historical_peak_fc_value: null,
+          edge_score: 75,
+        }],
+      ]),
+      "slight_edge"
+    );
+
+    expect(warnings.find((warning) => warning.rule === "ascending_for_declining")?.type).toBe("warning");
+    expect(warnings.some((warning) => warning.rule === "win_now_points_buy")).toBe(true);
+    expect(warnings.some((warning) => warning.type === "block")).toBe(false);
+  });
+
+  it("still blocks young-for-old trades without a meaningful projected-points gain", () => {
+    const warnings = tradeHealthCheck(
+      [{ player_id: "future-qb", position: "QB", label: "Future QB", edge_score: 86, ppg: 14 }],
+      [{ player_id: "veteran-rb", position: "RB", label: "Veteran RB", edge_score: 78, ppg: 15 }],
+      new Map([
+        ["future-qb", {
+          player_id: "future-qb",
+          full_name: "Future QB",
+          position: "QB",
+          age: 22,
+          trend_30day: 3,
+          current_fc_value: null,
+          historical_peak_fc_value: null,
+          edge_score: 86,
+        }],
+        ["veteran-rb", {
+          player_id: "veteran-rb",
+          full_name: "Veteran RB",
+          position: "RB",
+          age: 27,
+          trend_30day: -2,
+          current_fc_value: null,
+          historical_peak_fc_value: null,
+          edge_score: 78,
+        }],
+      ]),
+      "slight_edge"
+    );
+
+    expect(warnings.find((warning) => warning.rule === "ascending_for_declining")?.type).toBe("block");
+    expect(warnings.some((warning) => warning.rule === "win_now_points_buy")).toBe(false);
   });
 
   it("breaks a trade into current, raw KTC, league, and package context components", () => {

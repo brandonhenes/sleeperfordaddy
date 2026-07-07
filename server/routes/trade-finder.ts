@@ -175,9 +175,9 @@ router.get("/api/trade/find/:username/:leagueId", async (req, res) => {
           searchDepth,
           maxOpponents: 1,
           maxEvaluationsPerOpponent: targetPlayerId
-            ? (isDeep ? 24 : 12)
-            : (isDeep ? 22 : 16),
-          maxPackagesPerPartner: isDeep ? 6 : 5,
+            ? (isDeep ? 36 : 16)
+            : (isDeep ? 36 : 20),
+          maxPackagesPerPartner: isDeep ? 8 : 5,
         }
       : {
           strategyFocus,

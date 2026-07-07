@@ -185,6 +185,40 @@ describe("acquisition finder valuation bridge", () => {
     expect(filterAcquisitionRecommendationOffers([bad, good])).toEqual([good]);
   });
 
+  it("rejects absurdly light acquisition offers after KTC League valuation", async () => {
+    const generated = {
+      ...offer(),
+      acceptance_likelihood: 75,
+      their_perspective: {
+        ...offer().their_perspective,
+        verdict: "likely_accept" as const,
+        verdict_reason: "Generated package looked close before valuation.",
+      },
+    };
+    const evaluatePackage = async (
+      input: OpportunityPackageValuationInput
+    ): Promise<OpportunityPackageValuation> => ({
+      ...valuation(input),
+      sendContextTradeValue: 4_900,
+      receiveContextTradeValue: 12_300,
+      delta: 7_400,
+      fairness: "lopsided",
+      percentGap: 0.6,
+    });
+
+    const valued = await valueAcquisitionOfferWithKtcLeague(
+      generated,
+      "league-1",
+      "sf",
+      undefined,
+      evaluatePackage
+    );
+
+    expect(valued.their_perspective.verdict).toBe("no_chance");
+    expect(valued.acceptance_likelihood).toBeLessThanOrEqual(10);
+    expect(filterAcquisitionRecommendationOffers([valued])).toEqual([]);
+  });
+
   it("does not surface owners with zero viable acquisition packages", () => {
     const empty = opportunity("empty", 60, []);
     const hardWithOffer = opportunity("hard", 70, [offer()]);

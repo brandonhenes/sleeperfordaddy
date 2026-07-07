@@ -31,6 +31,7 @@ import {
   scoreTradeFinderPackage,
   shouldSurfaceTradeFinderPackage,
 } from "../trade-finder.js";
+import { classifyTradeStrategy } from "../trade-strategy-thesis.js";
 
 const baselineScoring = {
   ppr: 1,
@@ -531,6 +532,50 @@ describe("Find Trades generator quality", () => {
 
     expect(ranked).toHaveLength(1);
     expect(ranked[0].opp.roster.roster_id).toBe(3);
+  });
+
+  it("hides pick-only packages for partner-first search unless pick arbitrage is selected", async () => {
+    const user = profile({
+      roster: { ...profile({}).roster, is_user: true, archetype: "Competitor" },
+      tradeablePicks: [
+        scoredPick("2027 Mid 2nd", 42, 2, 20),
+        scoredPick("2027 Mid 3rd", 28, 3, 32),
+      ],
+    });
+    const opp = profile({
+      roster: { ...profile({}).roster, roster_id: 2, display_name: "Opponent", archetype: "Rebuilder" },
+      tradeablePicks: [scoredPick("2027 1.05", 72, 1, 5)],
+    });
+
+    const partnerDefault = await generateTradeFinderPackages(
+      user as never,
+      opp as never,
+      "sf",
+      "league-1",
+      baselineScoring,
+      new Map(),
+      false,
+      undefined,
+      async (send, receive, leagueId, mode) =>
+        scoreTradeFinderPackage(send, receive, leagueId, mode),
+      { opponentRosterId: 2 }
+    );
+    const pickArbitrage = await generateTradeFinderPackages(
+      user as never,
+      opp as never,
+      "sf",
+      "league-1",
+      baselineScoring,
+      new Map(),
+      false,
+      undefined,
+      async (send, receive, leagueId, mode) =>
+        scoreTradeFinderPackage(send, receive, leagueId, mode),
+      { opponentRosterId: 2, strategyFocus: "pick_arbitrage" }
+    );
+
+    expect(partnerDefault.some(isPickOnlyTradePackage)).toBe(false);
+    expect(pickArbitrage.some(isPickOnlyTradePackage)).toBe(true);
   });
 
   it("builds QB tier-down packages with a lesser QB anchor before other positions", async () => {
@@ -1212,7 +1257,7 @@ describe("Find Trades generator quality", () => {
     expect(annotated.ranking_components?.roster_fit).toBeLessThan(50);
   });
 
-  it("treats lopsided but otherwise valid player packages as low-confidence fallback", () => {
+  it("keeps lopsided player packages out of default lanes but allows explicit target fallback", () => {
     const annotated = annotateTradeFinderPackage(
       packageFrom(
         [player("Send QB", "QB", 68)],
@@ -1222,9 +1267,10 @@ describe("Find Trades generator quality", () => {
       { userNeeds: ["WR"], opponentNeeds: ["QB"], userArchetype: "Competitor", opponentArchetype: "Competitor" }
     );
 
-    expect(shouldSurfaceTradeFinderPackage(annotated)).toBe(true);
+    expect(shouldSurfaceTradeFinderPackage(annotated)).toBe(false);
     expect(annotated.quality_tier).toBe("low_confidence");
-    expect(dedupeAndRankTradeFinderPackages([annotated], 4)).toEqual([annotated]);
+    expect(dedupeAndRankTradeFinderPackages([annotated], 4)).toEqual([]);
+    expect(dedupeAndRankTradeFinderPackages([annotated], 4, true)).toEqual([annotated]);
   });
 
   it("rejects excessive overpays even when they fit needs and look easy to accept", () => {
@@ -1275,10 +1321,11 @@ describe("Find Trades generator quality", () => {
       { userNeeds: ["WR"], opponentNeeds: ["RB"], userArchetype: "Competitor", opponentArchetype: "Competitor" }
     );
 
-    expect(shouldSurfaceTradeFinderPackage(annotated)).toBe(true);
+    expect(shouldSurfaceTradeFinderPackage(annotated)).toBe(false);
     expect(annotated.package_quality_label).toBe("poor");
     expect(annotated.quality_tier).toBe("low_confidence");
     expect(annotated.ranking_components?.acceptance_likelihood).toBeLessThanOrEqual(28);
+    expect(dedupeAndRankTradeFinderPackages([annotated], 4, true)).toEqual([annotated]);
   });
 
   it("rejects superstar-for-junk packages", () => {
@@ -1397,6 +1444,93 @@ describe("Find Trades generator quality", () => {
     expect(annotated.strategy_type).toBe("consolidation");
     expect(annotated.trade_thesis).toContain("Consolidation");
     expect(annotated.ranking_components?.strategy_fit).toEqual(expect.any(Number));
+  });
+
+  it("classifies one future asset for two current producers as a win-now buy for contenders", () => {
+    const metadata = classifyTradeStrategy({
+      sendAssets: [player("Future QB", "QB", 86, { ppg: 13.2 })],
+      receiveAssets: [
+        player("Veteran RB 1", "RB", 91, { ppg: 19.5 }),
+        player("Veteran RB 2", "RB", 75, { ppg: 9.6 }),
+      ],
+      userArchetype: "All-In Contender",
+      opponentArchetype: "Rebuilder",
+      fairness: "slight_edge",
+      valueEdgeForUser: -600,
+      mode: "sf",
+    });
+
+    expect(metadata.strategy_type).toBe("win_now_buy");
+    expect(metadata.trade_thesis).toContain("projected league PPG");
+    expect(metadata.strategy_score).toBeGreaterThanOrEqual(56);
+  });
+
+  it("generates win-now points-buy packages from future value into two current producers", async () => {
+    const futureQb = coreAsset({
+      player_id: "future-qb",
+      full_name: "Future QB",
+      position: "QB",
+      edge_score: 86,
+      age: 22,
+      ppg: 13.2,
+    });
+    const veteranRb1 = coreAsset({
+      player_id: "veteran-rb-1",
+      full_name: "Veteran RB 1",
+      position: "RB",
+      edge_score: 91,
+      age: 27,
+      ppg: 19.5,
+    });
+    const veteranRb2 = coreAsset({
+      player_id: "veteran-rb-2",
+      full_name: "Veteran RB 2",
+      position: "RB",
+      edge_score: 75,
+      age: 27,
+      ppg: 9.6,
+    });
+    const user = profile({
+      roster: { ...profile({}).roster, is_user: true, archetype: "All-In Contender", core_assets: [futureQb] },
+      byPos: byPosFromAssets([futureQb]),
+      needs: ["RB"],
+      surplus: { QB: [futureQb], RB: [], WR: [], TE: [] },
+      tradeablePicks: [],
+    });
+    const opp = profile({
+      roster: {
+        ...profile({}).roster,
+        roster_id: 2,
+        display_name: "Opponent",
+        archetype: "Rebuilder",
+        core_assets: [veteranRb1, veteranRb2],
+      },
+      byPos: byPosFromAssets([veteranRb1, veteranRb2]),
+      needs: ["QB"],
+      surplus: { QB: [], RB: [veteranRb1, veteranRb2], WR: [], TE: [] },
+      tradeablePicks: [],
+    });
+
+    const generated = await generateTradeFinderPackages(
+      user as never,
+      opp as never,
+      "sf",
+      "league-1",
+      baselineScoring,
+      new Map(),
+      false,
+      undefined,
+      async (send, receive, leagueId, mode) =>
+        scoreTradeFinderPackage(send, receive, leagueId, mode),
+      { strategyFocus: "win_now_buy", maxEvaluationsPerOpponent: 12 }
+    );
+    const pointsBuy = generated.find((pkg) => pkg.label === "Win-Now Points Buy");
+
+    expect(pointsBuy).toBeDefined();
+    expect(pointsBuy?.strategy_type).toBe("win_now_buy");
+    expect(pointsBuy?.you_send).toHaveLength(1);
+    expect(pointsBuy?.you_receive).toHaveLength(2);
+    expect(pointsBuy?.why_you_do_it).toContain("projected PPG");
   });
 
   it("preserves the empty/no-opportunity state only when no valid fallback packages exist", () => {

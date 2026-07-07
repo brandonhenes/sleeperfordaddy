@@ -5,6 +5,7 @@ import type { EvaluatedAsset, ShopOpportunity, TradeAssetInput } from "@shared/t
 import { TradeHealthList } from "./PartnerCard";
 import { humanize } from "../../lib/format";
 import { buildTradeCalculatorUrl } from "../../lib/trade-calculator-url";
+import { buildTradeFinderUrl } from "../../lib/trade-finder-url";
 
 function evaluatedAssetToTradeInput(asset: EvaluatedAsset): TradeAssetInput {
   if (asset.asset_type === "player" || asset.player_id) {
@@ -94,9 +95,14 @@ export default function ShopOpportunityCard({ opp, username }: { opp: ShopOpport
   const receiveContextValue = opp.receive_context_trade_value ?? opp.receive_total_tp;
   const valuationEdge = opp.valuation_edge ?? (receiveContextValue - sendContextValue);
   const decision = shopDecision(opp);
+  const shoppedPlayerId = opp.you_send.find((asset) => asset.player_id)?.player_id ?? null;
   const calculatorUrl = buildTradeCalculatorUrl({
     username,
     leagueId: opp.league_id,
+    returnTo: buildTradeFinderUrl(username, {
+      mode: "shop",
+      playerId: shoppedPlayerId,
+    }),
     send: opp.you_send.map(evaluatedAssetToTradeInput),
     receive: opp.you_receive.map(evaluatedAssetToTradeInput),
     sendLabels: opp.you_send.map((asset) => asset.label),

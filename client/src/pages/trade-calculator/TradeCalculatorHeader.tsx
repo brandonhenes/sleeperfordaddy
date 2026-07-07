@@ -17,6 +17,7 @@ type TradeCalculatorHeaderProps = {
   valuationMode: TradeValuationProfile;
   onValuationModeChange: (mode: TradeValuationProfile) => void;
   selectedLeague: string;
+  returnTo?: string | null;
 };
 
 export default function TradeCalculatorHeader({
@@ -25,9 +26,31 @@ export default function TradeCalculatorHeader({
   valuationMode,
   onValuationModeChange,
   selectedLeague,
+  returnTo,
 }: TradeCalculatorHeaderProps) {
   return (
     <div style={{ padding: "28px 0 8px" }}>
+      {returnTo && (
+        <a
+          href={returnTo}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            minHeight: 34,
+            border: "1px solid rgba(59,130,246,0.45)",
+            background: "rgba(59,130,246,0.1)",
+            color: "#93c5fd",
+            borderRadius: 999,
+            padding: "0 12px",
+            fontSize: 12,
+            fontWeight: 800,
+            textDecoration: "none",
+            marginBottom: 12,
+          }}
+        >
+          Back to Trade Finder
+        </a>
+      )}
       <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>Trade Calculator</h1>
       <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 4 }}>
         Pick a league and a partner, then tap players and picks to build both sides. The verdict updates live.

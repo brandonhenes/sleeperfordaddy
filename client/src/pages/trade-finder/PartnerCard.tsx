@@ -351,6 +351,33 @@ const strategyLabels: Array<{ value: TradeStrategyType; label: string }> = [
   { value: "market_value", label: "Pure value" },
 ];
 
+const strategyDescriptions: Record<TradeStrategyType, string> = {
+  consolidation: "Trade 2-4 smaller pieces for one better weekly starter.",
+  tier_down: "Move one premium asset for a lesser same-position anchor plus added value.",
+  buy_low: "Target a temporarily discounted player before the market warms up.",
+  sell_high: "Move a player after a value spike before the market cools.",
+  win_now_buy: "Buy immediate points, usually older production, when the title window matters.",
+  rebuild_sell: "Turn fragile current production into younger or more liquid value.",
+  productive_struggle: "Sell short-term points while staying competitive enough to matter.",
+  pick_arbitrage: "Use draft-pick timing and hype cycles, without empty pick-swap spam.",
+  position_arbitrage: "Exploit SF, TEP, scoring, and positional scarcity.",
+  roster_fit_trade: "Swap surplus for a need on both teams.",
+  roster_spot_arbitrage: "Turn bench clutter into one asset you can actually start.",
+  manager_exploit: "Shape the offer around what this manager tends to overvalue.",
+  liquidity_upgrade: "Trade into assets that are easier to flip later.",
+  market_value: "Chase raw market value and optionality over roster fit.",
+};
+
+function strategyLabel(value: TradeStrategyType | null): string {
+  if (!value) return "Any trade shape";
+  return strategyLabels.find((strategy) => strategy.value === value)?.label ?? humanize(value);
+}
+
+function strategyDescription(value: TradeStrategyType | null): string {
+  if (!value) return "Show the best realistic lanes first, then let you narrow from there.";
+  return strategyDescriptions[value];
+}
+
 function assetShort(asset: TradePackageAsset): string {
   if (asset.asset_type === "pick") return asset.label;
   return asset.label;
@@ -483,6 +510,12 @@ function addUniqueConstraint(
   setter((current) => current.includes(constraint) ? current : [...current, constraint]);
 }
 
+function sameStringSet(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const bSet = new Set(b);
+  return a.every((entry) => bSet.has(entry));
+}
+
 function LaneAssetBox({
   label,
   assets,
@@ -555,7 +588,20 @@ function SteeringPanel({
   activePackage: TradePackage | null;
 }) {
   const [targetSearch, setTargetSearch] = useState("");
-  const selectedTarget = steering.partnerTargets.find((target) => target.player_id === steering.targetPlayerId) ?? null;
+  const [draftTargetPlayerId, setDraftTargetPlayerId] = useState<string | null>(steering.targetPlayerId);
+  const [draftAvoidTargetPlayerIds, setDraftAvoidTargetPlayerIds] = useState<string[]>(steering.avoidTargetPlayerIds);
+  const [draftLaneConstraints, setDraftLaneConstraints] = useState<TradeFinderConstraint[]>(steering.laneConstraints);
+  const [draftStrategyFocus, setDraftStrategyFocus] = useState<TradeStrategyType | null>(steering.strategyFocus);
+  const [draftSearchDepth, setDraftSearchDepth] = useState<TradeFinderSearchDepth>(steering.searchDepth);
+  const steeringAvoidKey = steering.avoidTargetPlayerIds.join("|");
+  const steeringConstraintKey = steering.laneConstraints.join("|");
+  const selectedTarget = steering.partnerTargets.find((target) => target.player_id === draftTargetPlayerId) ?? null;
+  const hasDraftChanges =
+    draftTargetPlayerId !== steering.targetPlayerId ||
+    !sameStringSet(draftAvoidTargetPlayerIds, steering.avoidTargetPlayerIds) ||
+    !sameStringSet(draftLaneConstraints, steering.laneConstraints) ||
+    draftStrategyFocus !== steering.strategyFocus ||
+    draftSearchDepth !== steering.searchDepth;
   const visibleTargets = useMemo(() => {
     const needle = targetSearch.trim().toLowerCase();
     if (!needle) return selectedTarget ? [selectedTarget] : [];
@@ -567,18 +613,41 @@ function SteeringPanel({
     return base.slice(0, 8);
   }, [selectedTarget, steering.partnerTargets, targetSearch]);
 
+  useEffect(() => {
+    setDraftTargetPlayerId(steering.targetPlayerId);
+    setDraftAvoidTargetPlayerIds(steering.avoidTargetPlayerIds);
+    setDraftLaneConstraints(steering.laneConstraints);
+    setDraftStrategyFocus(steering.strategyFocus);
+    setDraftSearchDepth(steering.searchDepth);
+  }, [
+    steering.targetPlayerId,
+    steeringAvoidKey,
+    steeringConstraintKey,
+    steering.strategyFocus,
+    steering.searchDepth,
+  ]);
+
   function toggleConstraint(value: TradeFinderConstraint) {
-    steering.setLaneConstraints((current) =>
+    setDraftLaneConstraints((current) =>
       current.includes(value)
         ? current.filter((entry) => entry !== value)
         : [...current, value]
     );
   }
 
+  function applyDraft() {
+    steering.setTargetPlayerId(draftTargetPlayerId);
+    steering.setAvoidTargetPlayerIds(draftAvoidTargetPlayerIds);
+    steering.setLaneConstraints(draftLaneConstraints);
+    steering.setStrategyFocus(draftStrategyFocus);
+    steering.setSearchDepth(draftSearchDepth);
+  }
+
   function findDifferentTargets() {
     const ids = [...new Set(packages.flatMap(receivePlayerIds))];
     steering.setTargetPlayerId(null);
     steering.setAvoidTargetPlayerIds(ids);
+    steering.setSearchDepth("deep");
   }
 
   function findSameStrategyDifferentTarget() {
@@ -596,6 +665,11 @@ function SteeringPanel({
     steering.setLaneConstraints([]);
     steering.setStrategyFocus(null);
     steering.setSearchDepth("quick");
+    setDraftTargetPlayerId(null);
+    setDraftAvoidTargetPlayerIds([]);
+    setDraftLaneConstraints([]);
+    setDraftStrategyFocus(null);
+    setDraftSearchDepth("quick");
     setTargetSearch("");
   }
 
@@ -605,7 +679,7 @@ function SteeringPanel({
         <div>
           <div style={{ fontSize: 11, fontWeight: 900, color: "#93c5fd", textTransform: "uppercase" }}>Steer the search</div>
           <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 3 }}>
-            {selectedTarget ? `Targeting ${selectedTarget.full_name}` : steering.avoidTargetPlayerIds.length > 0 ? "Avoiding current receive targets" : "Refine this partner's lanes"}
+            {selectedTarget ? `Ready to target ${selectedTarget.full_name}` : draftAvoidTargetPlayerIds.length > 0 ? "Ready to avoid current receive targets" : "Pick a goal, target, or filter, then tap Go."}
           </div>
         </div>
         <button
@@ -617,7 +691,33 @@ function SteeringPanel({
         </button>
       </div>
 
-      <div style={{ display: "grid", gap: 8 }}>
+      <label style={{ display: "grid", gap: 5 }}>
+        <span style={{ color: "var(--text-muted)", fontSize: 10, fontWeight: 900, textTransform: "uppercase" }}>Target from their roster</span>
+        <select
+          value={draftTargetPlayerId ?? ""}
+          onChange={(event) => {
+            setDraftTargetPlayerId(event.target.value || null);
+            setDraftAvoidTargetPlayerIds([]);
+          }}
+          disabled={steering.partnerTargetsLoading || steering.partnerTargets.length === 0}
+          style={{ width: "100%", minHeight: 40, border: "1px solid var(--border)", background: "var(--dark-base)", color: "var(--text)", borderRadius: 9, padding: "8px 10px", fontSize: 13, fontFamily: "inherit", boxSizing: "border-box" }}
+        >
+          <option value="">
+            {steering.partnerTargetsLoading
+              ? "Loading their roster..."
+              : steering.partnerTargets.length === 0
+                ? "No targetable players loaded"
+                : "Any player on their roster"}
+          </option>
+          {steering.partnerTargets.map((target) => (
+            <option key={target.player_id} value={target.player_id}>
+              {target.full_name} ({target.position} {Math.round(target.edge_score)}{target.tags.length > 0 ? ` - ${target.tags.slice(0, 2).join(", ")}` : ""})
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <div style={{ display: "none" }}>
         <input
           value={targetSearch}
           onChange={(event) => setTargetSearch(event.target.value)}
@@ -634,14 +734,14 @@ function SteeringPanel({
         {visibleTargets.length > 0 && (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(145px, 1fr))", gap: 7 }}>
             {visibleTargets.map((target) => {
-              const active = target.player_id === steering.targetPlayerId;
+              const active = target.player_id === draftTargetPlayerId;
               return (
                 <button
                   key={target.player_id}
                   type="button"
                   onClick={() => {
-                    steering.setTargetPlayerId(active ? null : target.player_id);
-                    steering.setAvoidTargetPlayerIds([]);
+                    setDraftTargetPlayerId(active ? null : target.player_id);
+                    setDraftAvoidTargetPlayerIds([]);
                   }}
                   style={{ textAlign: "left", border: active ? "1px solid rgba(34,197,94,0.75)" : "1px solid var(--border)", background: active ? "rgba(34,197,94,0.13)" : "rgba(7,8,11,0.55)", color: "var(--text)", borderRadius: 9, padding: 9, fontSize: 11, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}
                 >
@@ -658,8 +758,8 @@ function SteeringPanel({
         <label style={{ display: "grid", gap: 5, minWidth: 0 }}>
           <span style={{ color: "var(--text-muted)", fontSize: 10, fontWeight: 900, textTransform: "uppercase" }}>Goal</span>
           <select
-            value={steering.strategyFocus ?? ""}
-            onChange={(event) => steering.setStrategyFocus((event.target.value || null) as TradeStrategyType | null)}
+            value={draftStrategyFocus ?? ""}
+            onChange={(event) => setDraftStrategyFocus((event.target.value || null) as TradeStrategyType | null)}
             style={{ width: "100%", minHeight: 38, border: "1px solid var(--border)", background: "var(--dark-base)", color: "var(--text)", borderRadius: 9, padding: "8px 10px", fontSize: 12, fontWeight: 800, fontFamily: "inherit" }}
           >
             <option value="">Any trade shape</option>
@@ -672,18 +772,23 @@ function SteeringPanel({
         </label>
         <button
           type="button"
-          onClick={() => steering.setSearchDepth((current) => current === "deep" ? "quick" : "deep")}
-          style={{ border: steering.searchDepth === "deep" ? "1px solid rgba(34,197,94,0.65)" : "1px solid rgba(59,130,246,0.45)", background: steering.searchDepth === "deep" ? "rgba(34,197,94,0.13)" : "rgba(59,130,246,0.12)", color: steering.searchDepth === "deep" ? "var(--green)" : "#93c5fd", borderRadius: 999, padding: "7px 10px", fontSize: 11, fontWeight: 900, cursor: "pointer", fontFamily: "inherit" }}
+          onClick={() => setDraftSearchDepth((current) => current === "deep" ? "quick" : "deep")}
+          style={{ border: draftSearchDepth === "deep" ? "1px solid rgba(34,197,94,0.65)" : "1px solid rgba(59,130,246,0.45)", background: draftSearchDepth === "deep" ? "rgba(34,197,94,0.13)" : "rgba(59,130,246,0.12)", color: draftSearchDepth === "deep" ? "var(--green)" : "#93c5fd", borderRadius: 999, padding: "7px 10px", fontSize: 11, fontWeight: 900, cursor: "pointer", fontFamily: "inherit" }}
         >
-          {steering.searchDepth === "deep" ? "Deep search on" : "Expand search"}
+          {draftSearchDepth === "deep" ? "Deep search on" : "Expand search"}
         </button>
       </div>
 
+      <div style={{ marginTop: 8, border: "1px solid rgba(59,130,246,0.18)", background: "rgba(7,8,11,0.38)", borderRadius: 9, padding: "9px 10px", fontSize: 12, color: "var(--text-dim)", lineHeight: 1.45 }}>
+        <span style={{ color: "var(--text)", fontWeight: 900 }}>{strategyLabel(draftStrategyFocus)}:</span>{" "}
+        {strategyDescription(draftStrategyFocus)}
+      </div>
+
       <select
-        value={steering.targetPlayerId ?? ""}
+        value={draftTargetPlayerId ?? ""}
         onChange={(event) => {
-          steering.setTargetPlayerId(event.target.value || null);
-          steering.setAvoidTargetPlayerIds([]);
+          setDraftTargetPlayerId(event.target.value || null);
+          setDraftAvoidTargetPlayerIds([]);
         }}
         disabled={steering.partnerTargetsLoading || steering.partnerTargets.length === 0}
         style={{ display: "none", width: "100%", minHeight: 40, border: "1px solid var(--border)", background: "var(--dark-base)", color: "var(--text)", borderRadius: 9, padding: "8px 10px", fontSize: 13, fontFamily: "inherit" }}
@@ -705,6 +810,13 @@ function SteeringPanel({
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
         <button
           type="button"
+          onClick={applyDraft}
+          style={{ border: "1px solid rgba(59,130,246,0.75)", background: "rgba(59,130,246,0.18)", color: "#bfdbfe", borderRadius: 999, padding: "8px 12px", fontSize: 12, fontWeight: 950, cursor: "pointer", fontFamily: "inherit" }}
+        >
+          {hasDraftChanges ? "Go find lanes" : "Go again"}
+        </button>
+        <button
+          type="button"
           onClick={findSameStrategyDifferentTarget}
           style={{ border: "1px solid rgba(34,197,94,0.55)", background: "rgba(34,197,94,0.12)", color: "var(--green)", borderRadius: 999, padding: "7px 10px", fontSize: 11, fontWeight: 900, cursor: "pointer", fontFamily: "inherit" }}
         >
@@ -721,11 +833,11 @@ function SteeringPanel({
 
       <details style={{ marginTop: 10 }}>
         <summary style={{ cursor: "pointer", color: "var(--text-muted)", fontSize: 11, fontWeight: 900, padding: "6px 0" }}>
-          More filters{steering.laneConstraints.length > 0 ? ` (${steering.laneConstraints.length})` : ""}
+          More filters{draftLaneConstraints.length > 0 ? ` (${draftLaneConstraints.length})` : ""}
         </summary>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
           {constraintLabels.map((constraint) => {
-            const active = steering.laneConstraints.includes(constraint.value);
+            const active = draftLaneConstraints.includes(constraint.value);
             return (
               <button
                 key={constraint.value}
@@ -761,11 +873,22 @@ export default function PartnerCard({
   const decision = pkg ? tradeDecision(pkg) : null;
   const activeStrategy = normalizeStrategyFocus(pkg?.strategy_type);
   const activeReceivePlayerIds = pkg ? receivePlayerIds(pkg) : [];
+  const returnToFinderUrl = buildTradeFinderUrl(username, {
+    mode: "find",
+    leagueId,
+    opponentRosterId: partner.roster_id,
+    targetPlayerId: steering?.targetPlayerId ?? null,
+    avoidTargetPlayerIds: steering?.avoidTargetPlayerIds ?? [],
+    constraints: steering?.laneConstraints ?? [],
+    strategyFocus: steering?.strategyFocus ?? activeStrategy,
+    searchDepth: steering?.searchDepth ?? "deep",
+  });
   const calculatorUrl = pkg
     ? buildTradeCalculatorUrl({
         username,
         leagueId,
         opponentRosterId: partner.roster_id,
+        returnTo: returnToFinderUrl,
         send: pkg.you_send.map(packageAssetToTradeInput),
         receive: pkg.you_receive.map(packageAssetToTradeInput),
         sendLabels: pkg.you_send.map((asset) => asset.label),

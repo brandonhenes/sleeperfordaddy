@@ -2,7 +2,9 @@ import type { Dispatch, SetStateAction } from "react";
 import { Link } from "wouter";
 import type {
   LeagueSummary,
+  LeaguePowerRanking,
   OpponentProfile,
+  RosterRanking,
   TradeFinderConstraint,
   TradeFinderSearchDepth,
   TradePartnerTarget,
@@ -23,9 +25,130 @@ const EMPTY_STATE_STRATEGIES: Array<{ value: TradeStrategyType; label: string }>
   { value: "liquidity_upgrade", label: "Liquidity" },
   { value: "market_value", label: "Pure value" },
 ];
+const ROSTER_POSITIONS = ["QB", "RB", "WR", "TE"] as const;
 
 function cleanMetaText(value: string): string {
   return value.replace(/\u00c2\u00b7|\u00b7/g, "-");
+}
+
+function rosterWeakSpots(roster: RosterRanking): string {
+  const weakSlots = (roster.lineup?.slot_grades ?? [])
+    .filter((slot) => slot.grade === "hole" || slot.grade === "weak")
+    .map((slot) => slot.slot_label)
+    .slice(0, 3);
+  return weakSlots.length > 0 ? weakSlots.join(", ") : "No obvious holes";
+}
+
+function RosterAssetLine({
+  label,
+  meta,
+  score,
+}: {
+  label: string;
+  meta?: string | null;
+  score: number;
+}) {
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 8, alignItems: "center", padding: "5px 0", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ color: "var(--text)", fontSize: 11, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</div>
+        {meta && <div style={{ color: "var(--text-muted)", fontSize: 10, marginTop: 1 }}>{meta}</div>}
+      </div>
+      <span style={{ color: score >= 80 ? "var(--green)" : score >= 65 ? "var(--amber)" : "var(--text-muted)", fontSize: 11, fontWeight: 900 }}>{Math.round(score)}</span>
+    </div>
+  );
+}
+
+function RosterSnapshotCard({ label, roster }: { label: string; roster: RosterRanking | null }) {
+  if (!roster) {
+    return (
+      <div style={{ border: "1px solid var(--border)", background: "var(--dark-base)", borderRadius: 10, padding: 12 }}>
+        <div style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 900, textTransform: "uppercase" }}>{label}</div>
+        <div style={{ marginTop: 8, color: "var(--text-muted)", fontSize: 12 }}>Roster context is still loading.</div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ border: "1px solid var(--border)", background: "var(--dark-base)", borderRadius: 10, padding: 12, minWidth: 0 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 900, textTransform: "uppercase" }}>{label}</div>
+          <div style={{ marginTop: 3, color: "var(--text)", fontSize: 13, fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{roster.display_name}</div>
+        </div>
+        <span style={{ color: "var(--amber)", fontSize: 11, fontWeight: 900 }}>{roster.archetype}</span>
+      </div>
+      <div style={{ marginTop: 8, color: "var(--text-muted)", fontSize: 11, lineHeight: 1.45 }}>
+        <span style={{ fontWeight: 900 }}>Weak spots:</span> {rosterWeakSpots(roster)}
+      </div>
+      <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
+        {ROSTER_POSITIONS.map((position) => {
+          const assets = (roster.core_assets ?? [])
+            .filter((asset) => asset.position === position)
+            .sort((a, b) => b.edge_score - a.edge_score);
+          if (assets.length === 0) return null;
+          return (
+            <div key={position} style={{ minWidth: 0 }}>
+              <div style={{ color: "var(--text-muted)", fontSize: 10, fontWeight: 950, letterSpacing: 0.4, marginBottom: 2 }}>{position}</div>
+              {assets.map((asset) => (
+                <RosterAssetLine
+                  key={asset.player_id}
+                  label={asset.full_name}
+                  meta={asset.age != null ? `Age ${asset.age}` : asset.team}
+                  score={asset.edge_score}
+                />
+              ))}
+            </div>
+          );
+        })}
+        {(roster.draft_picks ?? []).length > 0 && (
+          <div style={{ minWidth: 0 }}>
+            <div style={{ color: "var(--text-muted)", fontSize: 10, fontWeight: 950, letterSpacing: 0.4, marginBottom: 2 }}>PICKS</div>
+            {[...(roster.draft_picks ?? [])]
+              .sort((a, b) => b.edge_score - a.edge_score)
+              .map((pick) => (
+                <RosterAssetLine
+                  key={`${pick.season}-${pick.round}-${pick.original_owner_id}-${pick.pick_slot ?? pick.tier}`}
+                  label={pick.label}
+                  meta={`${pick.tier} ${pick.round === 1 ? "1st" : pick.round === 2 ? "2nd" : `${pick.round}rd`}`}
+                  score={pick.edge_score}
+                />
+              ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function RosterSnapshotPanel({
+  selectedLeagueData,
+  selectedOpponentRosterId,
+}: {
+  selectedLeagueData?: LeaguePowerRanking;
+  selectedOpponentRosterId: number | null;
+}) {
+  if (!selectedLeagueData || selectedOpponentRosterId == null) return null;
+  const userRoster = selectedLeagueData.rosters.find((roster) => roster.is_user) ?? null;
+  const partnerRoster = selectedLeagueData.rosters.find((roster) => roster.roster_id === selectedOpponentRosterId) ?? null;
+
+  return (
+    <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: 14, marginTop: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+        <div>
+          <div style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 900, textTransform: "uppercase" }}>Full rosters</div>
+          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 3 }}>Both rosters are here so the lane makes sense before you open Calculator.</div>
+        </div>
+        <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 800 }}>
+          {selectedLeagueData.league_name}
+        </span>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(240px, 100%), 1fr))", gap: 10 }}>
+        <RosterSnapshotCard label="You" roster={userRoster} />
+        <RosterSnapshotCard label="Them" roster={partnerRoster} />
+      </div>
+    </div>
+  );
 }
 
 interface FindTradesPanelProps {
@@ -59,6 +182,7 @@ interface FindTradesPanelProps {
   suggestionsLoading: boolean;
   suggestionsRefreshing: boolean;
   suggestionsError: unknown;
+  selectedLeagueData?: LeaguePowerRanking;
 }
 
 export default function FindTradesPanel({
@@ -92,6 +216,7 @@ export default function FindTradesPanel({
   suggestionsLoading,
   suggestionsRefreshing,
   suggestionsError,
+  selectedLeagueData,
 }: FindTradesPanelProps) {
   const hasSteeringControls =
     Boolean(targetPlayerId) ||
@@ -114,7 +239,10 @@ export default function FindTradesPanel({
     ...suggestionPartnerOptions.filter(
       (partner) => !opponentProfiles.some((profile) => profile.rosterId === partner.rosterId)
     ),
-  ].sort((a, b) => a.displayName.localeCompare(b.displayName));
+  ].map((partner) => ({
+    ...partner,
+    meta: cleanMetaText(partner.meta),
+  })).sort((a, b) => a.displayName.localeCompare(b.displayName));
 
   const livePartnerOptionMap = new Map<number, { rosterId: number; displayName: string; meta: string }>();
   for (const partner of partnerOptions) {
@@ -130,13 +258,18 @@ export default function FindTradesPanel({
         : suggestion.partner.archetype,
     });
   }
-  const livePartnerOptions = [...livePartnerOptionMap.values()].sort((a, b) => a.displayName.localeCompare(b.displayName));
+  const livePartnerOptions = [...livePartnerOptionMap.values()]
+    .map((partner) => ({
+      ...partner,
+      meta: cleanMetaText(partner.meta),
+    }))
+    .sort((a, b) => a.displayName.localeCompare(b.displayName));
   const selectedPartnerLabel =
     filteredSuggestions[0]?.partner.display_name ??
     livePartnerOptions.find((partner) => partner.rosterId === selectedOpponentRosterId)?.displayName ??
     selectedScoutProfile?.displayName ??
     (selectedOpponentRosterId != null ? `Roster ${selectedOpponentRosterId}` : "");
-  const emptyStateTargets = partnerTargets.slice(0, 6);
+  const emptyStateTargets = partnerTargets.slice(0, 0);
   const defaultLaneSuggestions = filteredSuggestions
     .map((suggestion) => ({
       ...suggestion,
@@ -222,6 +355,13 @@ export default function FindTradesPanel({
         />
       )}
 
+      {selectedLeague && selectedOpponentRosterId != null && (
+        <RosterSnapshotPanel
+          selectedLeagueData={selectedLeagueData}
+          selectedOpponentRosterId={selectedOpponentRosterId}
+        />
+      )}
+
       {!selectedLeague && <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: "48px 24px", marginTop: 16, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>Select a league above to find trade opportunities</div>}
       {selectedLeague && selectedOpponentRosterId == null && (
         <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: "32px 20px", marginTop: 16, textAlign: "center" }}>
@@ -280,7 +420,34 @@ export default function FindTradesPanel({
               <div style={{ color: "var(--text-muted)", fontSize: 10, fontWeight: 900, textTransform: "uppercase", marginBottom: 6 }}>Target a player</div>
               {partnerTargetsLoading ? (
                 <div style={{ color: "var(--text-muted)", fontSize: 12 }}>Loading their roster...</div>
-              ) : emptyStateTargets.length > 0 ? (
+              ) : partnerTargets.length > 0 ? (
+                <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 8, alignItems: "center" }}>
+                  <select
+                    value={targetPlayerId ?? ""}
+                    onChange={(event) => {
+                      setTargetPlayerId(event.target.value || null);
+                      setAvoidTargetPlayerIds([]);
+                      setSearchDepth("deep");
+                    }}
+                    style={{ width: "100%", minHeight: 38, border: "1px solid var(--border)", background: "var(--dark-base)", color: "var(--text)", borderRadius: 9, padding: "8px 10px", fontSize: 12, fontWeight: 800, fontFamily: "inherit" }}
+                  >
+                    <option value="">Choose from their roster...</option>
+                    {partnerTargets.map((target) => (
+                      <option key={target.player_id} value={target.player_id}>
+                        {target.full_name} - {target.position} {Math.round(target.edge_score)}{target.age != null ? ` - Age ${target.age}` : ""}{target.tags[0] ? ` - ${target.tags[0]}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => setSearchDepth("deep")}
+                    disabled={!targetPlayerId}
+                    style={{ border: "1px solid rgba(59,130,246,0.45)", background: targetPlayerId ? "rgba(59,130,246,0.22)" : "rgba(255,255,255,0.04)", color: targetPlayerId ? "var(--text)" : "var(--text-muted)", borderRadius: 8, padding: "9px 13px", fontSize: 11, fontWeight: 900, cursor: targetPlayerId ? "pointer" : "not-allowed", fontFamily: "inherit", minHeight: 38 }}
+                  >
+                    Go
+                  </button>
+                </div>
+              ) : false ? (
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(135px, 1fr))", gap: 7 }}>
                   {emptyStateTargets.map((target) => {
                     const active = target.player_id === targetPlayerId;

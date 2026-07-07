@@ -14,6 +14,7 @@ describe("trade calculator URL helpers", () => {
       receive: [{ type: "player", player_id: "p2" }],
       sendLabels: ["Kyler Murray", "2027 Late 1st"],
       receiveLabels: ["Lamar Jackson"],
+      returnTo: "/trade-finder/henes35?mode=find&league=league-1&opponent=6&strategy=tier_down",
     });
 
     const parsed = parseTradeCalculatorQuery(url.split("?")[1]);
@@ -25,6 +26,7 @@ describe("trade calculator URL helpers", () => {
     expect(parsed.receive).toEqual([{ type: "player", player_id: "p2" }]);
     expect(parsed.sendLabels).toEqual(["Kyler Murray", "2027 Late 1st"]);
     expect(parsed.receiveLabels).toEqual(["Lamar Jackson"]);
+    expect(parsed.returnTo).toBe("/trade-finder/henes35?mode=find&league=league-1&opponent=6&strategy=tier_down");
   });
 
   it("ignores malformed package payloads", () => {
@@ -42,5 +44,17 @@ describe("trade calculator URL helpers", () => {
 
     expect(parsed.send).toEqual([{ type: "player", player_id: "4046" }]);
     expect(parsed.sendLabels).toEqual(["Christian McCaffrey"]);
+  });
+
+  it("drops non-local return paths", () => {
+    const url = buildTradeCalculatorUrl({
+      returnTo: "https://example.com/trade-finder",
+      send: [{ type: "player", player_id: "4046" }],
+    });
+
+    const parsed = parseTradeCalculatorQuery(`${url.split("?")[1] ?? ""}&returnTo=//evil.test`);
+
+    expect(url).not.toContain("returnTo=");
+    expect(parsed.returnTo).toBeNull();
   });
 });

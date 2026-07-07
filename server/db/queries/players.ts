@@ -1,5 +1,6 @@
 import { db } from "../connection.js";
 import { players_master } from "../schema.js";
+import { sql } from "drizzle-orm";
 
 export async function bulkUpsertPlayers(
   players: Array<{
@@ -34,18 +35,18 @@ export async function bulkUpsertPlayers(
       .onConflictDoUpdate({
         target: players_master.player_id,
         set: {
-          full_name: players_master.full_name,
-          first_name: players_master.first_name,
-          last_name: players_master.last_name,
-          position: players_master.position,
-          team: players_master.team,
-          status: players_master.status,
-          age: players_master.age,
-          years_exp: players_master.years_exp,
-          injury_status: players_master.injury_status,
-          injury_body_part: players_master.injury_body_part,
-          injury_start_date: players_master.injury_start_date,
-          injury_notes: players_master.injury_notes,
+          full_name: sql`COALESCE(EXCLUDED.full_name, ${players_master.full_name})`,
+          first_name: sql`COALESCE(EXCLUDED.first_name, ${players_master.first_name})`,
+          last_name: sql`COALESCE(EXCLUDED.last_name, ${players_master.last_name})`,
+          position: sql`COALESCE(EXCLUDED.position, ${players_master.position})`,
+          team: sql`EXCLUDED.team`,
+          status: sql`EXCLUDED.status`,
+          age: sql`COALESCE(NULLIF(EXCLUDED.age, 0), ${players_master.age})`,
+          years_exp: sql`COALESCE(EXCLUDED.years_exp, ${players_master.years_exp})`,
+          injury_status: sql`EXCLUDED.injury_status`,
+          injury_body_part: sql`EXCLUDED.injury_body_part`,
+          injury_start_date: sql`EXCLUDED.injury_start_date`,
+          injury_notes: sql`EXCLUDED.injury_notes`,
           updated_at: Date.now(),
         },
       });

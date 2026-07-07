@@ -139,6 +139,23 @@ function totalEdge(assets: TradePackageAsset[]): number {
   return assets.reduce((s, a) => s + a.edge_score, 0);
 }
 
+function playerMarketValue(asset: CoreAsset): number {
+  return Math.max(
+    asset.ktc_value ?? 0,
+    asset.dp_value ?? 0,
+    asset.fc_value ?? 0,
+    asset.edge_score * 90
+  );
+}
+
+function pickMarketValue(pick: ScoredPick): number {
+  return Math.max(
+    pick.ktc_value ?? 0,
+    pick.dp_value ?? 0,
+    pick.edge_score * 75
+  );
+}
+
 function r1(n: number): number {
   return Math.round(n * 10) / 10;
 }
@@ -161,6 +178,26 @@ function valueSweetenerHint(offer: AcquisitionOffer): string | null {
     return "KTC League says this is a real overpay; try lowering one piece before sending it.";
   }
   return offer.sweetener_hint;
+}
+
+function reconcileAcquisitionPerspectiveWithValuation(offer: AcquisitionOffer): AcquisitionOffer {
+  const edgeForUser = offer.valuation_edge ?? offer.delta;
+  const gap = offer.valuation_percent_gap ?? 0;
+  const isTooLight = offer.fairness === "lopsided" && edgeForUser >= 1_500;
+  if (!isTooLight) return offer;
+
+  const isAbsurdlyLight = edgeForUser >= 2_500 && gap >= 0.18;
+  return {
+    ...offer,
+    acceptance_likelihood: Math.min(offer.acceptance_likelihood, isAbsurdlyLight ? 10 : 25),
+    their_perspective: {
+      ...offer.their_perspective,
+      verdict: isAbsurdlyLight ? "no_chance" : "unlikely",
+      verdict_reason: isAbsurdlyLight
+        ? "KTC League shows this package is far too light. It is not a realistic opening offer."
+        : "KTC League shows this package is light. Add meaningful value before treating it as actionable.",
+    },
+  };
 }
 
 interface AcquisitionStrategyContext {
@@ -187,7 +224,7 @@ export async function valueAcquisitionOfferWithKtcLeague(
       classStrengths,
       weights,
     });
-    const valued: AcquisitionOffer = {
+    const valued: AcquisitionOffer = reconcileAcquisitionPerspectiveWithValuation({
       ...offer,
       you_send: valuation.sendAssets,
       you_receive: valuation.receiveAssets,
@@ -208,7 +245,7 @@ export async function valueAcquisitionOfferWithKtcLeague(
       valuation_percent_gap: valuation.percentGap,
       valuation_warnings: valuation.warnings,
       valuation_explanations: valuation.valuationExplanations,
-    };
+    });
     const strategy = classifyTradeStrategy({
       sendAssets: valued.you_send,
       receiveAssets: valued.you_receive,
@@ -292,6 +329,11 @@ async function valueAcquisitionOffersForLeague(
 
 export function filterAcquisitionRecommendationOffers(offers: AcquisitionOffer[]): AcquisitionOffer[] {
   return offers.filter((offer) =>
+    !(
+      offer.fairness === "lopsided" &&
+      (offer.valuation_edge ?? offer.delta) >= 2_500 &&
+      (offer.valuation_percent_gap ?? 0) >= 0.18
+    ) &&
     !recommendationRejectReason({
       valueEdgeForUser: offer.valuation_edge ?? offer.delta,
       percentGap: offer.valuation_percent_gap,
@@ -572,7 +614,7 @@ function generateAcquisitionOffers(
 ): AcquisitionOffer[] {
   const offers: AcquisitionOffer[] = [];
   const targetAsset = assetFromPlayer(target);
-  const targetValue = target.edge_score;
+  const targetValue = playerMarketValue(target);
   const pos = target.position as Pos;
 
   // What does the owner need?
@@ -584,7 +626,7 @@ function generateAcquisitionOffers(
   // User's available assets (excluding users own starters at positions they need)
   const userAssets = userRoster.core_assets
     .filter((a) => a.edge_score >= MIN_EDGE && POSITIONS.includes(a.position as Pos))
-    .sort((a, b) => b.edge_score - a.edge_score);
+    .sort((a, b) => playerMarketValue(b) - playerMarketValue(a));
 
   const userPicks = (userRoster.draft_picks ?? [])
     .filter((p) => p.edge_score > 0)
@@ -603,13 +645,13 @@ function generateAcquisitionOffers(
   // Find user player at a position the owner needs, close in value
   for (const weakPos of ownerWeakPositions) {
     const candidates = userAssets.filter(
-      (a) => a.position === weakPos && a.edge_score >= targetValue * 0.7
+      (a) => a.position === weakPos && playerMarketValue(a) >= targetCost * 0.7
     );
     if (candidates.length === 0) continue;
 
     // Pick the one closest to target value (with overpay factor)
     const best = candidates.reduce((prev, curr) =>
-      Math.abs(curr.edge_score - targetCost) < Math.abs(prev.edge_score - targetCost) ? curr : prev
+      Math.abs(playerMarketValue(curr) - targetCost) < Math.abs(playerMarketValue(prev) - targetCost) ? curr : prev
     );
 
     const send = [assetFromPlayer(best)];
@@ -712,14 +754,14 @@ function generateAcquisitionOffers(
 
     // Add best pick
     send.push(assetFromPick(userPicks[0]));
-    sendVal += userPicks[0].edge_score;
+    sendVal += pickMarketValue(userPicks[0]);
 
     // Add more to reach target cost
     if (sendVal < targetCost * 0.7) {
       // Try second pick
       if (userPicks.length > 1) {
         send.push(assetFromPick(userPicks[1]));
-        sendVal += userPicks[1].edge_score;
+        sendVal += pickMarketValue(userPicks[1]);
       }
     }
 
@@ -727,17 +769,17 @@ function generateAcquisitionOffers(
     if (sendVal < targetCost * 0.8) {
       for (const weakPos of ownerWeakPositions) {
         const depth = userAssets.filter(
-          (a) => a.position === weakPos && a.edge_score >= MIN_EDGE && a.edge_score <= targetValue * 0.6
+          (a) => a.position === weakPos && a.edge_score >= MIN_EDGE && playerMarketValue(a) <= targetValue * 0.6
         );
         if (depth.length > 0) {
           send.push(assetFromPlayer(depth[0]));
-          sendVal += depth[0].edge_score;
+          sendVal += playerMarketValue(depth[0]);
           break;
         }
       }
     }
 
-    if (sendVal >= targetValue * 0.6) {
+    if (sendVal >= targetCost * 0.65) {
       const receive = [targetAsset];
       const delta = totalEdge(receive) - totalEdge(send);
       const f = fairness(delta);

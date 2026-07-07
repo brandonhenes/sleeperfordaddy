@@ -3,6 +3,7 @@ import { Calculator } from "lucide-react";
 import VerdictBadge from "../../components/VerdictBadge";
 import { fairnessLabel, formatTradeValue, humanize } from "../../lib/format";
 import { buildTradeCalculatorUrl } from "../../lib/trade-calculator-url";
+import { buildTradeFinderUrl } from "../../lib/trade-finder-url";
 import type { AcquisitionOpportunity, TradeAssetInput, TradePackageAsset } from "@shared/types";
 
 function packageAssetToTradeInput(asset: TradePackageAsset): TradeAssetInput {
@@ -47,7 +48,28 @@ function acquisitionDecision(
 } {
   const verdict = offer.their_perspective.verdict;
   const strongFit = offer.strategy_fit === "strong" || (offer.strategy_score ?? 0) >= 70;
+  const valueEdgeForUser = offer.valuation_edge ?? offer.delta;
+  const tooLight = offer.fairness === "lopsided" && valueEdgeForUser >= 1_500;
+  const absurdlyLight = tooLight && valueEdgeForUser >= 2_500;
   const badOverpay = offer.fairness === "lopsided" && offer.delta < -1_500;
+
+  if (absurdlyLight) {
+    return {
+      label: "Ignore",
+      reason: "This is not a real offer yet. KTC League says you are asking for far more value than you are sending.",
+      nextAction: offer.sweetener_hint ?? "Add a real anchor asset before opening this in Calculator.",
+      color: "var(--red)",
+    };
+  }
+
+  if (tooLight) {
+    return {
+      label: "Tweak",
+      reason: "The target is interesting, but this package is too light to treat as actionable.",
+      nextAction: offer.sweetener_hint ?? "Add meaningful value before testing acceptance.",
+      color: "var(--amber)",
+    };
+  }
 
   if (verdict === "no_chance" || badOverpay) {
     return {
@@ -87,6 +109,7 @@ export default function AcquisitionCard({ opportunity, username }: { opportunity
         username,
         leagueId: opportunity.league_id,
         opponentRosterId: owner.roster_id,
+        returnTo: buildTradeFinderUrl(username, { mode: "acquire" }),
         send: offer.you_send.map(packageAssetToTradeInput),
         receive: offer.you_receive.map(packageAssetToTradeInput),
         sendLabels: offer.you_send.map((asset) => asset.label),

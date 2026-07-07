@@ -92,6 +92,32 @@ function countType(assets: StrategyAsset[], type: "player" | "pick"): number {
   return assets.filter((asset) => assetType(asset) === type).length;
 }
 
+function projectedPpg(asset: StrategyAsset): number {
+  const ppg = asset.ppg;
+  return ppg != null && Number.isFinite(ppg) ? Math.max(0, ppg) : 0;
+}
+
+function projectedPpgTotal(assets: StrategyAsset[]): number {
+  return assets.reduce((sum, asset) => sum + projectedPpg(asset), 0);
+}
+
+function isCurrentProducer(asset: StrategyAsset): boolean {
+  if (assetType(asset) !== "player") return false;
+  if (!["RB", "WR", "TE"].includes(asset.position ?? "")) return false;
+  return projectedPpg(asset) >= 7 || asset.edge_score >= 72;
+}
+
+function isWinNowPointsBuy(input: TradeStrategyInput): boolean {
+  const window = rosterWindow(input.userArchetype);
+  if (window !== "contend") return false;
+  if (input.sendAssets.length !== 1 || input.receiveAssets.length < 2) return false;
+  if (countType(input.receiveAssets, "player") < 2) return false;
+  if (input.fairness === "lopsided") return false;
+  const producerCount = input.receiveAssets.filter(isCurrentProducer).length;
+  const ppgGain = projectedPpgTotal(input.receiveAssets) - projectedPpgTotal(input.sendAssets);
+  return producerCount >= 2 && (ppgGain >= 6 || (projectedPpgTotal(input.receiveAssets) >= 24 && ppgGain >= 4));
+}
+
 function isPremiumPick(asset: StrategyAsset): boolean {
   if (assetType(asset) !== "pick") return false;
   const round = assetRound(asset);
@@ -175,6 +201,7 @@ function classifyStrategy(input: TradeStrategyInput): TradeStrategyType {
     return input.sendAssets.length >= 3 ? "roster_spot_arbitrage" : "consolidation";
   }
   if (input.sendAssets.length === 1 && input.receiveAssets.length >= 2) {
+    if (isWinNowPointsBuy(input)) return "win_now_buy";
     if (window === "rebuild") {
       return input.userArchetype === "Productive Struggle" ? "productive_struggle" : "rebuild_sell";
     }
@@ -211,6 +238,8 @@ function scoreStrategy(input: TradeStrategyInput, strategy: TradeStrategyType): 
   const sendHasElite = input.sendAssets.some(isEliteAsset);
   const liquidityDelta = sideLiquidity(input.receiveAssets, input.mode) - sideLiquidity(input.sendAssets, input.mode);
   const pickOnly = countType(input.sendAssets, "player") === 0 && countType(input.receiveAssets, "player") === 0;
+  const projectedPointsGain = projectedPpgTotal(input.receiveAssets) - projectedPpgTotal(input.sendAssets);
+  const receiveCurrentProducers = input.receiveAssets.filter(isCurrentProducer).length;
   let score = 45;
 
   switch (strategy) {
@@ -235,6 +264,8 @@ function scoreStrategy(input: TradeStrategyInput, strategy: TradeStrategyType): 
       score += window === "contend" ? 22 : window === "rebuild" ? -18 : 4;
       score += receiveHasAnchor ? 10 : -14;
       score += countType(input.sendAssets, "pick") > 0 ? 8 : 0;
+      score += receiveCurrentProducers >= 2 ? 14 : 0;
+      score += projectedPointsGain >= 8 ? 12 : projectedPointsGain >= 4 ? 6 : 0;
       break;
     case "pick_arbitrage":
       score += input.pickOnlyMaterial ? 18 : -18;
@@ -280,7 +311,7 @@ function scoreStrategy(input: TradeStrategyInput, strategy: TradeStrategyType): 
   if (valueEdge >= 1_500) score += 12;
   else if (valueEdge >= 500) score += 6;
   else if (valueEdge <= -2_500) score -= 28;
-  else if (valueEdge <= -1_000) score -= strategy === "consolidation" && window === "contend" ? 8 : 16;
+  else if (valueEdge <= -1_000) score -= (strategy === "consolidation" && window === "contend") || (strategy === "win_now_buy" && projectedPointsGain >= 6) ? 8 : 16;
   else if (valueEdge <= -500) score -= 6;
   if (input.fairness === "lopsided" && valueEdge < 0) score -= 16;
   if (pickOnly && !input.pickOnlyMaterial) score -= 16;
@@ -326,7 +357,13 @@ function buildThesis(
     case "productive_struggle":
       return `${label}: move ${send} for ${receive}. Fit is ${fit} for ${window} because it trades one hammer for multiple liquid shots. ${value}`;
     case "win_now_buy":
-      return `${label}: spend ${send} to add ${receive}. Fit is ${fit} for ${window} when the added starter meaningfully raises title odds. ${value}`;
+      {
+        const pointsGain = projectedPpgTotal(input.receiveAssets) - projectedPpgTotal(input.sendAssets);
+        const pointsText = pointsGain > 0
+          ? ` It adds about ${Math.round(pointsGain * 10) / 10} projected league PPG.`
+          : "";
+        return `${label}: spend ${send} to add ${receive}. Fit is ${fit} for ${window} when the added starter production meaningfully raises title odds.${pointsText} ${value}`;
+      }
     case "pick_arbitrage":
       return `${label}: exchange draft capital from ${send} into ${receive}. Fit is ${fit}; this should only surface when it improves pick quality, liquidity, or timing. ${value}`;
     case "position_arbitrage":

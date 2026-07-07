@@ -4,6 +4,7 @@ export interface TradeCalculatorRouteState {
   username: string | null;
   leagueId: string | null;
   opponentRosterId: number | null;
+  returnTo: string | null;
   send: TradeAssetInput[];
   receive: TradeAssetInput[];
   sendLabels: string[];
@@ -49,12 +50,20 @@ function parseLabels(value: string | null): string[] {
   }
 }
 
+function parseReturnTo(value: string | null): string | null {
+  if (!value) return null;
+  if (!value.startsWith("/trade-finder")) return null;
+  if (value.startsWith("//") || value.includes("\\")) return null;
+  return value;
+}
+
 export function parseTradeCalculatorQuery(input: string | URLSearchParams): TradeCalculatorRouteState {
   const params = paramsFrom(input);
   return {
     username: params.get("username") || null,
     leagueId: params.get("league") || null,
     opponentRosterId: parseRosterId(params.get("opponent") ?? params.get("opponentRosterId")),
+    returnTo: parseReturnTo(params.get("returnTo")),
     send: parseAssets(params.get("send")),
     receive: parseAssets(params.get("receive")),
     sendLabels: parseLabels(params.get("sendLabels")),
@@ -70,11 +79,14 @@ export function buildTradeCalculatorUrl(state: {
   receive?: TradeAssetInput[];
   sendLabels?: string[];
   receiveLabels?: string[];
+  returnTo?: string | null;
 }): string {
   const params = new URLSearchParams();
   if (state.username) params.set("username", state.username);
   if (state.leagueId) params.set("league", state.leagueId);
   if (state.opponentRosterId != null) params.set("opponent", String(state.opponentRosterId));
+  const returnTo = parseReturnTo(state.returnTo ?? null);
+  if (returnTo) params.set("returnTo", returnTo);
   if (state.send && state.send.length > 0) params.set("send", JSON.stringify(state.send));
   if (state.receive && state.receive.length > 0) params.set("receive", JSON.stringify(state.receive));
   if (state.sendLabels && state.sendLabels.length > 0) params.set("sendLabels", JSON.stringify(state.sendLabels));

@@ -106,4 +106,28 @@ describe("trade recommendation quality", () => {
     expect(isUnrealisticEliteAcquisition(input)).toBe(false);
     expect(recommendationRejectReason(input)).toBeNull();
   });
+
+  it("rejects protected young-core deals unless they are intentional win-now points buys", () => {
+    const base = {
+      valueEdgeForUser: -400,
+      sendAssets: [player("Young Core QB", 86, 7_200)],
+      receiveAssets: [player("Veteran RB", 78, 4_900)],
+      healthWarnings: [
+        { type: "warning" as const, rule: "young_core_protection", message: "Protected young core." },
+      ],
+    };
+
+    expect(recommendationRejectReason(base)).toContain("protected young core");
+    expect(recommendationRejectReason({
+      ...base,
+      receiveAssets: [
+        player("Veteran RB 1", 88, 4_600),
+        player("Veteran RB 2", 74, 2_100),
+      ],
+      healthWarnings: [
+        ...base.healthWarnings,
+        { type: "warning" as const, rule: "win_now_points_buy", message: "Adds projected points." },
+      ],
+    })).toBeNull();
+  });
 });

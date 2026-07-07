@@ -77,6 +77,7 @@ const TRADE_FINDER_MAX_PLAYER_PICK_TEMPLATES = 5;
 const TRADE_FINDER_MAX_ROSTER_SPOT_TEMPLATES = 2;
 const TRADE_FINDER_MAX_TIER_DOWN_TEMPLATES = 4;
 const TRADE_FINDER_MAX_RENTAL_TEMPLATES = 3;
+const TRADE_FINDER_MAX_POINTS_BUY_TEMPLATES = 4;
 const TRADE_FINDER_MAX_CONCURRENT_VALUATIONS = 8;
 const TRADE_FINDER_RESULT_TTL_MS = 15 * 60_000;
 const TRADE_FINDER_BOARD_RESULT_TTL_MS = 15 * 60_000;
@@ -290,6 +291,7 @@ function assetFromPlayer(a: CoreAsset): TradePackageAsset {
     dp_score: a.dp_score,
     league_adjusted_score: null,
     scoring_delta_ppg: null,
+    ppg: a.ppg ?? a.league_points_ppg ?? null,
     source_agreement: a.source_agreement,
   };
 }
@@ -509,6 +511,35 @@ function isAgingOrFragilePlayer(asset: CoreAsset): boolean {
   return asset.availability !== "active";
 }
 
+function projectedPpgForCore(asset: CoreAsset): number {
+  const ppg = asset.ppg ?? asset.league_points_ppg ?? null;
+  if (ppg != null && Number.isFinite(ppg) && ppg > 0) return Math.max(0, ppg);
+  if (asset.position === "QB") return clamp(8 + (asset.edge_score - 60) * 0.2, 8, 22);
+  if (asset.position === "RB") return clamp(5 + (asset.edge_score - 55) * 0.35, 5, 22);
+  if (asset.position === "WR") return clamp(6 + (asset.edge_score - 55) * 0.25, 6, 20);
+  if (asset.position === "TE") return clamp(4 + (asset.edge_score - 55) * 0.22, 4, 16);
+  return 0;
+}
+
+function isFutureValueAsset(asset: CoreAsset, mode: "sf" | "1qb"): boolean {
+  const age = asset.age ?? 99;
+  if (asset.position === "QB") {
+    return asset.edge_score >= (mode === "sf" ? 68 : 76) && age <= 25;
+  }
+  if (asset.position === "WR") return asset.edge_score >= 65 && age <= 24;
+  if (asset.position === "TE") return asset.edge_score >= 70 && age <= 25;
+  return asset.edge_score >= 76 && age <= 23;
+}
+
+function isCurrentPointsBuyAsset(asset: CoreAsset): boolean {
+  const age = asset.age ?? 0;
+  if (!["RB", "WR", "TE"].includes(asset.position)) return false;
+  const ppg = projectedPpgForCore(asset);
+  const productiveEnough = ppg >= 8 || asset.edge_score >= 70;
+  if (asset.position === "RB") return productiveEnough && age >= 26 && asset.edge_score >= 62;
+  return productiveEnough && age >= 27 && asset.edge_score >= 62;
+}
+
 function isTierDownAnchor(outgoing: CoreAsset, candidate: CoreAsset): boolean {
   return (
     candidate.player_id !== outgoing.player_id &&
@@ -676,6 +707,13 @@ function packagePassesTradeFinderControls(
     if (!isRealisticTradeFinderPackage(pkg)) return false;
   }
   if (options.strategyFocus && !packageMatchesStrategyFocus(pkg, options.strategyFocus)) return false;
+  if (
+    options.opponentRosterId != null &&
+    options.strategyFocus !== "pick_arbitrage" &&
+    isPickOnlyTradePackage(pkg)
+  ) {
+    return false;
+  }
   return true;
 }
 
@@ -1011,7 +1049,11 @@ export function annotateTradeFinderPackage(
 }
 
 export function shouldSurfaceTradeFinderPackage(pkg: TradePackage): boolean {
-  return hardRejectReason(pkg) == null;
+  if (hardRejectReason(pkg) != null) return false;
+  if (pkg.fairness === "lopsided" && pkg.quality_tier === "low_confidence") {
+    return false;
+  }
+  return true;
 }
 
 function shouldSurfaceTargetFallbackPackage(pkg: TradePackage): boolean {
@@ -1917,6 +1959,61 @@ export async function generateTradeFinderPackages(
         sweetener_hint: "Tier-down only works if the return includes a real anchor, not just volume.",
       });
       if (added) tierDownGenerated += 1;
+    }
+  }
+
+  let pointsBuyGenerated = 0;
+  if (userIsContender && strategyTemplateAllowed(options.strategyFocus, ["win_now_buy"])) {
+    const futureValueCandidates = userPlayers
+      .filter((asset) => isFutureValueAsset(asset, mode))
+      .slice(0, 6);
+    const pointsBuyTargets = (targetPlayer ? [targetPlayer] : oppTargets)
+      .filter(isCurrentPointsBuyAsset)
+      .slice(0, targetPlayer ? 1 : 5);
+
+    for (const target of pointsBuyTargets) {
+      if (pointsBuyGenerated >= TRADE_FINDER_MAX_POINTS_BUY_TEMPLATES) break;
+      const secondaryTargets = oppPlayers
+        .filter((asset) => asset.player_id !== target.player_id && isCurrentPointsBuyAsset(asset))
+        .sort((a, b) => {
+          const ppgDelta = projectedPpgForCore(b) - projectedPpgForCore(a);
+          return ppgDelta !== 0 ? ppgDelta : b.edge_score - a.edge_score;
+        })
+        .slice(0, 4);
+
+      for (const secondary of secondaryTargets) {
+        if (pointsBuyGenerated >= TRADE_FINDER_MAX_POINTS_BUY_TEMPLATES) break;
+        const receivePpg = projectedPpgForCore(target) + projectedPpgForCore(secondary);
+        const strongestReturnEdge = Math.max(target.edge_score, secondary.edge_score);
+        const outgoingCandidates = futureValueCandidates
+          .filter((asset) => {
+            if (asset.player_id === target.player_id || asset.player_id === secondary.player_id) return false;
+            const ppgGain = receivePpg - projectedPpgForCore(asset);
+            if (ppgGain < 6) return false;
+            if (asset.edge_score < strongestReturnEdge - 18) return false;
+            if (asset.edge_score > strongestReturnEdge + 12) return false;
+            return true;
+          })
+          .sort((a, b) => Math.abs(a.edge_score - strongestReturnEdge) - Math.abs(b.edge_score - strongestReturnEdge))
+          .slice(0, targetPlayer ? 3 : 2);
+
+        for (const outgoing of outgoingCandidates) {
+          if (pointsBuyGenerated >= TRADE_FINDER_MAX_POINTS_BUY_TEMPLATES) break;
+          const added = await addStrategicPackage({
+            type: "balanced",
+            label: "Win-Now Points Buy",
+            send: [assetFromPlayerWithScoring(outgoing, scoring, usage, hasCustom)],
+            receive: [
+              assetFromPlayerWithScoring(target, scoring, usage, hasCustom),
+              assetFromPlayerWithScoring(secondary, scoring, usage, hasCustom),
+            ],
+            why_you_do_it: `Trade future-value ${outgoing.position} liquidity for about ${Math.round((receivePpg - projectedPpgForCore(outgoing)) * 10) / 10} projected PPG of current production`,
+            why_they_accept: `They turn older production into a younger, more liquid ${outgoing.position} asset.`,
+            sweetener_hint: "Only pursue this if you are actively buying a title-window points spike.",
+          });
+          if (added) pointsBuyGenerated += 1;
+        }
+      }
     }
   }
 

@@ -168,7 +168,10 @@ export function recommendationRejectReason(input: RecommendationQualityInput): s
   const protectsYoungCore = input.healthWarnings?.some(
     (warning) => warning.rule === "young_core_protection"
   );
-  if (protectsYoungCore && input.valueEdgeForUser < MAJOR_RECOMMENDATION_EDGE) {
+  const intentionalWinNowPointsBuy = input.healthWarnings?.some(
+    (warning) => warning.rule === "win_now_points_buy"
+  );
+  if (protectsYoungCore && !intentionalWinNowPointsBuy && input.valueEdgeForUser < MAJOR_RECOMMENDATION_EDGE) {
     return "Rejecting protected young core trade without an overwhelming return.";
   }
 

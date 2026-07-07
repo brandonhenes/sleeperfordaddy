@@ -182,7 +182,18 @@ export async function getPowerRankings(
   const inClause = sql.join(idFrags, sql`, `);
 
   const rosterRows = await db.execute(sql`
-    SELECT rp.league_id, rp.owner_id, rp.player_id, pm.full_name, pm.position, pm.age, pm.team, pm.status,
+    SELECT rp.league_id, rp.owner_id, rp.player_id, pm.full_name, pm.position,
+      COALESCE(
+        NULLIF(pm.age, 0),
+        CASE WHEN ktc.age_decimal IS NOT NULL AND ktc.age_decimal > 0 THEN FLOOR(ktc.age_decimal)::int ELSE NULL END,
+        CASE WHEN dpv.age IS NOT NULL AND dpv.age > 0 THEN FLOOR(dpv.age)::int ELSE NULL END,
+        CASE
+          WHEN pp.age IS NOT NULL AND pp.age ~ '^[0-9]+(\\.[0-9]+)?$' AND pp.age::real > 0
+            THEN FLOOR(pp.age::real)::int
+          ELSE NULL
+        END
+      ) AS age,
+      pm.team, pm.status,
       EXISTS (
         SELECT 1 FROM fantasycalc_daily fc
         WHERE fc.sleeper_id = rp.player_id
@@ -195,7 +206,13 @@ export async function getPowerRankings(
           AND dp.is_pick = false
           AND UPPER(dp.team) IN ('FA', 'FREE AGENT')
       ) AS external_flags_fa
-    FROM roster_players rp JOIN players_master pm ON rp.player_id = pm.player_id
+    FROM roster_players rp
+    JOIN players_master pm ON rp.player_id = pm.player_id
+    LEFT JOIN ktc_values ktc ON ktc.sleeper_id = rp.player_id AND COALESCE(ktc.is_pick, false) = false
+    LEFT JOIN dynastyprocess_values dpv ON dpv.sleeper_id = rp.player_id AND COALESCE(dpv.is_pick, false) = false
+    LEFT JOIN prospect_profiles pp
+      ON LOWER(pp.player_name) = LOWER(pm.full_name)
+      AND UPPER(pp.position) = UPPER(pm.position)
     WHERE rp.league_id IN (${inClause}) AND pm.position IN ('QB','RB','WR','TE')
   `);
   type RR = { league_id: string; owner_id: string; player_id: string; full_name: string; position: string; age: number | null; team: string | null; status: string | null; external_flags_fa: boolean };
@@ -636,9 +653,37 @@ async function getPowerRankingsDbOnly(
 
   const [rosterPlayerRows, ridRows, nmRows, tradedPickRows, draftOrderRows, completedDraftSeasonsByLeague] = await Promise.all([
     db.execute(sql`
-      SELECT rp.league_id, rp.owner_id, rp.player_id, pm.full_name, pm.position, pm.age
+      SELECT rp.league_id, rp.owner_id, rp.player_id, pm.full_name, pm.position,
+        COALESCE(
+          NULLIF(pm.age, 0),
+          CASE WHEN ktc.age_decimal IS NOT NULL AND ktc.age_decimal > 0 THEN FLOOR(ktc.age_decimal)::int ELSE NULL END,
+          CASE WHEN dpv.age IS NOT NULL AND dpv.age > 0 THEN FLOOR(dpv.age)::int ELSE NULL END,
+          CASE
+            WHEN pp.age IS NOT NULL AND pp.age ~ '^[0-9]+(\\.[0-9]+)?$' AND pp.age::real > 0
+              THEN FLOOR(pp.age::real)::int
+            ELSE NULL
+          END
+        ) AS age,
+        pm.team, pm.status,
+        EXISTS (
+          SELECT 1 FROM fantasycalc_daily fc
+          WHERE fc.sleeper_id = rp.player_id
+            AND fc.snapshot_date = (SELECT MAX(snapshot_date) FROM fantasycalc_daily)
+            AND fc.is_pick = false
+            AND UPPER(fc.team) IN ('FA', 'FREE AGENT')
+        ) OR EXISTS (
+          SELECT 1 FROM dynastyprocess_values dp
+          WHERE dp.sleeper_id = rp.player_id
+            AND dp.is_pick = false
+            AND UPPER(dp.team) IN ('FA', 'FREE AGENT')
+        ) AS external_flags_fa
       FROM roster_players rp
       JOIN players_master pm ON rp.player_id = pm.player_id
+      LEFT JOIN ktc_values ktc ON ktc.sleeper_id = rp.player_id AND COALESCE(ktc.is_pick, false) = false
+      LEFT JOIN dynastyprocess_values dpv ON dpv.sleeper_id = rp.player_id AND COALESCE(dpv.is_pick, false) = false
+      LEFT JOIN prospect_profiles pp
+        ON LOWER(pp.player_name) = LOWER(pm.full_name)
+        AND UPPER(pp.position) = UPPER(pm.position)
       WHERE rp.league_id IN (${inClause}) AND pm.position IN ('QB','RB','WR','TE')
     `),
     db.execute(sql`SELECT league_id, owner_id, roster_id FROM rosters WHERE league_id IN (${inClause})`),
