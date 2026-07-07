@@ -1,5 +1,7 @@
 import { Router } from "express";
 import type { LeaguePowerRanking, OpponentProfile } from "@shared/types";
+import { getLeagueUsers } from "../sleeper/leagues.js";
+import { getLeagueRosters } from "../sleeper/rosters.js";
 import { getPowerRankings } from "../services/power-rankings.js";
 import {
   getExploitAngles,
@@ -8,6 +10,130 @@ import {
 } from "../services/opponent-profiler.js";
 
 const router = Router();
+const queuedProfileRefreshes = new Map<string, { leagueId: string; username: string }>();
+let profileRefreshQueueRunning = false;
+
+function fallbackProfilesFromLeague(league: LeaguePowerRanking, myRosterId: number | null): OpponentProfile[] {
+  const now = new Date().toISOString();
+  const season = String(new Date().getFullYear());
+  return league.rosters
+    .filter((roster) => roster.roster_id !== myRosterId)
+    .map((roster) => ({
+      leagueId: league.league_id,
+      rosterId: roster.roster_id,
+      ownerId: roster.owner_id,
+      displayName: roster.display_name || `Roster ${roster.roster_id}`,
+      season,
+      totalTrades: 0,
+      totalWaiverMoves: 0,
+      activityLevel: "inactive",
+      positionsAcquired: {},
+      positionsSold: {},
+      waiverTargets: {},
+      avgAgeAcquired: null,
+      avgAgeSold: null,
+      ageBias: "neutral",
+      picksAcquired: 0,
+      picksSold: 0,
+      pickTendency: "neutral",
+      recentTrades: [],
+      tradePartners: {},
+      profiledAt: now,
+      seasonsAnalyzed: 0,
+      isStale: true,
+    }));
+}
+
+function fallbackProfile(
+  league: LeaguePowerRanking,
+  rosterId: number,
+  ownerId: string | null,
+  displayName: string
+): OpponentProfile {
+  const now = new Date().toISOString();
+  return {
+    leagueId: league.league_id,
+    rosterId,
+    ownerId,
+    displayName: displayName || `Roster ${rosterId}`,
+    season: String(new Date().getFullYear()),
+    totalTrades: 0,
+    totalWaiverMoves: 0,
+    activityLevel: "inactive",
+    positionsAcquired: {},
+    positionsSold: {},
+    waiverTargets: {},
+    avgAgeAcquired: null,
+    avgAgeSold: null,
+    ageBias: "neutral",
+    picksAcquired: 0,
+    picksSold: 0,
+    pickTendency: "neutral",
+    recentTrades: [],
+    tradePartners: {},
+    profiledAt: now,
+    seasonsAnalyzed: 0,
+    isStale: true,
+  };
+}
+
+async function completeFallbackProfilesFromLiveRosters(
+  league: LeaguePowerRanking,
+  myRosterId: number | null
+): Promise<OpponentProfile[]> {
+  const profileByRosterId = new Map<number, OpponentProfile>(
+    fallbackProfilesFromLeague(league, myRosterId).map((profile) => [profile.rosterId, profile])
+  );
+
+  try {
+    const [rosters, users] = await Promise.all([
+      getLeagueRosters(league.league_id),
+      getLeagueUsers(league.league_id),
+    ]);
+    const userById = new Map(users.map((user) => [user.user_id, user]));
+    for (const roster of rosters) {
+      if (roster.roster_id === myRosterId || profileByRosterId.has(roster.roster_id)) continue;
+      const user = roster.owner_id ? userById.get(roster.owner_id) : undefined;
+      const teamNameRaw = user?.metadata?.team_name;
+      const teamName = typeof teamNameRaw === "string" ? teamNameRaw.trim() : "";
+      const displayName = teamName || user?.display_name?.trim() || `Roster ${roster.roster_id}`;
+      profileByRosterId.set(
+        roster.roster_id,
+        fallbackProfile(league, roster.roster_id, roster.owner_id, displayName)
+      );
+    }
+  } catch (err) {
+    console.warn("[opponents] Failed to complete live roster fallback:", err);
+  }
+
+  return [...profileByRosterId.values()].sort((a, b) => a.rosterId - b.rosterId);
+}
+
+async function drainProfileRefreshQueue(): Promise<void> {
+  if (profileRefreshQueueRunning) return;
+  profileRefreshQueueRunning = true;
+  try {
+    while (queuedProfileRefreshes.size > 0) {
+      const [key, job] = queuedProfileRefreshes.entries().next().value as [string, { leagueId: string; username: string }];
+      queuedProfileRefreshes.delete(key);
+      try {
+        await profileLeagueOpponents(job.leagueId, job.username);
+      } catch (err) {
+        console.error("[opponents] Background profile refresh failed:", err);
+      }
+    }
+  } finally {
+    profileRefreshQueueRunning = false;
+  }
+}
+
+function queueProfileRefresh(leagueId: string, username: string): void {
+  const key = `${leagueId}:${username.toLowerCase()}`;
+  if (!queuedProfileRefreshes.has(key)) {
+    queuedProfileRefreshes.set(key, { leagueId, username });
+  }
+  void drainProfileRefreshQueue();
+}
 
 function withCurrentRosterIdentity(
   profiles: OpponentProfile[],
@@ -103,13 +229,29 @@ router.get("/api/opponents/:leagueId/:username", async (req, res) => {
     }
 
     const myRosterId = league.rosters.find((roster) => roster.is_user)?.roster_id ?? null;
-    let profiles = await getStoredProfiles(leagueId);
-    if (profiles.length === 0) {
-      profiles = await profileLeagueOpponents(leagueId, username);
+    const fallbackProfiles = await completeFallbackProfilesFromLiveRosters(league, myRosterId);
+    const storedProfiles = await getStoredProfiles(leagueId);
+    const hasStoredProfiles = storedProfiles.length > 0;
+    const liveProfileCount = fallbackProfiles.length;
+    if (
+      !hasStoredProfiles ||
+      storedProfiles.length < liveProfileCount ||
+      storedProfiles.some((profile) => profile.isStale)
+    ) {
+      queueProfileRefresh(leagueId, username);
+    }
+
+    const profileByRosterId = new Map<number, OpponentProfile>(
+      fallbackProfiles.map((profile) => [profile.rosterId, profile])
+    );
+    for (const profile of storedProfiles) {
+      if (profile.rosterId !== myRosterId && profileByRosterId.has(profile.rosterId)) {
+        profileByRosterId.set(profile.rosterId, profile);
+      }
     }
 
     const filtered = withCurrentRosterIdentity(
-      profiles.filter((profile) => profile.rosterId !== myRosterId),
+      [...profileByRosterId.values()],
       league
     );
     res.json({

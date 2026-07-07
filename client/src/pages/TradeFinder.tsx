@@ -6,11 +6,12 @@ import { PageHeader } from "../components/ui";
 import { useCurrentUsername } from "../hooks/use-current-user";
 import { useLeagueSummaries } from "../hooks/use-league-summaries";
 import {
+  useTradeFinderPrewarm,
   useShopPlayer,
   useTradePartnerTargets,
   useTradeSuggestions,
 } from "../hooks/use-trade-finder";
-import { useAcquisition } from "../hooks/use-acquisition";
+import { type AcquisitionDepth, useAcquisition } from "../hooks/use-acquisition";
 import {
   useOpponentExploits,
   useOpponentProfiles,
@@ -37,7 +38,6 @@ export default function TradeFinder() {
     <AppShell requireSync>
       <PageHeader
         title="Trade Finder"
-        subtitle="Suggested trades and acquisition plans based on roster composition, archetypes, and draft capital."
       />
       <TradeFinderReady username={username} />
     </AppShell>
@@ -54,8 +54,10 @@ function TradeFinderReady({ username }: { username: string }) {
   const [mode, setMode] = useState<"find" | "acquire" | "shop" | "scout">(initialRoute.mode ?? "find");
   const [targetSearch, setTargetSearch] = useState("");
   const [selectedTarget, setSelectedTarget] = useState<SelectedAcquisitionTarget | null>(null);
+  const [acquisitionDepth, setAcquisitionDepth] = useState<AcquisitionDepth>("quick");
   const [selectedPlayer, setSelectedPlayer] = useState(initialRoute.mode === "shop" ? initialRoute.playerId ?? "" : "");
   const [shopAmbition, setShopAmbition] = useState(2);
+  const [shopDepth, setShopDepth] = useState<"quick" | "full">("quick");
   const [showShopRedraft, setShowShopRedraft] = useState(false);
   const [shopPathFilter, setShopPathFilter] = useState<ShopPathFilter>(null);
   const [selectedScoutRosterId, setSelectedScoutRosterId] = useState<number | null>(
@@ -100,10 +102,16 @@ function TradeFinderReady({ username }: { username: string }) {
     isFetching: suggestionsFetching,
     error: suggestionsError,
   } = useTradeSuggestions(
-    username,
-    selectedLeague,
+    mode === "find" ? username : "",
+    mode === "find" ? selectedLeague : "",
     selectedScoutRosterId,
-    tradeControls
+    tradeControls,
+    mode === "find" && !!selectedLeague && selectedScoutRosterId != null
+  );
+  useTradeFinderPrewarm(
+    mode === "find" ? username : "",
+    mode === "find" ? selectedLeague : "",
+    mode === "find" && !!selectedLeague
   );
   const partnerTargetsQuery = useTradePartnerTargets(
     mode === "find" ? username : "",
@@ -139,12 +147,13 @@ function TradeFinderReady({ username }: { username: string }) {
     queryFn: () => apiFetch(`/api/trade/assets?q=${encodeURIComponent(targetSearch.trim())}&limit=8`),
   });
 
-  const { data: acquisitionData, isLoading: acquisitionLoading } = useAcquisition(username, selectedTarget);
+  const { data: acquisitionData, isLoading: acquisitionLoading } = useAcquisition(username, selectedTarget, acquisitionDepth);
   const { data: shopResult, isLoading: shopLoading, error: shopError } = useShopPlayer(
     mode === "shop" ? username : "",
     mode === "shop" ? selectedPlayer : "",
     shopAmbition,
-    showShopRedraft
+    showShopRedraft,
+    shopDepth
   );
   const scoutProfilesWithScores = scoreScoutProfiles(
     scoutProfilesQuery.data?.profiles ?? [],
@@ -399,16 +408,17 @@ function TradeFinderReady({ username }: { username: string }) {
     <>
       <FreshnessBar leagueId={selectedLeague || undefined} />
 
-      <div style={{ display: "flex", gap: 0, borderBottom: "1px solid var(--border)", marginBottom: 16, marginTop: 8, flexWrap: "wrap" }}>
+      <div className="trade-finder-tabs" style={{ display: "flex", gap: 0, borderBottom: "1px solid var(--border)", marginBottom: 16, marginTop: 8, flexWrap: "wrap" }}>
         {([
-          { key: "find" as const, label: "Find Trades" },
-          { key: "acquire" as const, label: "What Would It Take?" },
-          { key: "shop" as const, label: "Shop a Player" },
-          { key: "scout" as const, label: "Scout Opponents" },
+          { key: "find" as const, label: "Find" },
+          { key: "acquire" as const, label: "Acquire" },
+          { key: "shop" as const, label: "Shop" },
+          { key: "scout" as const, label: "Scout" },
         ]).map((m) => (
           <button
             key={m.key}
             onClick={() => { setMode(m.key); setSelectedTarget(null); setSelectedPlayer(""); setShopPathFilter(null); if (m.key !== "scout") setScoutRouteWarning(null); }}
+            className="trade-finder-tab"
             style={{ background: "transparent", border: "none", borderBottom: mode === m.key ? "2px solid var(--amber)" : "2px solid transparent", color: mode === m.key ? "var(--amber)" : "var(--text-muted)", padding: "10px 12px", fontSize: 14, fontWeight: 700, cursor: "pointer", letterSpacing: 0.3, transition: "color 0.15s, border-color 0.15s", fontFamily: "inherit", flex: "1 1 150px", minWidth: 0, whiteSpace: "normal", overflowWrap: "anywhere" }}
           >
             {m.label}
@@ -452,10 +462,13 @@ function TradeFinderReady({ username }: { username: string }) {
       )}
       {mode === "acquire" && (
         <AcquisitionPanel
+          username={username}
           targetSearch={targetSearch}
           setTargetSearch={setTargetSearch}
           selectedTarget={selectedTarget}
           setSelectedTarget={setSelectedTarget}
+          acquisitionDepth={acquisitionDepth}
+          setAcquisitionDepth={setAcquisitionDepth}
           targetResults={targetResults}
           acquisitionData={acquisitionData}
           acquisitionLoading={acquisitionLoading}
@@ -464,13 +477,19 @@ function TradeFinderReady({ username }: { username: string }) {
 
       {mode === "shop" && (
         <ShopPlayerPanel
+          username={username}
           portfolio={portfolio}
           selectedPlayer={selectedPlayer}
           setSelectedPlayer={setSelectedPlayer}
           shopAmbition={shopAmbition}
           setShopAmbition={setShopAmbition}
+          shopDepth={shopDepth}
+          setShopDepth={setShopDepth}
           showShopRedraft={showShopRedraft}
-          onToggleRedraft={() => setShowShopRedraft((current) => !current)}
+          onToggleRedraft={() => {
+            setShopDepth("quick");
+            setShowShopRedraft((current) => !current);
+          }}
           shopPathFilter={shopPathFilter}
           setShopPathFilter={setShopPathFilter}
           shopLoading={shopLoading}

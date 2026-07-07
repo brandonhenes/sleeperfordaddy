@@ -57,6 +57,7 @@ import {
   applyTradeStrategyMetadata,
   classifyTradeStrategy,
 } from "./trade-strategy-thesis.js";
+import { prewarmSleeperProjectionWeeks } from "./league-market-adjustment.js";
 
 // Constants
 
@@ -76,16 +77,17 @@ const TRADE_FINDER_MAX_PLAYER_PICK_TEMPLATES = 5;
 const TRADE_FINDER_MAX_ROSTER_SPOT_TEMPLATES = 2;
 const TRADE_FINDER_MAX_TIER_DOWN_TEMPLATES = 4;
 const TRADE_FINDER_MAX_RENTAL_TEMPLATES = 3;
-const TRADE_FINDER_MAX_CONCURRENT_VALUATIONS = 4;
+const TRADE_FINDER_MAX_CONCURRENT_VALUATIONS = 8;
 const TRADE_FINDER_RESULT_TTL_MS = 15 * 60_000;
 const TRADE_FINDER_BOARD_RESULT_TTL_MS = 15 * 60_000;
 const TRADE_FINDER_RESULT_CACHE_MAX_ENTRIES = 80;
+const TRADE_FINDER_BOARD_MAX_LEAGUES = 6;
 
 let activeTradeFinderValuations = 0;
 const tradeFinderValuationQueue: Array<() => void> = [];
 const tradeFinderResultCache = new Map<string, { data: TradeSuggestion[]; expires: number }>();
 const tradeFinderInFlight = new Map<string, Promise<TradeSuggestion[]>>();
-const tradeBoardResultCache = new Map<string, { data: TradeBoardLine[]; expires: number }>();
+const tradeBoardResultCache = new Map<string, { data: TradeBoardLine[]; expires: number; generatedAt: number }>();
 const tradeBoardInFlight = new Map<string, Promise<TradeBoardLine[]>>();
 
 async function withTradeFinderValuationSlot<T>(work: () => Promise<T>): Promise<T> {
@@ -145,6 +147,11 @@ function setCachedTradeFinderResult(
   data: TradeSuggestion[],
   ttlMs = TRADE_FINDER_RESULT_TTL_MS
 ) {
+  if (data.length === 0) {
+    tradeFinderResultCache.delete(key);
+    return;
+  }
+
   tradeFinderResultCache.set(key, {
     data,
     expires: Date.now() + ttlMs,
@@ -176,21 +183,35 @@ function tradeBoardResultCacheKey(
 }
 
 function getCachedTradeBoardResult(key: string): TradeBoardLine[] | null {
+  const hit = getTradeBoardCacheEntry(key, false);
+  return hit?.data ?? null;
+}
+
+function getTradeBoardCacheEntry(
+  key: string,
+  allowStale: boolean
+): { data: TradeBoardLine[]; stale: boolean; generatedAt: number } | null {
   const hit = tradeBoardResultCache.get(key);
   if (!hit) return null;
-  if (hit.expires <= Date.now()) {
+  const stale = hit.expires <= Date.now();
+  if (stale && !allowStale) {
     tradeBoardResultCache.delete(key);
     return null;
   }
   tradeBoardResultCache.delete(key);
   tradeBoardResultCache.set(key, hit);
-  return hit.data;
+  return {
+    data: hit.data,
+    stale,
+    generatedAt: hit.generatedAt,
+  };
 }
 
 function setCachedTradeBoardResult(key: string, data: TradeBoardLine[]) {
   tradeBoardResultCache.set(key, {
     data,
     expires: Date.now() + TRADE_FINDER_BOARD_RESULT_TTL_MS,
+    generatedAt: Date.now(),
   });
 
   const now = Date.now();
@@ -512,8 +533,27 @@ function tierDownAnchorFor(
   return candidates.find(
     (candidate) =>
       candidate.position !== outgoing.position &&
-      isTierDownAnchor(outgoing, candidate)
+    isTierDownAnchor(outgoing, candidate)
   ) ?? null;
+}
+
+function tierDownPickFor(picks: EnrichedPick[], minEdge = 36): EnrichedPick | null {
+  return [...picks]
+    .filter((candidate) => candidate.edge_score >= minEdge)
+    .sort((a, b) => a.edge_score - b.edge_score)[0] ?? null;
+}
+
+function targetPriorityForPartnerSearch(asset: CoreAsset, userNeeds: readonly string[]): number {
+  const edge = asset.edge_score;
+  const actionableBand =
+    edge >= 72 && edge <= 90
+      ? 100 - Math.abs(edge - 82)
+      : edge > 90
+        ? 62 - (edge - 90)
+        : edge;
+  const needBoost = userNeeds.includes(asset.position as Pos) ? 8 : 0;
+  const elitePenalty = edge >= 95 ? 8 : 0;
+  return actionableBand + needBoost - elitePenalty;
 }
 
 function packageHasPickReturn(pkg: Pick<TradePackage, "you_receive">): boolean {
@@ -536,11 +576,16 @@ function packageHasQuarterback(pkg: Pick<TradePackage, "you_send" | "you_receive
   );
 }
 
+function packageHasPick(pkg: Pick<TradePackage, "you_send" | "you_receive">): boolean {
+  return [...pkg.you_send, ...pkg.you_receive].some((asset) => asset.asset_type === "pick");
+}
+
 function packageReceivesPlayer(pkg: Pick<TradePackage, "you_receive">): boolean {
   return pkg.you_receive.some((asset) => asset.asset_type === "player");
 }
 
 function packageMatchesStrategyFocus(pkg: TradePackage, focus: TradeStrategyType): boolean {
+  if (focus === "market_value") return true;
   if (pkg.strategy_type === focus) return true;
   if (focus === "tier_down") {
     return ["tier_down", "rebuild_sell", "productive_struggle"].includes(pkg.strategy_type ?? "") &&
@@ -578,6 +623,18 @@ function packageIsQbTierDown(pkg: Pick<TradePackage, "you_send" | "you_receive">
   return sendsQb && receivesQb && pkg.you_receive.length > 1;
 }
 
+function packageHasSamePositionReturn(pkg: Pick<TradePackage, "you_send" | "you_receive">): boolean {
+  const sentPositions = new Set(
+    pkg.you_send
+      .filter((asset) => asset.asset_type === "player" && asset.position)
+      .map((asset) => asset.position)
+  );
+  if (sentPositions.size === 0) return false;
+  return pkg.you_receive.some(
+    (asset) => asset.asset_type === "player" && asset.position && sentPositions.has(asset.position)
+  );
+}
+
 function packageSendsAgingRb(pkg: Pick<TradePackage, "you_send">, user: RosterProfile): boolean {
   const userAssets = new Map(user.roster.core_assets.map((asset) => [asset.player_id, asset]));
   return pkg.you_send.some((asset) => {
@@ -585,6 +642,12 @@ function packageSendsAgingRb(pkg: Pick<TradePackage, "you_send">, user: RosterPr
     const source = userAssets.get(asset.player_id);
     return Boolean(source && (source.age ?? 0) >= 27);
   });
+}
+
+export function isRealisticTradeFinderPackage(pkg: TradePackage): boolean {
+  if (pkg.package_quality_label === "poor" || pkg.quality_tier === "low_confidence") return false;
+  if (pkg.fairness === "lopsided") return false;
+  return (pkg.valuation_edge ?? pkg.delta) >= -MAJOR_VALUATION_EDGE;
 }
 
 function packagePassesTradeFinderControls(
@@ -605,11 +668,12 @@ function packagePassesTradeFinderControls(
   if (constraints.has("only_qb_tier_down") && !packageIsQbTierDown(pkg)) return false;
   if (constraints.has("no_aging_rbs") && packageSendsAgingRb(pkg, user)) return false;
   if (constraints.has("no_qbs") && packageHasQuarterback(pkg)) return false;
+  if (constraints.has("no_picks") && packageHasPick(pkg)) return false;
+  if (constraints.has("same_position_return") && !packageHasSamePositionReturn(pkg)) return false;
   if (constraints.has("more_picks_back") && !packageHasPickReturn(pkg)) return false;
   if (constraints.has("win_now_only") && (!packageReceivesPlayer(pkg) || isPickOnlyTradePackage(pkg))) return false;
   if (constraints.has("more_realistic")) {
-    if (pkg.fairness === "lopsided") return false;
-    if ((pkg.valuation_edge ?? pkg.delta) < -MAJOR_VALUATION_EDGE) return false;
+    if (!isRealisticTradeFinderPackage(pkg)) return false;
   }
   if (options.strategyFocus && !packageMatchesStrategyFocus(pkg, options.strategyFocus)) return false;
   return true;
@@ -966,6 +1030,16 @@ function shouldSurfaceWithOptionalTargetFallback(
     (allowTargetFallback && shouldSurfaceTargetFallbackPackage(pkg));
 }
 
+function shouldSurfacePartnerStartingPoint(pkg: TradePackage): boolean {
+  return (
+    shouldSurfaceTargetFallbackPackage(pkg) &&
+    !pkg.is_pick_only &&
+    pkg.package_quality_label !== "poor" &&
+    pkg.quality_tier !== "low_confidence" &&
+    pkg.fairness !== "lopsided"
+  );
+}
+
 function withQualityMetadata(pkg: TradePackage): TradePackage {
   const quality = qualityScore(pkg);
   const withComponents = {
@@ -980,25 +1054,30 @@ function withQualityMetadata(pkg: TradePackage): TradePackage {
 export function dedupeAndRankTradeFinderPackages(
   packages: TradePackage[],
   maxPackages = 4,
-  allowTargetFallback = false
+  allowTargetFallback = false,
+  prefiltered = false
 ): TradePackage[] {
   const seen = new Set<string>();
   const typeCounts = new Map<TradeOpportunityType, number>();
-  const validPackages = packages.filter((pkg) =>
-    shouldSurfaceWithOptionalTargetFallback(pkg, allowTargetFallback)
-  );
+  const validPackages = prefiltered
+    ? packages
+    : packages.filter((pkg) =>
+        shouldSurfaceWithOptionalTargetFallback(pkg, allowTargetFallback)
+      );
   const hasMultiAssetPlayerPackage = validPackages.some(
     (pkg) => !isPickOnlyTradePackage(pkg) && pkg.you_send.length + pkg.you_receive.length > 2
   );
   const betterThanLow = validPackages.filter((pkg) => pkg.quality_tier !== "low_confidence");
   const pool = betterThanLow.length > 0
-    ? validPackages
+    ? betterThanLow
     : validPackages.filter((pkg) => pkg.quality_tier === "low_confidence");
   const effectiveMaxPackages = betterThanLow.length > 0
     ? maxPackages
     : Math.min(maxPackages, 2);
   const uniqueReceiveTargets = new Set(pool.map(primaryReceiveAssetKey)).size;
-  const shouldDiversifyReceiveTargets = uniqueReceiveTargets >= 3 && effectiveMaxPackages >= 3;
+  const minimumDistinctReceiveTargets = Math.min(uniqueReceiveTargets, effectiveMaxPackages);
+  const shouldDiversifyReceiveTargets =
+    !allowTargetFallback && uniqueReceiveTargets >= 2 && effectiveMaxPackages >= 2;
   const tierRank: Record<TradePackageQualityTier, number> = {
     strong: 3,
     speculative: 2,
@@ -1033,7 +1112,11 @@ export function dedupeAndRankTradeFinderPackages(
     const receiveTargetCount = receiveTargetCounts.get(receiveTargetKey) ?? 0;
     if (labelCount >= 1 && selected.length < effectiveMaxPackages - 1) continue;
     if (typeCount >= 2 && selected.length < effectiveMaxPackages - 1) continue;
-    if (shouldDiversifyReceiveTargets && receiveTargetCount >= 1 && selected.length < uniqueReceiveTargets) {
+    if (
+      shouldDiversifyReceiveTargets &&
+      receiveTargetCount >= 1 &&
+      selected.length < minimumDistinctReceiveTargets
+    ) {
       continue;
     }
     if (isPickOnlyTradePackage(pkg) && selected.some(isPickOnlyTradePackage)) continue;
@@ -1062,6 +1145,13 @@ export function dedupeAndRankTradeFinderPackages(
       const labelCount = labelCounts.get(labelKey) ?? 0;
       const receiveTargetCount = receiveTargetCounts.get(receiveTargetKey) ?? 0;
       if (labelCount >= 2) continue;
+      if (
+        shouldDiversifyReceiveTargets &&
+        receiveTargetCount >= 1 &&
+        selected.length < minimumDistinctReceiveTargets
+      ) {
+        continue;
+      }
       if (shouldDiversifyReceiveTargets && receiveTargetCount >= 2) {
         continue;
       }
@@ -1462,10 +1552,10 @@ export async function generateTradeFinderPackages(
   const maxPackagesPerPartner =
     options.maxPackagesPerPartner ?? TRADE_FINDER_MAX_PACKAGES_PER_PARTNER;
   let packageEvaluationsStarted = 0;
-  const scorePackageWithBudget = async (
+  const scorePackageWithBudget = (
     send: TradePackageAsset[],
     receive: TradePackageAsset[]
-  ): Promise<PackageScore | null> => {
+  ): Promise<PackageScore> | null => {
     if (packageEvaluationsStarted >= maxEvaluationsPerOpponent) {
       return null;
     }
@@ -1481,32 +1571,35 @@ export async function generateTradeFinderPackages(
     why_they_accept: string;
     sweetener_hint?: string | null;
   };
-  const addStrategicPackage = async (input: StrategicPackageInput): Promise<boolean> => {
-    const scored = await scorePackageWithBudget(input.send, input.receive);
-    if (!scored) return false;
-    if (scored.sendTotal <= 0 || scored.receiveTotal <= 0) return false;
-    packages.push({
-      type: input.type,
-      trade_type: tradeTypeForPackage(input.type),
-      label: input.label,
-      you_send: scored.sendAssets,
-      you_receive: scored.receiveAssets,
-      send_total: scored.sendTotal,
-      receive_total: scored.receiveTotal,
-      delta: scored.delta,
-      send_edge: scored.sendEdge,
-      receive_edge: scored.receiveEdge,
-      delta_edge: scored.deltaEdge,
-      package_penalty_pct_send: scored.packagePenaltySend,
-      package_penalty_pct_receive: scored.packagePenaltyReceive,
-      ...valuationFields(scored),
-      fairness: scored.fairness,
-      why_you_do_it: input.why_you_do_it,
-      why_they_accept: input.why_they_accept,
-      sweetener_hint: input.sweetener_hint ?? null,
-      acceptance: null,
-      healthCheck: [],
-    });
+  const pendingStrategicPackages: Promise<void>[] = [];
+  const addStrategicPackage = (input: StrategicPackageInput): boolean => {
+    const scoredWork = scorePackageWithBudget(input.send, input.receive);
+    if (!scoredWork) return false;
+    pendingStrategicPackages.push(scoredWork.then((scored) => {
+      if (scored.sendTotal <= 0 || scored.receiveTotal <= 0) return;
+      packages.push({
+        type: input.type,
+        trade_type: tradeTypeForPackage(input.type),
+        label: input.label,
+        you_send: scored.sendAssets,
+        you_receive: scored.receiveAssets,
+        send_total: scored.sendTotal,
+        receive_total: scored.receiveTotal,
+        delta: scored.delta,
+        send_edge: scored.sendEdge,
+        receive_edge: scored.receiveEdge,
+        delta_edge: scored.deltaEdge,
+        package_penalty_pct_send: scored.packagePenaltySend,
+        package_penalty_pct_receive: scored.packagePenaltyReceive,
+        ...valuationFields(scored),
+        fairness: scored.fairness,
+        why_you_do_it: input.why_you_do_it,
+        why_they_accept: input.why_they_accept,
+        sweetener_hint: input.sweetener_hint ?? null,
+        acceptance: null,
+        healthCheck: [],
+      });
+    }));
     return true;
   };
   const userTopIds = new Set(Object.values(user.topPlayerIdsByPos).filter(Boolean));
@@ -1529,14 +1622,18 @@ export async function generateTradeFinderPackages(
   const targetPlayer = options.targetPlayerId
     ? oppPlayers.find((asset) => asset.player_id === options.targetPlayerId)
     : null;
-  const oppTargets = (targetPlayer
+  const oppTargetPool = targetPlayer
     ? [targetPlayer]
     : oppPlayers.filter(
         (asset) =>
           asset.edge_score >= 60 &&
           !avoidedTargetIds.has(asset.player_id)
       )
-  ).slice(0, targetPlayer ? 1 : 10);
+        .sort((a, b) =>
+          targetPriorityForPartnerSearch(b, user.needs) -
+          targetPriorityForPartnerSearch(a, user.needs)
+        );
+  const oppTargets = oppTargetPool.slice(0, targetPlayer ? 1 : 10);
   const userPicks = user.tradeablePicks
     .filter((pick) => pick.edge_score >= 18)
     .slice(0, 6);
@@ -1550,7 +1647,13 @@ export async function generateTradeFinderPackages(
     userWindow === "Competitor";
   const userWantsFuture = wantsFutureAssets(userWindow);
 
-  if (targetPlayer && strategyTemplateAllowed(options.strategyFocus, [
+  const targetedTemplateTargets = targetPlayer
+    ? [targetPlayer]
+    : !options.strategyFocus
+      ? oppTargets.slice(0, options.searchDepth === "deep" ? 8 : 5)
+      : [];
+
+  if (targetedTemplateTargets.length > 0 && strategyTemplateAllowed(options.strategyFocus, [
     "consolidation",
     "position_arbitrage",
     "roster_fit_trade",
@@ -1559,79 +1662,133 @@ export async function generateTradeFinderPackages(
     "liquidity_upgrade",
   ])) {
     let targetedGenerated = 0;
-    const target = targetPlayer;
-    const targetAsset = assetFromPlayerWithScoring(target, scoring, usage, hasCustom);
-    const targetCandidates = userPlayers
-      .filter(
-        (asset) =>
-          asset.player_id !== target.player_id &&
-          asset.edge_score >= MIN_EDGE_SCORE &&
-          asset.edge_score <= target.edge_score + 8
-      )
-      .slice(0, 10);
+    const maxTargetedGenerated = targetPlayer
+      ? Math.min(6, maxEvaluationsPerOpponent)
+      : Math.min(maxEvaluationsPerOpponent, options.searchDepth === "deep" ? 12 : 10);
+    for (const target of targetedTemplateTargets) {
+      if (targetedGenerated >= maxTargetedGenerated) break;
+      let targetedGeneratedForTarget = 0;
+      const maxTargetedPerTarget = targetPlayer ? maxTargetedGenerated : 2;
+      const targetAsset = assetFromPlayerWithScoring(target, scoring, usage, hasCustom);
+      const targetCandidates = userPlayers
+        .filter(
+          (asset) =>
+            asset.player_id !== target.player_id &&
+            asset.edge_score >= MIN_EDGE_SCORE &&
+            asset.edge_score <= target.edge_score + 8
+        )
+        .slice(0, 10);
 
-    const directSwap = targetCandidates.find(
-      (asset) => Math.abs(asset.edge_score - target.edge_score) <= 7
-    );
-    if (directSwap && targetedGenerated < 1) {
-      const added = await addStrategicPackage({
-        type: "balanced",
-        label: "Target Swap",
-        send: [assetFromPlayerWithScoring(directSwap, scoring, usage, hasCustom)],
-        receive: [targetAsset],
-        why_you_do_it: `Target ${target.full_name} directly with a comparable ${directSwap.position}`,
-        why_they_accept: opp.needs.includes(directSwap.position as Pos)
-          ? `Fills their ${directSwap.position} need with a comparable asset.`
-          : "A comparable one-for-one starting point.",
-        sweetener_hint: "Use this only if you prefer this specific player over the one you send.",
-      });
-      if (added) targetedGenerated += 1;
-    }
-
-    for (const candidate of targetCandidates) {
-      if (targetedGenerated >= 4) break;
-      const pick = userPicks.find(
-        (candidatePick) =>
-          !((candidatePick.pick_breakdown?.round ?? candidatePick.round) === 1 && target.edge_score < ELITE_EDGE_SCORE) &&
-          candidate.edge_score + candidatePick.edge_score >= target.edge_score * 0.88
-      ) ?? userPicks.find((candidatePick) => candidate.edge_score + candidatePick.edge_score >= target.edge_score * 0.78);
-      if (!pick) continue;
-      const added = await addStrategicPackage({
-        type: "player_plus_pick",
-        label: "Target Player + Pick",
-        send: [
-          assetFromPlayerWithScoring(candidate, scoring, usage, hasCustom),
-          assetFromPick(pick),
-        ],
-        receive: [targetAsset],
-        why_you_do_it: `Use ${candidate.position} value plus a pick to target ${target.full_name}`,
-        why_they_accept: opp.needs.includes(candidate.position as Pos)
-          ? `Fills their ${candidate.position} need and adds draft capital.`
-          : `Turns ${target.full_name} into a player-plus-pick return.`,
-        sweetener_hint: "If this is too rich, toggle No 1sts or Cheaper and regenerate.",
-      });
-      if (added) targetedGenerated += 1;
-    }
-
-    for (let i = 0; i < targetCandidates.length && targetedGenerated < 6; i++) {
-      for (let j = i + 1; j < Math.min(targetCandidates.length, i + 5) && targetedGenerated < 6; j++) {
-        const first = targetCandidates[i];
-        const second = targetCandidates[j];
-        const sendEdge = first.edge_score + second.edge_score;
-        if (sendEdge < target.edge_score * 1.12 || sendEdge > target.edge_score * 2.2) continue;
+      const directSwap = targetCandidates.find(
+        (asset) => Math.abs(asset.edge_score - target.edge_score) <= 7
+      );
+      if (targetPlayer && directSwap && targetedGenerated < maxTargetedGenerated) {
         const added = await addStrategicPackage({
-          type: "consolidation",
-          label: "Target 2-for-1",
-          send: [
-            assetFromPlayerWithScoring(first, scoring, usage, hasCustom),
-            assetFromPlayerWithScoring(second, scoring, usage, hasCustom),
-          ],
+          type: "balanced",
+          label: "Target Swap",
+          send: [assetFromPlayerWithScoring(directSwap, scoring, usage, hasCustom)],
           receive: [targetAsset],
-          why_you_do_it: `Package two assets to make a direct run at ${target.full_name}`,
-          why_they_accept: `Gets two playable pieces for one player. ${ARCHETYPE_WANTS[opp.roster.archetype] ?? "Flexibility matters for them."}`,
-          sweetener_hint: "Two-for-one target offers work best when both pieces solve something for them.",
+          why_you_do_it: `Target ${target.full_name} directly with a comparable ${directSwap.position}`,
+          why_they_accept: opp.needs.includes(directSwap.position as Pos)
+            ? `Fills their ${directSwap.position} need with a comparable asset.`
+            : "A comparable one-for-one starting point.",
+          sweetener_hint: "Use this only if you prefer this specific player over the one you send.",
         });
         if (added) targetedGenerated += 1;
+      }
+
+      if (!targetPlayer) {
+        for (
+          let i = 0;
+          i < targetCandidates.length &&
+            targetedGenerated < maxTargetedGenerated &&
+            targetedGeneratedForTarget < Math.min(1, maxTargetedPerTarget);
+          i += 1
+        ) {
+          for (
+            let j = i + 1;
+            j < Math.min(targetCandidates.length, i + 5) &&
+              targetedGenerated < maxTargetedGenerated &&
+              targetedGeneratedForTarget < Math.min(1, maxTargetedPerTarget);
+            j += 1
+          ) {
+            const first = targetCandidates[i];
+            const second = targetCandidates[j];
+            const sendEdge = first.edge_score + second.edge_score;
+            if (sendEdge < target.edge_score * 1.05 || sendEdge > target.edge_score * 1.95) continue;
+            const added = await addStrategicPackage({
+              type: "consolidation",
+              label: "Target 2-for-1",
+              send: [
+                assetFromPlayerWithScoring(first, scoring, usage, hasCustom),
+                assetFromPlayerWithScoring(second, scoring, usage, hasCustom),
+              ],
+              receive: [targetAsset],
+              why_you_do_it: `Package two assets to make a direct run at ${target.full_name}`,
+              why_they_accept: `Gets two playable pieces for one player. ${ARCHETYPE_WANTS[opp.roster.archetype] ?? "Flexibility matters for them."}`,
+              sweetener_hint: "Two-for-one target offers work best when both pieces solve something for them.",
+            });
+            if (added) {
+              targetedGenerated += 1;
+              targetedGeneratedForTarget += 1;
+            }
+          }
+        }
+      }
+
+      for (const candidate of targetCandidates) {
+        if (
+          targetedGenerated >= maxTargetedGenerated ||
+          targetedGeneratedForTarget >= maxTargetedPerTarget
+        ) break;
+        const pick = userPicks.find(
+          (candidatePick) =>
+            !((candidatePick.pick_breakdown?.round ?? candidatePick.round) === 1 && target.edge_score < ELITE_EDGE_SCORE) &&
+            candidate.edge_score + candidatePick.edge_score >= target.edge_score * 0.88
+        ) ?? userPicks.find((candidatePick) => candidate.edge_score + candidatePick.edge_score >= target.edge_score * 0.78);
+        if (!pick) continue;
+        const added = await addStrategicPackage({
+          type: "player_plus_pick",
+          label: "Target Player + Pick",
+          send: [
+            assetFromPlayerWithScoring(candidate, scoring, usage, hasCustom),
+            assetFromPick(pick),
+          ],
+          receive: [targetAsset],
+          why_you_do_it: `Use ${candidate.position} value plus a pick to target ${target.full_name}`,
+          why_they_accept: opp.needs.includes(candidate.position as Pos)
+            ? `Fills their ${candidate.position} need and adds draft capital.`
+            : `Turns ${target.full_name} into a player-plus-pick return.`,
+          sweetener_hint: "If this is too rich, toggle No 1sts or Cheaper and regenerate.",
+        });
+        if (added) {
+          targetedGenerated += 1;
+          targetedGeneratedForTarget += 1;
+        }
+      }
+
+      if (targetPlayer) {
+        for (let i = 0; i < targetCandidates.length && targetedGenerated < maxTargetedGenerated; i++) {
+          for (let j = i + 1; j < Math.min(targetCandidates.length, i + 5) && targetedGenerated < maxTargetedGenerated; j++) {
+            const first = targetCandidates[i];
+            const second = targetCandidates[j];
+            const sendEdge = first.edge_score + second.edge_score;
+            if (sendEdge < target.edge_score * 1.12 || sendEdge > target.edge_score * 2.2) continue;
+            const added = await addStrategicPackage({
+              type: "consolidation",
+              label: "Target 2-for-1",
+              send: [
+                assetFromPlayerWithScoring(first, scoring, usage, hasCustom),
+                assetFromPlayerWithScoring(second, scoring, usage, hasCustom),
+              ],
+              receive: [targetAsset],
+              why_you_do_it: `Package two assets to make a direct run at ${target.full_name}`,
+              why_they_accept: `Gets two playable pieces for one player. ${ARCHETYPE_WANTS[opp.roster.archetype] ?? "Flexibility matters for them."}`,
+              sweetener_hint: "Two-for-one target offers work best when both pieces solve something for them.",
+            });
+            if (added) targetedGenerated += 1;
+          }
+        }
       }
     }
   }
@@ -1740,7 +1897,7 @@ export async function generateTradeFinderPackages(
         outgoing.position !== "QB" &&
         (isAgingOrFragilePlayer(outgoing) || user.needs.length > 0);
       const anchor = tierDownAnchorFor(outgoing, oppPlayers, allowCrossPosition);
-      const pick = oppPicks.find((candidate) => candidate.edge_score >= 28);
+      const pick = tierDownPickFor(oppPicks);
       if (!anchor || !pick) continue;
       const samePositionAnchor = anchor.position === outgoing.position;
       const added = await addStrategicPackage({
@@ -1994,7 +2151,7 @@ export async function generateTradeFinderPackages(
       const anchor = opp.surplus[oppPos].find((asset) =>
         isTierDownAnchor(outgoing, asset)
       );
-      const pick = opp.tradeablePicks.find((candidate) => candidate.edge_score >= 18);
+      const pick = tierDownPickFor(opp.tradeablePicks);
       if (!anchor || !pick) continue;
       if (!user.needs.includes(oppPos as Pos) && !isAgingOrFragilePlayer(outgoing)) {
         continue;
@@ -2206,6 +2363,8 @@ export async function generateTradeFinderPackages(
     }
   }
 
+  await Promise.all(pendingStrategicPackages);
+
   const context: TradeFinderQualityContext = {
     userNeeds: user.needs,
     opponentNeeds: opp.needs,
@@ -2213,19 +2372,40 @@ export async function generateTradeFinderPackages(
     opponentArchetype: opp.roster.archetype,
     mode,
   };
-  const qualified = packages
+  const controlled = packages
     .map((pkg) => annotateTradeFinderPackage(pkg, context))
-    .filter((pkg) => packagePassesTradeFinderControls(pkg, user, options))
+    .filter((pkg) => packagePassesTradeFinderControls(pkg, user, options));
+  const qualified = controlled
     .filter((pkg) => shouldSurfaceWithOptionalTargetFallback(pkg, Boolean(options.targetPlayerId)));
+  const fallbackQualified =
+    qualified.length === 0 && !options.targetPlayerId && !options.strategyFocus
+      ? controlled.filter(shouldSurfacePartnerStartingPoint)
+      : [];
 
   return dedupeAndRankTradeFinderPackages(
-    qualified,
+    qualified.length > 0 ? qualified : fallbackQualified,
     maxPackagesPerPartner,
-    Boolean(options.targetPlayerId)
+    Boolean(options.targetPlayerId),
+    qualified.length === 0 && fallbackQualified.length > 0
   );
 }
 
 // Main
+
+export async function prewarmTradeFinderLeague(
+  username: string,
+  leagueId: string,
+  weights?: SourceWeights
+): Promise<void> {
+  await Promise.all([
+    getPowerRankings(username, "dynasty", weights, undefined, {
+      leagueIds: [leagueId],
+      forceDbOnly: true,
+      skipLeaguePoints: true,
+    }),
+    prewarmSleeperProjectionWeeks(),
+  ]);
+}
 
 export async function getTradePartnerTargets(
   username: string,
@@ -2236,10 +2416,16 @@ export async function getTradePartnerTargets(
   const allLeagues = await getPowerRankings(username, "dynasty", weights, undefined, {
     leagueIds: [leagueId],
     forceDbOnly: true,
+    skipLeaguePoints: true,
   });
   const league = allLeagues.find((l) => l.league_id === leagueId);
   const roster = league?.rosters.find((r) => r.roster_id === opponentRosterId);
   if (!league || !roster || roster.is_user) return [];
+
+  void prewarmSleeperProjectionWeeks().catch((error: unknown) => {
+    const detail = error instanceof Error ? error.message : String(error);
+    console.warn(`[trade-finder] Projection prewarm failed for league ${leagueId}: ${detail}`);
+  });
 
   return roster.core_assets
     .filter((asset) => POSITIONS.includes(asset.position as Pos) && asset.edge_score >= MIN_EDGE_SCORE)
@@ -2279,6 +2465,23 @@ export async function findTrades(
 
   const work = findTradesUncached(username, leagueId, classStrengths, weights, options)
     .then((data) => {
+      if (
+        data.length === 0 &&
+        options.opponentRosterId == null &&
+        !options.targetPlayerId &&
+        options.searchDepth !== "deep"
+      ) {
+        return findTradesUncached(username, leagueId, classStrengths, weights, {
+          ...options,
+          searchDepth: "deep",
+          maxOpponents: Math.max(options.maxOpponents ?? 0, 5),
+          maxEvaluationsPerOpponent: Math.max(options.maxEvaluationsPerOpponent ?? 0, 14),
+          maxPackagesPerPartner: Math.max(options.maxPackagesPerPartner ?? 0, 5),
+        });
+      }
+      return data;
+    })
+    .then((data) => {
       setCachedTradeFinderResult(cacheKey, data, options.resultTtlMs);
       return data;
     })
@@ -2307,6 +2510,10 @@ function tradeBoardPackageScore(pkg: TradePackage): number {
   );
 }
 
+export function isTradeBoardCandidatePackage(pkg: TradePackage): boolean {
+  return isRealisticTradeFinderPackage(pkg);
+}
+
 function bestTradeBoardLine(
   leagueId: string,
   leagueName: string,
@@ -2315,7 +2522,7 @@ function bestTradeBoardLine(
   let best: TradeBoardLine | null = null;
   let bestScore = -Infinity;
   for (const suggestion of suggestions) {
-    for (const pkg of suggestion.packages) {
+    for (const pkg of suggestion.packages.filter(isTradeBoardCandidatePackage)) {
       const score = tradeBoardPackageScore(pkg);
       if (score > bestScore) {
         bestScore = score;
@@ -2337,7 +2544,7 @@ export async function findTradeBoardLines(
   classStrengths?: ClassStrengthMap,
   weights?: SourceWeights
 ): Promise<TradeBoardLine[]> {
-  const uniqueLeagueIds = [...new Set(leagueIds.filter(Boolean))].slice(0, 4);
+  const uniqueLeagueIds = [...new Set(leagueIds.filter(Boolean))].slice(0, TRADE_FINDER_BOARD_MAX_LEAGUES);
   if (uniqueLeagueIds.length === 0) return [];
 
   const cacheKey = tradeBoardResultCacheKey(username, uniqueLeagueIds, classStrengths, weights);
@@ -2352,12 +2559,13 @@ export async function findTradeBoardLines(
     const leagues = await getPowerRankings(username, "dynasty", weights, undefined, {
       leagueIds: uniqueLeagueIds,
       forceDbOnly: true,
+      skipLeaguePoints: true,
     });
     const boardOptions: TradeFinderRuntimeOptions = {
         cacheNamespace: "board",
         maxOpponents: 1,
-        maxEvaluationsPerOpponent: 8,
-        maxPackagesPerPartner: 2,
+        maxEvaluationsPerOpponent: 6,
+        maxPackagesPerPartner: 1,
         resultTtlMs: TRADE_FINDER_BOARD_RESULT_TTL_MS,
     };
     const lines = await Promise.all(
@@ -2392,6 +2600,30 @@ export async function findTradeBoardLines(
   return work;
 }
 
+export function getTradeBoardCacheSnapshot(
+  username: string,
+  leagueIds: string[],
+  classStrengths?: ClassStrengthMap,
+  weights?: SourceWeights,
+  allowStale = true
+): { data: TradeBoardLine[]; stale: boolean; generatedAt: number } | null {
+  const uniqueLeagueIds = [...new Set(leagueIds.filter(Boolean))].slice(0, TRADE_FINDER_BOARD_MAX_LEAGUES);
+  if (uniqueLeagueIds.length === 0) return null;
+  return getTradeBoardCacheEntry(
+    tradeBoardResultCacheKey(username, uniqueLeagueIds, classStrengths, weights),
+    allowStale
+  );
+}
+
+export function precomputeTradeBoardLines(
+  username: string,
+  leagueIds: string[],
+  classStrengths?: ClassStrengthMap,
+  weights?: SourceWeights
+): Promise<TradeBoardLine[]> {
+  return findTradeBoardLines(username, leagueIds, classStrengths, weights);
+}
+
 async function buildTradeSuggestionsForLeague(
   league: LeaguePowerRanking,
   classStrengths?: ClassStrengthMap,
@@ -2416,19 +2648,21 @@ async function buildTradeSuggestionsForLeague(
 
   const mode = league.mode;
   const medians = computeLeagueMedians(league.rosters);
-  const enrichedPickMap = new Map<number, EnrichedPick[]>();
-  for (const roster of league.rosters) {
-    const picks = await Promise.all(
-      (roster.draft_picks ?? []).map((pick) =>
-        enrichScoredPick(pick, {
-          leagueSize: league.rosters.length,
-          format: league.mode,
-          classStrengths,
-        })
-      )
-    );
-    enrichedPickMap.set(roster.roster_id, picks);
-  }
+  const enrichedPickEntries = await Promise.all(
+    league.rosters.map(async (roster) => {
+      const picks = await Promise.all(
+        (roster.draft_picks ?? []).map((pick) =>
+          enrichScoredPick(pick, {
+            leagueSize: league.rosters.length,
+            format: league.mode,
+            classStrengths,
+          })
+        )
+      );
+      return [roster.roster_id, picks] as const;
+    })
+  );
+  const enrichedPickMap = new Map<number, EnrichedPick[]>(enrichedPickEntries);
 
   const profiles = league.rosters.map((r) =>
     buildProfile(r, medians, enrichedPickMap.get(r.roster_id) ?? [])
@@ -2514,7 +2748,7 @@ async function buildTradeSuggestionsForLeague(
         opp.behavior?.preferred_structure ?? "",
       ].filter(Boolean),
     };
-    const evaluatedPackages = applyAcceptanceAndBehavior(basePackages, userProfile, opp)
+    const controlledPackages = applyAcceptanceAndBehavior(basePackages, userProfile, opp)
       .map((pkg) => ({
         ...pkg,
         acceptance_reason:
@@ -2533,11 +2767,18 @@ async function buildTradeSuggestionsForLeague(
       }))
       .filter((pkg) => !pkg.healthCheck.some((warning) => warning.type === "block"))
       .map((pkg) => annotateTradeFinderPackage(pkg, qualityContext))
+      .filter((pkg) => packagePassesTradeFinderControls(pkg, userProfile, options));
+    const evaluatedPackages = controlledPackages
       .filter((pkg) => shouldSurfaceWithOptionalTargetFallback(pkg, Boolean(options.targetPlayerId)));
+    const fallbackPackages =
+      evaluatedPackages.length === 0 && !options.targetPlayerId && !options.strategyFocus
+        ? controlledPackages.filter(shouldSurfacePartnerStartingPoint)
+        : [];
     const packages = dedupeAndRankTradeFinderPackages(
-      evaluatedPackages,
+      evaluatedPackages.length > 0 ? evaluatedPackages : fallbackPackages,
       options.maxPackagesPerPartner ?? TRADE_FINDER_MAX_PACKAGES_PER_PARTNER,
-      Boolean(options.targetPlayerId)
+      Boolean(options.targetPlayerId),
+      evaluatedPackages.length === 0 && fallbackPackages.length > 0
     );
     if (packages.length === 0) return null;
 
@@ -2570,6 +2811,7 @@ async function findTradesUncached(
   const allLeagues = await getPowerRankings(username, "dynasty", weights, undefined, {
     leagueIds: [leagueId],
     forceDbOnly: true,
+    skipLeaguePoints: true,
   });
   const league = allLeagues.find((l) => l.league_id === leagueId);
   if (!league || league.rosters.length < 2) return [];
@@ -2589,19 +2831,21 @@ async function findTradesUncached(
 
   const mode = league.mode;
   const medians = computeLeagueMedians(league.rosters);
-  const enrichedPickMap = new Map<number, EnrichedPick[]>();
-  for (const roster of league.rosters) {
-    const picks = await Promise.all(
-      (roster.draft_picks ?? []).map((pick) =>
-        enrichScoredPick(pick, {
-          leagueSize: league.rosters.length,
-          format: league.mode,
-          classStrengths,
-        })
-      )
-    );
-    enrichedPickMap.set(roster.roster_id, picks);
-  }
+  const enrichedPickEntries = await Promise.all(
+    league.rosters.map(async (roster) => {
+      const picks = await Promise.all(
+        (roster.draft_picks ?? []).map((pick) =>
+          enrichScoredPick(pick, {
+            leagueSize: league.rosters.length,
+            format: league.mode,
+            classStrengths,
+          })
+        )
+      );
+      return [roster.roster_id, picks] as const;
+    })
+  );
+  const enrichedPickMap = new Map<number, EnrichedPick[]>(enrichedPickEntries);
 
   const profiles = league.rosters.map((r) =>
     buildProfile(r, medians, enrichedPickMap.get(r.roster_id) ?? [])
@@ -2687,7 +2931,7 @@ async function findTradesUncached(
         opp.behavior?.preferred_structure ?? "",
       ].filter(Boolean),
     };
-    const evaluatedPackages = applyAcceptanceAndBehavior(basePackages, userProfile, opp)
+    const controlledPackages = applyAcceptanceAndBehavior(basePackages, userProfile, opp)
       .map((pkg) => ({
         ...pkg,
         acceptance_reason:
@@ -2706,11 +2950,18 @@ async function findTradesUncached(
       }))
       .filter((pkg) => !pkg.healthCheck.some((warning) => warning.type === "block"))
       .map((pkg) => annotateTradeFinderPackage(pkg, qualityContext))
+      .filter((pkg) => packagePassesTradeFinderControls(pkg, userProfile, options));
+    const evaluatedPackages = controlledPackages
       .filter((pkg) => shouldSurfaceWithOptionalTargetFallback(pkg, Boolean(options.targetPlayerId)));
+    const fallbackPackages =
+      evaluatedPackages.length === 0 && !options.targetPlayerId && !options.strategyFocus
+        ? controlledPackages.filter(shouldSurfacePartnerStartingPoint)
+        : [];
     const packages = dedupeAndRankTradeFinderPackages(
-      evaluatedPackages,
+      evaluatedPackages.length > 0 ? evaluatedPackages : fallbackPackages,
       options.maxPackagesPerPartner ?? TRADE_FINDER_MAX_PACKAGES_PER_PARTNER,
-      Boolean(options.targetPlayerId)
+      Boolean(options.targetPlayerId),
+      evaluatedPackages.length === 0 && fallbackPackages.length > 0
     );
     if (packages.length === 0) return null;
 

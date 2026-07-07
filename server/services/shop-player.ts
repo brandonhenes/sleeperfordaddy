@@ -1,4 +1,6 @@
 import { getPowerRankings } from "./power-rankings.js";
+import { db } from "../db/connection.js";
+import { sql } from "drizzle-orm";
 import type {
   CoreAsset,
   ShopPlayerResult,
@@ -15,6 +17,7 @@ import { loadTradeHealthPlayerInfo, tradeHealthCheck } from "./trade-calculator.
 import { enrichScoredPick, type ClassStrengthMap } from "./pick-values.js";
 import { sourceWeightsKey, type SourceWeights } from "./edge-score.js";
 import type { ValueType } from "./composite-values.js";
+import { getLeagueIdsForUserLatestSeason } from "./dynasty-leagues.js";
 import {
   evaluateOpportunityPackage,
   opportunityValuationFields,
@@ -39,6 +42,14 @@ const SHOP_MAX_EVALUATIONS_PER_OPPONENT = 4;
 const SHOP_MAX_CANDIDATES_PER_OPPONENT = 24;
 const SHOP_MAX_OPPONENTS_PER_LEAGUE = 8;
 const SHOP_EVALUATION_CONCURRENCY = 4;
+const SHOP_RESULT_CACHE_TTL_MS = 10 * 60_000;
+const SHOP_RESULT_CACHE_MAX_ENTRIES = 64;
+const SHOP_QUICK_MAX_EVALUATIONS = 6;
+const SHOP_QUICK_MAX_EVALUATIONS_PER_LEAGUE = 3;
+const SHOP_QUICK_MAX_EVALUATIONS_PER_OPPONENT = 3;
+const SHOP_QUICK_MAX_OPPONENTS_PER_LEAGUE = 1;
+const SHOP_QUICK_MAX_LEAGUES_WITH_PLAYER = 2;
+const SHOP_QUICK_TIMEOUT_MS = 3_000;
 
 const ARCHETYPE_BUY_MOTIVATION: Record<string, { wants_vets: number; wants_youth: number; wants_picks: number }> = {
   "Dynasty Juggernaut": { wants_vets: 30, wants_youth: 60, wants_picks: 20 },
@@ -57,6 +68,114 @@ export type EnrichedPick = ScoredPick & {
 type EvaluateOpportunityPackageFn = (
   input: OpportunityPackageValuationInput
 ) => Promise<OpportunityPackageValuation>;
+
+export interface ShopPlayerOptions {
+  cacheNamespace?: string;
+  maxEvaluations?: number;
+  perLeagueCap?: number;
+  maxEvaluationsPerOpponent?: number;
+  maxOpponentsPerLeague?: number;
+  maxLeaguesWithPlayer?: number;
+  timeoutMs?: number;
+  resultTtlMs?: number;
+}
+
+export const SHOP_QUICK_PLAYER_OPTIONS: ShopPlayerOptions = {
+  cacheNamespace: "quick",
+  maxEvaluations: SHOP_QUICK_MAX_EVALUATIONS,
+  perLeagueCap: SHOP_QUICK_MAX_EVALUATIONS_PER_LEAGUE,
+  maxEvaluationsPerOpponent: SHOP_QUICK_MAX_EVALUATIONS_PER_OPPONENT,
+  maxOpponentsPerLeague: SHOP_QUICK_MAX_OPPONENTS_PER_LEAGUE,
+  maxLeaguesWithPlayer: SHOP_QUICK_MAX_LEAGUES_WITH_PLAYER,
+  timeoutMs: SHOP_QUICK_TIMEOUT_MS,
+};
+
+type ShopResultCacheEntry = {
+  expiresAt: number;
+  promise: Promise<ShopPlayerResult | null>;
+};
+
+const shopResultCache = new Map<string, ShopResultCacheEntry>();
+
+function classStrengthsCacheKey(classStrengths?: ClassStrengthMap): string {
+  if (!classStrengths) return "default";
+  return Object.entries(classStrengths)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([season, strength]) => `${season}:${strength}`)
+    .join(",");
+}
+
+function shopResultCacheKey(
+  username: string,
+  playerId: string,
+  ambition: number,
+  classStrengths?: ClassStrengthMap,
+  valueType: ValueType = "dynasty",
+  weights?: SourceWeights,
+  options: ShopPlayerOptions = {}
+): string {
+  return [
+    username.trim().toLowerCase(),
+    playerId,
+    ambition,
+    options.cacheNamespace ?? "full",
+    options.maxEvaluations ?? SHOP_MAX_EVALUATIONS_PER_REQUEST,
+    options.perLeagueCap ?? SHOP_MAX_EVALUATIONS_PER_LEAGUE,
+    options.maxEvaluationsPerOpponent ?? SHOP_MAX_EVALUATIONS_PER_OPPONENT,
+    options.maxOpponentsPerLeague ?? SHOP_MAX_OPPONENTS_PER_LEAGUE,
+    options.maxLeaguesWithPlayer ?? "all-leagues",
+    options.timeoutMs ?? SHOP_REQUEST_TIMEOUT_MS,
+    valueType,
+    sourceWeightsKey(weights),
+    classStrengthsCacheKey(classStrengths),
+  ].join("|");
+}
+
+function pruneShopResultCache(now = Date.now()): void {
+  for (const [key, entry] of shopResultCache) {
+    if (entry.expiresAt <= now) {
+      shopResultCache.delete(key);
+    }
+  }
+  while (shopResultCache.size > SHOP_RESULT_CACHE_MAX_ENTRIES) {
+    const oldestKey = shopResultCache.keys().next().value;
+    if (!oldestKey) break;
+    shopResultCache.delete(oldestKey);
+  }
+}
+
+export function clearShopPlayerResultCacheForTests(): void {
+  shopResultCache.clear();
+}
+
+async function loadLeagueIdsWhereUserRostersPlayer(
+  username: string,
+  playerId: string,
+  valueType: ValueType = "dynasty"
+): Promise<string[]> {
+  const userRows = await db.execute(sql`
+    SELECT user_id FROM users WHERE LOWER(username) = LOWER(${username}) LIMIT 1
+  `);
+  const userId = (userRows as unknown as { user_id: string }[])[0]?.user_id;
+  if (!userId) return [];
+
+  const currentLeagueIds = await getLeagueIdsForUserLatestSeason(
+    userId,
+    valueType === "redraft" ? "redraft" : "dynasty"
+  );
+  const currentLeagueSet = new Set(currentLeagueIds);
+  if (currentLeagueSet.size === 0) return [];
+
+  const rows = await db.execute(sql`
+    SELECT DISTINCT rp.league_id
+    FROM roster_players rp
+    WHERE rp.owner_id = ${userId}
+      AND rp.player_id = ${playerId}
+  `);
+  return (rows as unknown as { league_id: string }[])
+    .map((row) => row.league_id)
+    .filter((leagueId) => currentLeagueSet.has(leagueId));
+}
 
 export function shopPlayerAssetToTradePackageAsset(a: CoreAsset): TradePackageAsset {
   return {
@@ -814,10 +933,49 @@ export async function shopPlayer(
   ambition = 2,
   classStrengths?: ClassStrengthMap,
   valueType: ValueType = "dynasty",
-  weights?: SourceWeights
+  weights?: SourceWeights,
+  options: ShopPlayerOptions = {}
 ): Promise<ShopPlayerResult | null> {
+  const clampedAmbition = Math.max(1, Math.min(3, ambition));
+  const now = Date.now();
+  pruneShopResultCache(now);
+  const cacheKey = shopResultCacheKey(username, playerId, clampedAmbition, classStrengths, valueType, weights, options);
+  const cached = shopResultCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) {
+    return cached.promise;
+  }
+
+  const promise = shopPlayerUncached(username, playerId, clampedAmbition, classStrengths, valueType, weights, options)
+    .catch((error) => {
+      shopResultCache.delete(cacheKey);
+      throw error;
+    });
+  shopResultCache.set(cacheKey, {
+    expiresAt: now + (options.resultTtlMs ?? SHOP_RESULT_CACHE_TTL_MS),
+    promise,
+  });
+  return promise;
+}
+
+async function shopPlayerUncached(
+  username: string,
+  playerId: string,
+  ambition: number,
+  classStrengths?: ClassStrengthMap,
+  valueType: ValueType = "dynasty",
+  weights?: SourceWeights,
+  options: ShopPlayerOptions = {}
+): Promise<ShopPlayerResult | null> {
+  const ownedLeagueIds = await loadLeagueIdsWhereUserRostersPlayer(username, playerId, valueType);
+  if (ownedLeagueIds.length === 0) return null;
+  const rankingLeagueIds = options.maxLeaguesWithPlayer != null
+    ? ownedLeagueIds.slice(0, Math.max(1, options.maxLeaguesWithPlayer))
+    : ownedLeagueIds;
+
   const allLeagues = await getPowerRankings(username, valueType, weights, undefined, {
+    leagueIds: rankingLeagueIds,
     forceDbOnly: true,
+    skipLeaguePoints: true,
   });
   if (allLeagues.length === 0) return null;
 
@@ -837,34 +995,35 @@ export async function shopPlayer(
 
   if (leaguesWithPlayer.length === 0) return null;
 
-  const clampedAmbition = Math.max(1, Math.min(3, ambition));
   const firstAsset = leaguesWithPlayer[0].playerAsset;
   const allOpportunities: ShopOpportunity[] = [];
-  const evaluationBudget = createShopEvaluationBudget();
+  const evaluationBudget = createShopEvaluationBudget({
+    maxEvaluations: options.maxEvaluations,
+    perLeagueCap: options.perLeagueCap,
+    timeoutMs: options.timeoutMs,
+  });
   const valuationCache = new Map<string, Promise<ShopPackageScore>>();
   const evaluationStats = {
     leagues_scanned: allLeagues.length,
-    leagues_with_player: leaguesWithPlayer.length,
+    leagues_with_player: ownedLeagueIds.length,
     leagues_completed: 0,
     opponents_considered: 0,
     opponents_evaluated: 0,
     candidates_generated: 0,
   };
-  const healthScoreMap = new Map<string, number>();
-  for (const { league } of leaguesWithPlayer) {
-    for (const roster of league.rosters) {
-      for (const asset of roster.core_assets) {
-        healthScoreMap.set(asset.player_id, asset.edge_score);
-      }
-    }
-  }
-  const tradeHealthData = await loadTradeHealthPlayerInfo(
-    [...healthScoreMap.keys()],
-    healthScoreMap
-  );
   const pickMap = new Map<string, EnrichedPick[]>();
 
-  for (const { league, userRoster, playerAsset } of leaguesWithPlayer) {
+  const leaguesToScan = leaguesWithPlayer;
+  if (leaguesWithPlayer.length < ownedLeagueIds.length) {
+    markShopPartial(
+      evaluationBudget,
+      `Shop a Player scanned the fastest ${leaguesWithPlayer.length} of ${ownedLeagueIds.length} leagues. Load the full board to scan every league.`
+    );
+  }
+  const maxOpponentsPerLeague = options.maxOpponentsPerLeague ?? SHOP_MAX_OPPONENTS_PER_LEAGUE;
+  const maxEvaluationsPerOpponent = options.maxEvaluationsPerOpponent ?? SHOP_MAX_EVALUATIONS_PER_OPPONENT;
+
+  for (const { league, userRoster, playerAsset } of leaguesToScan) {
     if (shopBudgetTimedOut(evaluationBudget)) break;
     if (shopRequestEvaluationCapReached(evaluationBudget)) break;
     const leagueMedians: Record<string, number> = {};
@@ -907,14 +1066,14 @@ export async function shopPlayer(
       .filter(({ motivation }) => motivation.score >= 20)
       .sort((a, b) => b.motivation.score - a.motivation.score);
     evaluationStats.opponents_considered += rankedOpponents.length;
-    if (rankedOpponents.length > SHOP_MAX_OPPONENTS_PER_LEAGUE) {
+    if (rankedOpponents.length > maxOpponentsPerLeague) {
       markShopPartial(
         evaluationBudget,
-        `Shop a Player evaluated the top ${SHOP_MAX_OPPONENTS_PER_LEAGUE} buyers in ${league.league_name}.`
+        `Shop a Player evaluated the top ${maxOpponentsPerLeague} buyers in ${league.league_name}.`
       );
     }
 
-    for (const { opp, motivation } of rankedOpponents.slice(0, SHOP_MAX_OPPONENTS_PER_LEAGUE)) {
+    for (const { opp, motivation } of rankedOpponents.slice(0, maxOpponentsPerLeague)) {
       if (shopBudgetTimedOut(evaluationBudget)) break;
       if (shopRequestEvaluationCapReached(evaluationBudget)) break;
       if (shopLeagueEvaluationCapReached(evaluationBudget, league.league_id)) break;
@@ -929,7 +1088,7 @@ export async function shopPlayer(
         opp,
         playerAsset,
         leagueMedians,
-        ambition: clampedAmbition,
+        ambition,
         userPicks: await getLeaguePicks(userRoster),
         oppPicks: await getLeaguePicks(opp),
         classStrengths,
@@ -943,9 +1102,21 @@ export async function shopPlayer(
       const packages = await evaluateShopPackageCandidates(
         ctx,
         candidates,
-        SHOP_MAX_EVALUATIONS_PER_OPPONENT
+        maxEvaluationsPerOpponent
       );
       evaluationStats.opponents_evaluated += 1;
+      const packageHealthScores = new Map<string, number>();
+      for (const pkg of packages) {
+        for (const asset of [...pkg.you_send, ...pkg.you_receive]) {
+          if (asset.asset_type === "player" && asset.player_id) {
+            packageHealthScores.set(asset.player_id, asset.edge_score);
+          }
+        }
+      }
+      const tradeHealthData = await loadTradeHealthPlayerInfo(
+        [...packageHealthScores.keys()],
+        packageHealthScores
+      );
 
       for (const pkg of packages) {
         const acceptance = estimateAcceptance({
@@ -1100,7 +1271,7 @@ export async function shopPlayer(
     player_name: firstAsset.full_name,
     position: firstAsset.position,
     edge_score: firstAsset.edge_score,
-    leagues_owned: leaguesWithPlayer.length,
+    leagues_owned: ownedLeagueIds.length,
     partial_results: evaluationBudget.partialResults,
     warnings: [...evaluationBudget.warnings],
     evaluation_stats: {

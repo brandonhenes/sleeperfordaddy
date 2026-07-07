@@ -1,68 +1,109 @@
 import { describe, expect, it } from "vitest";
 import {
-  isExcessiveRecommendationOverpay,
-  recommendationAcceptanceProbability,
-  recommendationPercentGapFraction,
+  isUnrealisticEliteAcquisition,
+  lacksAnchorWhenSellingElite,
   recommendationRejectReason,
 } from "../trade-recommendation-quality.js";
 
-describe("trade recommendation quality guard", () => {
-  it("normalizes percent gaps from fraction or percent form", () => {
-    expect(recommendationPercentGapFraction(0.31)).toBe(0.31);
-    expect(recommendationPercentGapFraction(31)).toBe(0.31);
-  });
+function player(label: string, edge: number, contextValue = edge * 100) {
+  return {
+    asset_type: "player",
+    label,
+    position: "QB",
+    edge_score: edge,
+    context_trade_value: contextValue,
+  };
+}
 
-  it("rejects excessive user overpays across recommendation surfaces", () => {
+function pick(label: string, round: number, edge: number, slot?: number, tier?: string) {
+  return {
+    asset_type: "pick",
+    label,
+    edge_score: edge,
+    pick_round: round,
+    pick_slot: slot ?? null,
+    pick_tier: tier ?? null,
+  };
+}
+
+describe("trade recommendation quality", () => {
+  it("rejects selling an elite asset for late-pick junk without an anchor", () => {
     const input = {
-      valueEdgeForUser: -5_956,
-      percentGap: 0.58,
-      fairness: "lopsided" as const,
+      valueEdgeForUser: 0,
+      sendAssets: [player("Drake Maye", 98, 11_300)],
+      receiveAssets: [
+        pick("2027 Mid 4th", 4, 52),
+        pick("2028 Mid 4th", 4, 44),
+      ],
     };
 
-    expect(isExcessiveRecommendationOverpay(input)).toBe(true);
-    expect(recommendationRejectReason(input)).toContain("excessive overpay");
+    expect(lacksAnchorWhenSellingElite(input)).toBe(true);
+    expect(recommendationRejectReason(input)).toContain("elite asset");
   });
 
-  it("caps acceptance when the only positive signal is user overpay", () => {
-    const probability = recommendationAcceptanceProbability({
-      valueEdgeForUser: -1_000,
-      percentGap: 0.12,
-      fairness: "slight_edge",
+  it("allows elite tier-down packages when a real player anchor comes back", () => {
+    const input = {
+      valueEdgeForUser: 0,
+      sendAssets: [player("Elite QB", 98, 11_300)],
+      receiveAssets: [
+        player("Lesser QB Anchor", 82, 6_400),
+        pick("2027 Mid 1st", 1, 68),
+      ],
+    };
+
+    expect(lacksAnchorWhenSellingElite(input)).toBe(false);
+    expect(recommendationRejectReason(input)).toBeNull();
+  });
+
+  it("allows elite sales where the return anchor is a premium first", () => {
+    const input = {
+      valueEdgeForUser: 0,
+      sendAssets: [player("Elite WR", 92, 9_500)],
+      receiveAssets: [
+        pick("2026 1.03", 1, 73, 3, "early"),
+        player("Depth WR", 62, 2_800),
+      ],
+    };
+
+    expect(lacksAnchorWhenSellingElite(input)).toBe(false);
+    expect(recommendationRejectReason(input)).toBeNull();
+  });
+
+  it("rejects unrealistic elite acquisitions when the value edge is massive and acceptance is hard", () => {
+    const input = {
+      valueEdgeForUser: 14_367,
       acceptance: {
-        probability: 90,
-        accept_reasons: ["Massive overpay in their favor. They'll take this immediately."],
+        probability: 5,
+        accept_reasons: [],
+        reject_reasons: ["Targeting their top starter. Hard to pry loose."],
+      },
+      sendAssets: [
+        player("Courtland Sutton", 76, 3_500),
+        pick("2027 Late 1st", 1, 84, undefined, "late"),
+      ],
+      receiveAssets: [player("Josh Allen", 99, 24_000)],
+    };
+
+    expect(isUnrealisticEliteAcquisition(input)).toBe(true);
+    expect(recommendationRejectReason(input)).toContain("unrealistic elite acquisition");
+  });
+
+  it("does not reject elite acquisitions when acceptance is realistically strong", () => {
+    const input = {
+      valueEdgeForUser: 2_800,
+      acceptance: {
+        probability: 42,
+        accept_reasons: ["They are rebuilding and get a premium return."],
         reject_reasons: [],
       },
-    });
-
-    expect(probability).toBe(28);
-  });
-
-  it("protects young core warnings unless return is overwhelming", () => {
-    expect(recommendationRejectReason({
-      valueEdgeForUser: 0,
-      percentGap: 0,
-      fairness: "fair",
-      healthWarnings: [
-        {
-          type: "warning",
-          rule: "young_core_protection",
-          message: "Young core warning.",
-        },
+      sendAssets: [
+        player("Young QB", 90, 9_500),
+        pick("2027 Early 1st", 1, 76, 3, "early"),
       ],
-    })).toContain("protected young core");
+      receiveAssets: [player("Elite QB", 96, 12_000)],
+    };
 
-    expect(recommendationRejectReason({
-      valueEdgeForUser: 1_800,
-      percentGap: 0.18,
-      fairness: "slight_edge",
-      healthWarnings: [
-        {
-          type: "warning",
-          rule: "young_core_protection",
-          message: "Young core warning.",
-        },
-      ],
-    })).toBeNull();
+    expect(isUnrealisticEliteAcquisition(input)).toBe(false);
+    expect(recommendationRejectReason(input)).toBeNull();
   });
 });

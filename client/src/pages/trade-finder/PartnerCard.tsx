@@ -9,6 +9,7 @@ import {
   warningColors,
 } from "../../lib/format";
 import { buildTradeCalculatorUrl } from "../../lib/trade-calculator-url";
+import { buildTradeFinderUrl } from "../../lib/trade-finder-url";
 import type {
   TradeHealthWarning,
   TradeFinderConstraint,
@@ -331,6 +332,8 @@ const constraintLabels: Array<{ value: TradeFinderConstraint; label: string }> =
   { value: "more_picks_back", label: "More picks back" },
   { value: "only_qb_tier_down", label: "QB tier-down" },
   { value: "no_qbs", label: "No QB trades" },
+  { value: "no_picks", label: "No picks" },
+  { value: "same_position_return", label: "Same-position return" },
   { value: "no_aging_rbs", label: "No aging RBs" },
   { value: "win_now_only", label: "Win-now only" },
   { value: "more_realistic", label: "More realistic" },
@@ -345,6 +348,7 @@ const strategyLabels: Array<{ value: TradeStrategyType; label: string }> = [
   { value: "position_arbitrage", label: "Position edge" },
   { value: "roster_spot_arbitrage", label: "Roster spots" },
   { value: "liquidity_upgrade", label: "Liquidity" },
+  { value: "market_value", label: "Pure value" },
 ];
 
 function assetShort(asset: TradePackageAsset): string {
@@ -415,6 +419,70 @@ function laneConfidence(pkg: TradePackage): string {
   return "Thin";
 }
 
+type TradeDecision = "pursue" | "tweak" | "ignore";
+
+function tradeDecision(pkg: TradePackage): {
+  decision: TradeDecision;
+  label: string;
+  reason: string;
+  nextAction: string;
+  color: string;
+} {
+  const acceptance = pkg.acceptance?.probability ?? 0;
+  const valueEdge = pkg.valuation_edge ?? pkg.delta;
+  const hasBlock = pkg.healthCheck.some((warning) => warning.type === "block");
+  const usefulShape = Boolean(pkg.has_anchor_asset || pkg.addresses_my_need || pkg.addresses_their_need || pkg.strategy_fit === "strong");
+
+  if (hasBlock || pkg.package_quality_label === "poor" || (pkg.quality_tier === "low_confidence" && !usefulShape)) {
+    return {
+      decision: "ignore",
+      label: "Ignore",
+      reason: hasBlock ? "A hard quality rule is blocking this lane." : "The package shape is too thin to pursue.",
+      nextAction: "Use Not this player or Find more like this.",
+      color: "var(--text-muted)",
+    };
+  }
+
+  if (pkg.fairness === "lopsided" && valueEdge < -1_500) {
+    return {
+      decision: "ignore",
+      label: "Ignore",
+      reason: "You are paying too much for this shape.",
+      nextAction: "Make it cheaper before using calculator time.",
+      color: "var(--red)",
+    };
+  }
+
+  if (pkg.quality_tier === "strong" && acceptance >= 35 && valueEdge >= -1_000) {
+    return {
+      decision: "pursue",
+      label: "Pursue",
+      reason: "The value, shape, and acceptance signals are aligned enough to work.",
+      nextAction: "Open it in Calculator and tune the last asset.",
+      color: "var(--green)",
+    };
+  }
+
+  return {
+    decision: "tweak",
+    label: "Tweak",
+    reason: acceptance < 25 ? "The idea is useful, but acceptance is weak." : "The lane is close, but the price or shape needs work.",
+    nextAction: acceptance < 25 ? "Add value or switch the target." : "Try Cheaper, No picks, or Same-position return.",
+    color: "var(--amber)",
+  };
+}
+
+export function shouldShowAsDefaultTradeLane(pkg: TradePackage): boolean {
+  return tradeDecision(pkg).decision !== "ignore";
+}
+
+function addUniqueConstraint(
+  setter: Dispatch<SetStateAction<TradeFinderConstraint[]>>,
+  constraint: TradeFinderConstraint
+) {
+  setter((current) => current.includes(constraint) ? current : [...current, constraint]);
+}
+
 function LaneAssetBox({
   label,
   assets,
@@ -439,6 +507,44 @@ function LaneAssetBox({
   );
 }
 
+function FeedbackAction({
+  label,
+  onClick,
+  href,
+  disabled,
+  primary = false,
+}: {
+  label: string;
+  onClick?: () => void;
+  href?: string;
+  disabled?: boolean;
+  primary?: boolean;
+}) {
+  const style = {
+    border: primary ? "1px solid rgba(59,130,246,0.65)" : "1px solid var(--border)",
+    background: primary ? "rgba(59,130,246,0.14)" : "var(--dark-base)",
+    color: disabled ? "var(--text-muted)" : primary ? "#93c5fd" : "var(--text-dim)",
+    borderRadius: 999,
+    padding: "8px 11px",
+    fontSize: 11,
+    fontWeight: 900,
+    textDecoration: "none",
+    cursor: disabled ? "not-allowed" : "pointer",
+    fontFamily: "inherit",
+    opacity: disabled ? 0.55 : 1,
+  } satisfies React.CSSProperties;
+
+  if (href && !disabled) {
+    return <a href={href} style={style}>{label}</a>;
+  }
+
+  return (
+    <button type="button" onClick={onClick} disabled={disabled} style={style}>
+      {label}
+    </button>
+  );
+}
+
 function SteeringPanel({
   steering,
   packages,
@@ -452,13 +558,14 @@ function SteeringPanel({
   const selectedTarget = steering.partnerTargets.find((target) => target.player_id === steering.targetPlayerId) ?? null;
   const visibleTargets = useMemo(() => {
     const needle = targetSearch.trim().toLowerCase();
+    if (!needle) return selectedTarget ? [selectedTarget] : [];
     const base = needle
       ? steering.partnerTargets.filter((target) =>
           `${target.full_name} ${target.position} ${target.tags.join(" ")}`.toLowerCase().includes(needle)
         )
-      : steering.partnerTargets;
+      : [];
     return base.slice(0, 8);
-  }, [steering.partnerTargets, targetSearch]);
+  }, [selectedTarget, steering.partnerTargets, targetSearch]);
 
   function toggleConstraint(value: TradeFinderConstraint) {
     steering.setLaneConstraints((current) =>
@@ -547,7 +654,22 @@ function SteeringPanel({
         )}
       </div>
 
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 8, alignItems: "end", marginTop: 10 }}>
+        <label style={{ display: "grid", gap: 5, minWidth: 0 }}>
+          <span style={{ color: "var(--text-muted)", fontSize: 10, fontWeight: 900, textTransform: "uppercase" }}>Goal</span>
+          <select
+            value={steering.strategyFocus ?? ""}
+            onChange={(event) => steering.setStrategyFocus((event.target.value || null) as TradeStrategyType | null)}
+            style={{ width: "100%", minHeight: 38, border: "1px solid var(--border)", background: "var(--dark-base)", color: "var(--text)", borderRadius: 9, padding: "8px 10px", fontSize: 12, fontWeight: 800, fontFamily: "inherit" }}
+          >
+            <option value="">Any trade shape</option>
+            {strategyLabels.map((strategy) => (
+              <option key={strategy.value} value={strategy.value}>
+                {strategy.label}
+              </option>
+            ))}
+          </select>
+        </label>
         <button
           type="button"
           onClick={() => steering.setSearchDepth((current) => current === "deep" ? "quick" : "deep")}
@@ -555,19 +677,6 @@ function SteeringPanel({
         >
           {steering.searchDepth === "deep" ? "Deep search on" : "Expand search"}
         </button>
-        {strategyLabels.map((strategy) => {
-          const active = steering.strategyFocus === strategy.value;
-          return (
-            <button
-              key={strategy.value}
-              type="button"
-              onClick={() => steering.setStrategyFocus((current) => current === strategy.value ? null : strategy.value)}
-              style={{ border: active ? "1px solid rgba(34,197,94,0.65)" : "1px solid var(--border)", background: active ? "rgba(34,197,94,0.13)" : "var(--dark-base)", color: active ? "var(--green)" : "var(--text-muted)", borderRadius: 999, padding: "7px 10px", fontSize: 11, fontWeight: 900, cursor: "pointer", fontFamily: "inherit" }}
-            >
-              {strategy.label}
-            </button>
-          );
-        })}
       </div>
 
       <select
@@ -608,20 +717,28 @@ function SteeringPanel({
         >
           Different targets
         </button>
-        {constraintLabels.map((constraint) => {
-          const active = steering.laneConstraints.includes(constraint.value);
-          return (
-            <button
-              key={constraint.value}
-              type="button"
-              onClick={() => toggleConstraint(constraint.value)}
-              style={{ border: active ? "1px solid rgba(59,130,246,0.65)" : "1px solid var(--border)", background: active ? "rgba(59,130,246,0.18)" : "var(--dark-base)", color: active ? "#93c5fd" : "var(--text-muted)", borderRadius: 999, padding: "7px 10px", fontSize: 11, fontWeight: 900, cursor: "pointer", fontFamily: "inherit" }}
-            >
-              {constraint.label}
-            </button>
-          );
-        })}
       </div>
+
+      <details style={{ marginTop: 10 }}>
+        <summary style={{ cursor: "pointer", color: "var(--text-muted)", fontSize: 11, fontWeight: 900, padding: "6px 0" }}>
+          More filters{steering.laneConstraints.length > 0 ? ` (${steering.laneConstraints.length})` : ""}
+        </summary>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
+          {constraintLabels.map((constraint) => {
+            const active = steering.laneConstraints.includes(constraint.value);
+            return (
+              <button
+                key={constraint.value}
+                type="button"
+                onClick={() => toggleConstraint(constraint.value)}
+                style={{ border: active ? "1px solid rgba(59,130,246,0.65)" : "1px solid var(--border)", background: active ? "rgba(59,130,246,0.18)" : "var(--dark-base)", color: active ? "#93c5fd" : "var(--text-muted)", borderRadius: 999, padding: "7px 10px", fontSize: 11, fontWeight: 900, cursor: "pointer", fontFamily: "inherit" }}
+              >
+                {constraint.label}
+              </button>
+            );
+          })}
+        </div>
+      </details>
     </div>
   );
 }
@@ -641,6 +758,9 @@ export default function PartnerCard({
   const [activePackage, setActivePackage] = useState(0);
   const { partner, packages } = suggestion;
   const pkg = packages[Math.min(activePackage, Math.max(0, packages.length - 1))];
+  const decision = pkg ? tradeDecision(pkg) : null;
+  const activeStrategy = normalizeStrategyFocus(pkg?.strategy_type);
+  const activeReceivePlayerIds = pkg ? receivePlayerIds(pkg) : [];
   const calculatorUrl = pkg
     ? buildTradeCalculatorUrl({
         username,
@@ -652,6 +772,38 @@ export default function PartnerCard({
         receiveLabels: pkg.you_receive.map((asset) => asset.label),
       })
     : "/trade-calculator";
+  const finderUrl = (state: {
+    strategyFocus?: TradeStrategyType | null;
+    avoidTargetPlayerIds?: string[];
+    constraints?: TradeFinderConstraint[];
+  }) => buildTradeFinderUrl(username, {
+    mode: "find",
+    leagueId,
+    opponentRosterId: partner.roster_id,
+    strategyFocus: state.strategyFocus ?? activeStrategy,
+    avoidTargetPlayerIds: state.avoidTargetPlayerIds,
+    constraints: state.constraints,
+    searchDepth: "deep",
+  });
+
+  function findMoreLikeThis() {
+    if (!steering) return;
+    if (activeStrategy) steering.setStrategyFocus(activeStrategy);
+    steering.setSearchDepth("deep");
+  }
+
+  function avoidCurrentReceivePlayers() {
+    if (!steering || activeReceivePlayerIds.length === 0) return;
+    steering.setTargetPlayerId(null);
+    steering.setAvoidTargetPlayerIds((current) => [...new Set([...current, ...activeReceivePlayerIds])]);
+    steering.setSearchDepth("deep");
+  }
+
+  function applyConstraint(constraint: TradeFinderConstraint) {
+    if (!steering) return;
+    addUniqueConstraint(steering.setLaneConstraints, constraint);
+    steering.setSearchDepth("deep");
+  }
 
   useEffect(() => {
     if (activePackage > packages.length - 1) setActivePackage(0);
@@ -662,12 +814,14 @@ export default function PartnerCard({
   }, [steering]);
 
   return (
-    <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 12, marginBottom: 12, overflow: "hidden" }}>
+    <div className="trade-partner-card" style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 12, marginBottom: 12, overflow: "hidden" }}>
       <button
         onClick={() => setOpen((v) => !v)}
+        className="trade-partner-summary"
         style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, padding: "14px 18px", background: "none", border: "none", color: "var(--text)", cursor: "pointer", fontFamily: "inherit", flexWrap: "wrap" }}
       >
         <div
+          className="trade-partner-score"
           style={{
             width: 40,
             height: 40,
@@ -716,57 +870,120 @@ export default function PartnerCard({
             {pkg.trade_type.replace(/-/g, " ")}
           </span>
         )}
-        <div style={{ fontSize: 12, color: "var(--text-muted)", maxWidth: 300, flex: "1 1 220px", textAlign: "right", lineHeight: 1.4 }}>{partner.compatibility_reason}</div>
+        <div className="trade-partner-reason" style={{ fontSize: 12, color: "var(--text-muted)", maxWidth: 300, flex: "1 1 220px", textAlign: "right", lineHeight: 1.4 }}>{partner.compatibility_reason}</div>
         <span style={{ color: "var(--text-muted)", marginLeft: 8, display: "inline-flex" }}>
           {open ? <ChevronUp size={16} aria-hidden /> : <ChevronDown size={16} aria-hidden />}
         </span>
       </button>
 
       {open && (
-        <div style={{ padding: "0 18px 18px" }}>
-          {steering && <SteeringPanel steering={steering} packages={packages} activePackage={pkg ?? null} />}
-
-          {packages.length > 1 && (
-            <div style={{ display: "grid", gap: 10, marginBottom: 14 }}>
-              {packages.map((p, i) => {
-                const active = activePackage === i;
-                const confidence = laneConfidence(p);
-                return (
-                  <button
-                    key={`package-lane-${i}-${p.type}`}
-                    onClick={() => setActivePackage(i)}
-                    style={{
-                      width: "100%",
-                      textAlign: "left",
-                      background: active ? "rgba(59,130,246,0.12)" : "var(--dark-base)",
-                      color: "var(--text)",
-                      border: active ? "1px solid rgba(59,130,246,0.65)" : "1px solid var(--border)",
-                      borderRadius: 10,
-                      padding: 12,
-                      cursor: "pointer",
-                      fontFamily: "inherit",
-                    }}
-                  >
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", marginBottom: 7 }}>
-                      <span style={{ fontSize: 13, fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis" }}>
-                        {laneTitle(p)}
-                      </span>
-                      <span style={{ border: "1px solid var(--border)", borderRadius: 999, padding: "3px 8px", color: confidence === "Likely" || confidence === "Strong" ? "var(--green)" : confidence === "Hard" || confidence === "Thin" ? "var(--text-muted)" : "var(--amber)", fontSize: 10, fontWeight: 900, whiteSpace: "nowrap", textTransform: "uppercase" }}>
-                        {confidence}
-                      </span>
-                    </div>
-                    <div style={{ display: "grid", gap: 3, color: "var(--text-muted)", fontSize: 12, lineHeight: 1.35 }}>
-                      <span>Send: {assetSummary(p.you_send, 2)}</span>
-                      <span>Get: {assetSummary(p.you_receive, 2)}</span>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-
+        <div className="trade-partner-body" style={{ padding: "0 18px 18px" }}>
           {pkg && (
             <div>
+              {decision && (
+                <div className="trade-lane-decision" style={{ border: `1px solid ${decision.color}`, background: "var(--dark-base)", borderRadius: 12, padding: 12, marginBottom: 10 }}>
+                  <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                    <div style={{ minWidth: 0, flex: "1 1 220px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        <span style={{ color: decision.color, fontSize: 14, fontWeight: 950, textTransform: "uppercase" }}>
+                          {decision.label}
+                        </span>
+                        <span style={{ color: "var(--text-muted)", fontSize: 11, fontWeight: 800 }}>
+                          {pkg.strategy_label ?? opportunityLabel(pkg.opportunity_type) ?? "Trade lane"}
+                        </span>
+                      </div>
+                      <div style={{ marginTop: 6, color: "var(--text-dim)", fontSize: 12, lineHeight: 1.45 }}>
+                        {decision.reason}
+                      </div>
+                      <div style={{ marginTop: 4, color: "var(--text-muted)", fontSize: 11, lineHeight: 1.45 }}>
+                        Next: {decision.nextAction}
+                      </div>
+                    </div>
+                    <a
+                      href={calculatorUrl}
+                      style={{ alignSelf: "center", border: "1px solid rgba(59,130,246,0.65)", background: "rgba(59,130,246,0.14)", color: "#93c5fd", borderRadius: 10, padding: "9px 12px", fontSize: 12, fontWeight: 900, textDecoration: "none", whiteSpace: "nowrap" }}
+                    >
+                      Open Calculator
+                    </a>
+                  </div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+                    <FeedbackAction
+                      label="Find more like this"
+                      onClick={steering ? findMoreLikeThis : undefined}
+                      href={!steering ? finderUrl({ strategyFocus: activeStrategy }) : undefined}
+                      primary
+                    />
+                    <FeedbackAction
+                      label="Not this player"
+                      onClick={steering ? avoidCurrentReceivePlayers : undefined}
+                      href={!steering ? finderUrl({ avoidTargetPlayerIds: activeReceivePlayerIds }) : undefined}
+                      disabled={activeReceivePlayerIds.length === 0}
+                    />
+                    <FeedbackAction
+                      label="Cheaper"
+                      onClick={steering ? () => applyConstraint("cheaper") : undefined}
+                      href={!steering ? finderUrl({ constraints: ["cheaper"] }) : undefined}
+                    />
+                    <FeedbackAction
+                      label="No picks"
+                      onClick={steering ? () => applyConstraint("no_picks") : undefined}
+                      href={!steering ? finderUrl({ constraints: ["no_picks"] }) : undefined}
+                    />
+                    <FeedbackAction
+                      label="Add same-position player"
+                      onClick={steering ? () => applyConstraint("same_position_return") : undefined}
+                      href={!steering ? finderUrl({ constraints: ["same_position_return"] }) : undefined}
+                    />
+                    <FeedbackAction
+                      label="Make it realistic"
+                      onClick={steering ? () => applyConstraint("more_realistic") : undefined}
+                      href={!steering ? finderUrl({ constraints: ["more_realistic"] }) : undefined}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {packages.length > 1 && (
+                <div style={{ display: "grid", gap: 10, marginBottom: 14 }}>
+                  {packages.map((p, i) => {
+                    const active = activePackage === i;
+                    const confidence = laneConfidence(p);
+                    return (
+                      <button
+                        key={`package-lane-${i}-${p.type}`}
+                        onClick={() => setActivePackage(i)}
+                        style={{
+                          width: "100%",
+                          textAlign: "left",
+                          background: active ? "rgba(59,130,246,0.12)" : "var(--dark-base)",
+                          color: "var(--text)",
+                          border: active ? "1px solid rgba(59,130,246,0.65)" : "1px solid var(--border)",
+                          borderRadius: 10,
+                          padding: 12,
+                          cursor: "pointer",
+                          fontFamily: "inherit",
+                        }}
+                      >
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", marginBottom: 7 }}>
+                          <span style={{ fontSize: 13, fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis" }}>
+                            {laneTitle(p)}
+                          </span>
+                          <span style={{ border: "1px solid var(--border)", borderRadius: 999, padding: "3px 8px", color: confidence === "Likely" || confidence === "Strong" ? "var(--green)" : confidence === "Hard" || confidence === "Thin" ? "var(--text-muted)" : "var(--amber)", fontSize: 10, fontWeight: 900, whiteSpace: "nowrap", textTransform: "uppercase" }}>
+                            {confidence}
+                          </span>
+                        </div>
+                        <div style={{ display: "grid", gap: 3, color: "var(--text-muted)", fontSize: 12, lineHeight: 1.35 }}>
+                          <span>Send: {assetSummary(p.you_send, 2)}</span>
+                          <span>Get: {assetSummary(p.you_receive, 2)}</span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {steering && <SteeringPanel steering={steering} packages={packages} activePackage={pkg ?? null} />}
+
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
                 <LaneAssetBox label="You Send" assets={pkg.you_send} side="send" />
                 <LaneAssetBox label="You Get" assets={pkg.you_receive} side="receive" />
@@ -814,13 +1031,6 @@ export default function PartnerCard({
                   </div>
                 </div>
               )}
-
-              <a
-                href={calculatorUrl}
-                style={{ display: "block", textAlign: "center", marginTop: 10, border: "1px solid rgba(59,130,246,0.55)", background: "rgba(59,130,246,0.12)", color: "#93c5fd", borderRadius: 10, padding: "10px 12px", fontSize: 12, fontWeight: 900, textDecoration: "none" }}
-              >
-                Open lane in Calculator
-              </a>
 
               <details style={{ marginTop: 12 }}>
                 <summary style={{ cursor: "pointer", color: "var(--text-muted)", fontSize: 12, fontWeight: 900, padding: "8px 0" }}>

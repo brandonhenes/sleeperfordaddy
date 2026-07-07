@@ -59,6 +59,11 @@ export interface DraftPickInventoryOptions {
   completedDraftSeasons?: Set<string>;
 }
 
+export interface CompletedDraftSeasonTarget {
+  leagueId: string;
+  currentSeason?: string | number | null;
+}
+
 // ─── Build Item 1: Build Complete Draft Pick Inventory ───
 
 export function buildDraftPickInventory(
@@ -118,7 +123,66 @@ export async function getLeagueDraftPicks(
   });
 }
 
-async function getCompletedRookieDraftSeasons(
+export async function getCompletedRookieDraftSeasons(
+  leagueId: string
+): Promise<Set<string>> {
+  const [liveSeasons, persistedSeasons] = await Promise.all([
+    getSleeperCompletedRookieDraftSeasons(leagueId),
+    getPersistedCompletedRookieDraftSeasons(leagueId),
+  ]);
+
+  return mergeCompletedDraftSeasons(liveSeasons, persistedSeasons);
+}
+
+export function mergeCompletedDraftSeasons(
+  ...sources: Array<Iterable<string>>
+): Set<string> {
+  const seasons = new Set<string>();
+  for (const source of sources) {
+    for (const season of source) {
+      const normalized = String(season).trim();
+      if (normalized) seasons.add(normalized);
+    }
+  }
+  return seasons;
+}
+
+export async function mergeLiveCompletedDraftSeasonsByLeague(
+  targets: CompletedDraftSeasonTarget[],
+  persistedByLeague: Map<string, Set<string>> = new Map(),
+  options: { concurrency?: number } = {}
+): Promise<Map<string, Set<string>>> {
+  const result = new Map<string, Set<string>>();
+  for (const [leagueId, seasons] of persistedByLeague.entries()) {
+    result.set(leagueId, new Set(seasons));
+  }
+
+  const candidates = targets.filter((target, index, all) => {
+    const season = target.currentSeason == null ? null : String(target.currentSeason);
+    if (!target.leagueId || !season) return false;
+    if (all.findIndex((other) => other.leagueId === target.leagueId) !== index) return false;
+    return !(result.get(target.leagueId)?.has(season));
+  });
+
+  let next = 0;
+  const concurrency = Math.max(1, Math.min(options.concurrency ?? 4, candidates.length || 1));
+  await Promise.all(Array.from({ length: concurrency }, async () => {
+    while (next < candidates.length) {
+      const target = candidates[next++];
+      if (!target) continue;
+      const liveSeasons = await getSleeperCompletedRookieDraftSeasons(target.leagueId);
+      if (liveSeasons.size === 0) continue;
+      result.set(
+        target.leagueId,
+        mergeCompletedDraftSeasons(result.get(target.leagueId) ?? [], liveSeasons)
+      );
+    }
+  }));
+
+  return result;
+}
+
+export async function getSleeperCompletedRookieDraftSeasons(
   leagueId: string
 ): Promise<Set<string>> {
   try {
@@ -131,6 +195,34 @@ async function getCompletedRookieDraftSeasons(
       seasons.add(draft.season);
     }
     return seasons;
+  } catch {
+    return new Set<string>();
+  }
+}
+
+async function getPersistedCompletedRookieDraftSeasons(
+  leagueId: string
+): Promise<Set<string>> {
+  try {
+    const tableCheck = await db.execute(sql`
+      SELECT to_regclass('public.league_draft_results')::text AS table_name
+    `);
+    const exists = (tableCheck as unknown as Array<{ table_name: string | null }>)[0]?.table_name != null;
+    if (!exists) return new Set<string>();
+
+    const rows = await db.execute(sql`
+      SELECT season
+      FROM league_draft_results
+      WHERE league_id = ${leagueId}
+      GROUP BY season
+    `);
+
+    return new Set(
+      (rows as unknown as Array<{ season: string | number | null }>)
+        .map((row) => row.season)
+        .filter((season): season is string | number => season != null)
+        .map((season) => String(season))
+    );
   } catch {
     return new Set<string>();
   }

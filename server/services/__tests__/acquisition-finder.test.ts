@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
-import type { AcquisitionOffer, TradePackageAsset } from "../../../shared/types.js";
+import type { AcquisitionOffer, AcquisitionOpportunity, TradePackageAsset } from "../../../shared/types.js";
 import type {
   OpportunityPackageValuation,
   OpportunityPackageValuationInput,
 } from "../trade-opportunity-valuation.js";
 import {
+  buildAcquisitionSummary,
   filterAcquisitionRecommendationOffers,
+  rankAcquisitionOpportunities,
   valueAcquisitionOfferWithKtcLeague,
 } from "../acquisition-finder.js";
 
@@ -50,6 +52,33 @@ function offer(): AcquisitionOffer {
       verdict: "might_accept",
       verdict_reason: "Test verdict.",
     },
+  };
+}
+
+function opportunity(
+  leagueId: string,
+  difficultyScore: number,
+  packages: AcquisitionOffer[]
+): AcquisitionOpportunity {
+  return {
+    league_id: leagueId,
+    league_name: `League ${leagueId}`,
+    league_mode: "sf",
+    owner: {
+      roster_id: Number(leagueId.replace(/\D/g, "")) || 1,
+      display_name: `Owner ${leagueId}`,
+      archetype: "Competitor",
+    },
+    difficulty: {
+      score: difficultyScore,
+      label: difficultyScore >= 80 ? "near_impossible" : "hard",
+      reasons: [],
+      positional_importance: "Their TE1",
+      replacement_gap: 10,
+      archetype_resistance: "Test resistance",
+    },
+    packages,
+    trade_history: [],
   };
 }
 
@@ -154,5 +183,44 @@ describe("acquisition finder valuation bridge", () => {
     };
 
     expect(filterAcquisitionRecommendationOffers([bad, good])).toEqual([good]);
+  });
+
+  it("does not surface owners with zero viable acquisition packages", () => {
+    const empty = opportunity("empty", 60, []);
+    const hardWithOffer = opportunity("hard", 70, [offer()]);
+    const easyWithOffer = opportunity("easy", 68, [offer()]);
+
+    expect(rankAcquisitionOpportunities([empty, hardWithOffer, easyWithOffer])).toEqual([
+      easyWithOffer,
+      hardWithOffer,
+    ]);
+  });
+
+  it("summarizes the easiest viable acquisition path instead of zero-offer ownership", () => {
+    const viable = rankAcquisitionOpportunities([
+      opportunity("empty", 60, []),
+      opportunity("easy", 68, [offer()]),
+    ]);
+
+    expect(buildAcquisitionSummary("Trey McBride", 2, viable)).toContain(
+      "2 of your leagues"
+    );
+    expect(buildAcquisitionSummary("Trey McBride", 2, viable)).toContain(
+      "1 leagues produced viable starting offers"
+    );
+    expect(buildAcquisitionSummary("Trey McBride", 2, viable)).toContain(
+      "Owner easy"
+    );
+  });
+
+  it("marks limited acquisition results as a best-of subset", () => {
+    const viable = rankAcquisitionOpportunities([
+      opportunity("one", 68, [offer()]),
+      opportunity("two", 70, [offer()]),
+    ]);
+
+    expect(buildAcquisitionSummary("Trey McBride", 2, viable, 1)).toContain(
+      "Showing the best 1 of 2 viable starting offers"
+    );
   });
 });

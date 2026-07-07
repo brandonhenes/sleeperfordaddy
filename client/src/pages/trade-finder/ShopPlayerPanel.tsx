@@ -13,11 +13,14 @@ const SHOP_AMBITION_OPTIONS = [
 const SHOP_POSITION_GROUPS = ["QB", "RB", "WR", "TE"];
 
 interface ShopPlayerPanelProps {
+  username: string;
   portfolio: PortfolioData | undefined;
   selectedPlayer: string;
   setSelectedPlayer: Dispatch<SetStateAction<string>>;
   shopAmbition: number;
   setShopAmbition: Dispatch<SetStateAction<number>>;
+  shopDepth: "quick" | "full";
+  setShopDepth: Dispatch<SetStateAction<"quick" | "full">>;
   showShopRedraft: boolean;
   onToggleRedraft: () => void;
   shopPathFilter: ShopPathFilter;
@@ -28,11 +31,14 @@ interface ShopPlayerPanelProps {
 }
 
 export default function ShopPlayerPanel({
+  username,
   portfolio,
   selectedPlayer,
   setSelectedPlayer,
   shopAmbition,
   setShopAmbition,
+  shopDepth,
+  setShopDepth,
   showShopRedraft,
   onToggleRedraft,
   shopPathFilter,
@@ -47,10 +53,17 @@ export default function ShopPlayerPanel({
     shopError instanceof Error
       ? shopError.message
       : "Shop a Player could not finish. Try again in a moment.";
+  const scanWarning = shopResult?.warnings?.find((warning) =>
+    warning.includes("scanned the fastest")
+  );
+  const partialCopy = shopDepth === "quick"
+    ? scanWarning?.replace("Shop a Player ", "").replace(" Load the full board to scan every league.", "")
+      ?? "Fast first page loaded."
+    : "Showing the best completed results so far.";
 
   return (
     <div>
-      <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: 16, marginTop: 8 }}>
+      <div className="shop-player-select-card" style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: 16, marginTop: 8 }}>
         <button
           type="button"
           onClick={onToggleRedraft}
@@ -77,6 +90,7 @@ export default function ShopPlayerPanel({
           onChange={(e) => {
             setSelectedPlayer(e.target.value);
             setShopPathFilter(null);
+            setShopDepth("quick");
           }}
           style={{ display: "block", width: "100%", marginTop: 8, padding: "10px 12px", background: "var(--dark-base)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text)", fontSize: 14, cursor: "pointer", boxSizing: "border-box" }}
         >
@@ -100,13 +114,17 @@ export default function ShopPlayerPanel({
       </div>
 
       {selectedPlayer && (
-        <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: "12px 16px", marginTop: 8, display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+        <div className="shop-ambition-card" style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: "12px 16px", marginTop: 8, display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
           <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)" }}>Trade Ambition:</span>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", flex: "1 1 220px", minWidth: 0 }}>
+          <div className="shop-ambition-options" style={{ display: "flex", gap: 6, flexWrap: "wrap", flex: "1 1 220px", minWidth: 0 }}>
             {SHOP_AMBITION_OPTIONS.map((opt) => (
               <button
                 key={opt.value}
-                onClick={() => setShopAmbition(opt.value)}
+                onClick={() => {
+                  setShopAmbition(opt.value);
+                  setShopDepth("quick");
+                }}
+                className="shop-ambition-button"
                 style={{
                   padding: "6px 14px",
                   borderRadius: 6,
@@ -134,6 +152,7 @@ export default function ShopPlayerPanel({
         <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: "48px 24px", marginTop: 16, textAlign: "center" }}>
           <span className="animate-pulse" style={{ color: "var(--amber)", fontSize: 14 }}>
             Scanning all leagues for the best deals...
+            {shopDepth === "quick" ? " Showing the fastest paths first." : " Full board scan in progress."}
           </span>
         </div>
       )}
@@ -146,22 +165,37 @@ export default function ShopPlayerPanel({
 
       {selectedPlayer && shopResult && !shopLoading && (
         <div style={{ marginTop: 16 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <div className="shop-result-summary" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
             <span style={{ fontSize: 13, color: "var(--text-muted)" }}>
               {shopResult.player_name} owned in {shopResult.leagues_owned} league{shopResult.leagues_owned !== 1 ? "s" : ""}{" \u2014 "}{shopResult.opportunities.length} opportunit{shopResult.opportunities.length !== 1 ? "ies" : "y"} found
             </span>
           </div>
           {(shopResult.partial_results || (shopResult.warnings?.length ?? 0) > 0) && (
-            <div style={{ background: "rgba(61,139,253,0.1)", border: "1px solid rgba(61,139,253,0.28)", borderRadius: 10, padding: "10px 12px", marginBottom: 12, color: "var(--amber)", fontSize: 12, lineHeight: 1.5, overflowWrap: "anywhere" }}>
-              Showing the best completed results so far.
-              {shopResult.warnings && shopResult.warnings.length > 0 && (
-                <span style={{ color: "var(--text-dim)", marginLeft: 6 }}>
-                  {shopResult.warnings.slice(0, 2).join(" ")}
-                </span>
+            <div className="shop-partial-banner" style={{ background: "rgba(61,139,253,0.1)", border: "1px solid rgba(61,139,253,0.28)", borderRadius: 10, padding: "10px 12px", marginBottom: 12, color: "var(--amber)", fontSize: 12, lineHeight: 1.5, overflowWrap: "anywhere" }}>
+              {partialCopy}
+              {shopDepth === "quick" && (
+                <button
+                  type="button"
+                  onClick={() => setShopDepth("full")}
+                  style={{
+                    marginLeft: 10,
+                    border: "1px solid rgba(96,165,250,0.4)",
+                    background: "rgba(96,165,250,0.12)",
+                    color: "#93c5fd",
+                    borderRadius: 6,
+                    padding: "4px 8px",
+                    fontSize: 11,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                  }}
+                >
+                  Load full board
+                </button>
               )}
             </div>
           )}
-          <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
+          <div className="shop-path-filter-row" style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
             {[
               { key: null, label: `All (${shopResult.opportunities.length})` },
               { key: "even_swap" as const, label: `Even Swaps (${shopResult.opportunities.filter((o) => o.path === "even_swap").length})` },
@@ -189,7 +223,7 @@ export default function ShopPlayerPanel({
             ))}
           </div>
           {filteredShopResults.map((opp, i) => (
-            <ShopOpportunityCard key={`${opp.league_id}-${i}`} opp={opp} />
+            <ShopOpportunityCard key={`${opp.league_id}-${i}`} opp={opp} username={username} />
           ))}
           {filteredShopResults.length === 0 && (
             <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: "48px 24px", textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>

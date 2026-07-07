@@ -551,6 +551,13 @@ export interface TradeBoardLine {
   package: TradePackage;
 }
 
+export interface TradeBoardResponse {
+  lines: TradeBoardLine[];
+  status: "ready" | "building";
+  cache_status: "fresh" | "stale" | "local" | "miss";
+  generated_at: string | null;
+}
+
 export type TradeOpportunityType =
   | "buy_target"
   | "sell_player"
@@ -587,6 +594,8 @@ export type TradeFinderConstraint =
   | "more_realistic"
   | "more_picks_back"
   | "no_qbs"
+  | "no_picks"
+  | "same_position_return"
   | "win_now_only";
 export type TradeFinderSearchDepth = "quick" | "deep";
 
@@ -944,6 +953,9 @@ export interface AcquisitionResult {
   target: AcquisitionTarget;
   opportunities: AcquisitionOpportunity[];
   summary: string; // "Ja'Marr Chase is owned in 8 of your leagues. Easiest to acquire from Team X in League Y (Rebuilder, he's their WR2)."
+  partial_results?: boolean;
+  total_opportunities?: number;
+  warnings?: string[];
 }
 
 // ─── Shop a Player ───

@@ -3,6 +3,10 @@ import express from "express";
 import routes from "./routes/index.js";
 import { setupVite, serveStatic } from "./vite.js";
 
+process.on("unhandledRejection", (reason) => {
+  console.error("[process] Unhandled rejection:", reason);
+});
+
 const app = express();
 const PORT = parseInt(process.env.PORT || "5000", 10);
 const isDev = process.env.NODE_ENV !== "production";

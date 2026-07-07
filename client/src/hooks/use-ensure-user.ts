@@ -9,6 +9,10 @@ interface EnsureUserResult {
   phase: EnsurePhase;
   /** Progress info while syncing */
   syncProgress: { done: number; total: number } | null;
+  /** Latest sync step from the server, when available */
+  syncStep: string;
+  /** Latest sync detail from the server, when available */
+  syncDetail: string;
   /** Error message if phase is "error" */
   errorMsg: string;
   /** Manually retry the flow */
@@ -85,7 +89,10 @@ export function useEnsureUser(username: string | undefined): EnsureUserResult {
       setPhase("ready");
     } else if (s === "error" || s === "failed") {
       setPhase("error");
-      setErrorMsg(syncStatus.data.error || "Sync failed");
+      const detail = [syncStatus.data.step, syncStatus.data.detail]
+        .filter(Boolean)
+        .join(": ");
+      setErrorMsg(syncStatus.data.error || detail || "Sync failed");
     }
   }, [phase, syncStatus.data, queryClient]);
 
@@ -96,6 +103,9 @@ export function useEnsureUser(username: string | undefined): EnsureUserResult {
     syncStatus.data?.leagues_total
       ? { done: syncStatus.data.leagues_done, total: syncStatus.data.leagues_total }
       : null;
+
+  const syncStep = syncStatus.data?.step ?? "";
+  const syncDetail = syncStatus.data?.detail ?? "";
 
   // Retry handler
   const retry = useCallback(() => {
@@ -108,5 +118,5 @@ export function useEnsureUser(username: string | undefined): EnsureUserResult {
     }
   }, [username, queryClient]);
 
-  return { phase, syncProgress, errorMsg, retry };
+  return { phase, syncProgress, syncStep, syncDetail, errorMsg, retry };
 }

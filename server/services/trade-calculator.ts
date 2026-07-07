@@ -71,11 +71,34 @@ function normalizePick(asset: TradeAssetInput): { season: string; round: number;
   return { season, round, tier };
 }
 
-async function loadPickValueMaps(mode: "sf" | "1qb"): Promise<{
+type PickValueMaps = {
   ktcMap: Map<string, number>;
   dpMap: Map<string, number>;
-}> {
-  const [ktcRows, dpRows] = await Promise.all([
+};
+
+type PlayerNameMeta = {
+  full_name: string;
+  position: string | null;
+};
+
+const TRADE_LOOKUP_TTL_MS = 10 * 60 * 1000;
+const pickValueMapCache = new Map<"sf" | "1qb", { value: PickValueMaps; expires: number }>();
+const pickValueMapInFlight = new Map<"sf" | "1qb", Promise<PickValueMaps>>();
+const leagueSizeCache = new Map<string, { value: number; expires: number }>();
+const leagueSizeInFlight = new Map<string, Promise<number>>();
+const playerNameMetaCache = new Map<string, { value: PlayerNameMeta; expires: number }>();
+const playerNameMetaInFlight = new Map<string, Promise<Map<string, PlayerNameMeta>>>();
+
+async function loadPickValueMaps(mode: "sf" | "1qb"): Promise<PickValueMaps> {
+  const now = Date.now();
+  const cached = pickValueMapCache.get(mode);
+  if (cached && cached.expires > now) return cached.value;
+
+  const pending = pickValueMapInFlight.get(mode);
+  if (pending) return pending;
+
+  const work = (async () => {
+    const [ktcRows, dpRows] = await Promise.all([
     db.execute(sql`
       SELECT pick_season, pick_round, pick_tier, value_1qb, value_sf
       FROM ktc_values
@@ -86,40 +109,132 @@ async function loadPickValueMaps(mode: "sf" | "1qb"): Promise<{
       FROM dynastyprocess_values
       WHERE is_pick = true
     `),
-  ]);
+    ]);
 
-  type KtcPickRow = {
-    pick_season: number | null;
-    pick_round: number | null;
-    pick_tier: string | null;
-    value_1qb: number | null;
-    value_sf: number | null;
-  };
-  type DpPickRow = {
-    player_name: string;
-    value_1qb: number | null;
-    value_2qb: number | null;
-  };
+    type KtcPickRow = {
+      pick_season: number | null;
+      pick_round: number | null;
+      pick_tier: string | null;
+      value_1qb: number | null;
+      value_sf: number | null;
+    };
+    type DpPickRow = {
+      player_name: string;
+      value_1qb: number | null;
+      value_2qb: number | null;
+    };
 
-  const ktcMap = new Map<string, number>();
-  for (const r of ktcRows as unknown as KtcPickRow[]) {
-    if (r.pick_season == null || r.pick_round == null) continue;
-    const val = mode === "sf" ? r.value_sf : r.value_1qb;
-    if (val == null || val <= 0) continue;
-    const tier = (r.pick_tier ?? "").toLowerCase();
-    ktcMap.set(`${r.pick_season}|${tier}|${r.pick_round}`, val);
-    const generic = `${r.pick_season}||${r.pick_round}`;
-    if (!ktcMap.has(generic)) ktcMap.set(generic, val);
+    const ktcMap = new Map<string, number>();
+    for (const r of ktcRows as unknown as KtcPickRow[]) {
+      if (r.pick_season == null || r.pick_round == null) continue;
+      const val = mode === "sf" ? r.value_sf : r.value_1qb;
+      if (val == null || val <= 0) continue;
+      const tier = (r.pick_tier ?? "").toLowerCase();
+      ktcMap.set(`${r.pick_season}|${tier}|${r.pick_round}`, val);
+      const generic = `${r.pick_season}||${r.pick_round}`;
+      if (!ktcMap.has(generic)) ktcMap.set(generic, val);
+    }
+
+    const dpMap = new Map<string, number>();
+    for (const r of dpRows as unknown as DpPickRow[]) {
+      const val = mode === "sf" ? r.value_2qb : r.value_1qb;
+      if (val == null || val <= 0) continue;
+      dpMap.set(r.player_name.toLowerCase().trim(), val);
+    }
+
+    const value = { ktcMap, dpMap };
+    pickValueMapCache.set(mode, { value, expires: Date.now() + TRADE_LOOKUP_TTL_MS });
+    return value;
+  })();
+
+  pickValueMapInFlight.set(mode, work);
+  try {
+    return await work;
+  } finally {
+    pickValueMapInFlight.delete(mode);
+  }
+}
+
+async function loadLeagueSize(leagueId: string | undefined): Promise<number> {
+  if (!leagueId) return 12;
+
+  const now = Date.now();
+  const cached = leagueSizeCache.get(leagueId);
+  if (cached && cached.expires > now) return cached.value;
+
+  const pending = leagueSizeInFlight.get(leagueId);
+  if (pending) return pending;
+
+  const work = (async () => {
+    const leagueRows = await db.execute(sql`
+      SELECT total_rosters FROM leagues WHERE league_id = ${leagueId} LIMIT 1
+    `);
+    const totalRosters = (leagueRows as unknown as Array<{ total_rosters: number | null }>)[0]?.total_rosters;
+    const value = totalRosters && totalRosters > 0 ? totalRosters : 12;
+    leagueSizeCache.set(leagueId, { value, expires: Date.now() + TRADE_LOOKUP_TTL_MS });
+    return value;
+  })();
+
+  leagueSizeInFlight.set(leagueId, work);
+  try {
+    return await work;
+  } finally {
+    leagueSizeInFlight.delete(leagueId);
+  }
+}
+
+async function loadPlayerNameMeta(playerIds: string[]): Promise<Map<string, PlayerNameMeta>> {
+  const uniqueIds = [...new Set(playerIds.filter(Boolean))];
+  const out = new Map<string, PlayerNameMeta>();
+  if (uniqueIds.length === 0) return out;
+
+  const now = Date.now();
+  const missing: string[] = [];
+  for (const playerId of uniqueIds) {
+    const cached = playerNameMetaCache.get(playerId);
+    if (cached && cached.expires > now) {
+      out.set(playerId, cached.value);
+    } else {
+      missing.push(playerId);
+    }
   }
 
-  const dpMap = new Map<string, number>();
-  for (const r of dpRows as unknown as DpPickRow[]) {
-    const val = mode === "sf" ? r.value_2qb : r.value_1qb;
-    if (val == null || val <= 0) continue;
-    dpMap.set(r.player_name.toLowerCase().trim(), val);
+  if (missing.length === 0) return out;
+
+  const inFlightKey = missing.sort().join(",");
+  let pending = playerNameMetaInFlight.get(inFlightKey);
+  if (!pending) {
+    pending = (async () => {
+      const rows = await db.execute(sql`
+        SELECT player_id, full_name, position
+        FROM players_master
+        WHERE player_id IN (${sql.join(missing.map((id) => sql`${id}`), sql`, `)})
+      `);
+      const loaded = new Map<string, PlayerNameMeta>();
+      for (const row of rows as unknown as Array<{ player_id: string; full_name: string; position: string | null }>) {
+        const value = {
+          full_name: row.full_name,
+          position: row.position,
+        };
+        loaded.set(row.player_id, value);
+        playerNameMetaCache.set(row.player_id, {
+          value,
+          expires: Date.now() + TRADE_LOOKUP_TTL_MS,
+        });
+      }
+      return loaded;
+    })();
+    playerNameMetaInFlight.set(inFlightKey, pending);
   }
 
-  return { ktcMap, dpMap };
+  try {
+    const loaded = await pending;
+    for (const [playerId, meta] of loaded) out.set(playerId, meta);
+  } finally {
+    playerNameMetaInFlight.delete(inFlightKey);
+  }
+
+  return out;
 }
 
 function interpolatePickValue(
@@ -323,6 +438,10 @@ export interface TradeHealthPlayerInfo {
   edge_score: number | null;
 }
 
+type TradeHealthBaseInfo = Omit<TradeHealthPlayerInfo, "edge_score">;
+const tradeHealthBaseCache = new Map<string, { value: TradeHealthBaseInfo; expires: number }>();
+const tradeHealthBaseInFlight = new Map<string, Promise<Map<string, TradeHealthBaseInfo>>>();
+
 function formatPlayerName(asset: TradeHealthAssetInput, info?: TradeHealthPlayerInfo | null): string {
   const label = info?.full_name || asset.label || "This player";
   return label.replace(/\s+\([A-Z]{1,3}\)$/, "");
@@ -343,64 +462,106 @@ export async function loadTradeHealthPlayerInfo(
   const uniqueIds = [...new Set(playerIds.filter(Boolean))];
   if (uniqueIds.length === 0) return new Map();
 
-  const [playerRows, latestFantasycalcRows, historicalRows] = await Promise.all([
-    db.execute(sql`
-      SELECT player_id, full_name, position, age
-      FROM players_master
-      WHERE player_id IN (${sql.join(uniqueIds.map((id) => sql`${id}`), sql`, `)})
-    `),
-    db.execute(sql`
-      SELECT sleeper_id AS player_id, dynasty_value::float AS dynasty_value, trend_30day::float AS trend_30day
-      FROM fantasycalc_daily
-      WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM fantasycalc_daily)
-        AND sleeper_id IN (${sql.join(uniqueIds.map((id) => sql`${id}`), sql`, `)})
-    `),
-    db.execute(sql`
-      SELECT player_id, MAX(fc_value)::float AS peak_fc_value
-      FROM player_value_snapshots
-      WHERE player_id IN (${sql.join(uniqueIds.map((id) => sql`${id}`), sql`, `)})
-      GROUP BY player_id
-    `),
-  ]);
-
-  const latestMap = new Map<string, { dynasty_value: number | null; trend_30day: number | null }>();
-  for (const row of latestFantasycalcRows as unknown as Array<{
-    player_id: string;
-    dynasty_value: number | null;
-    trend_30day: number | null;
-  }>) {
-    latestMap.set(row.player_id, {
-      dynasty_value: row.dynasty_value ?? null,
-      trend_30day: row.trend_30day ?? null,
-    });
-  }
-
-  const historicalMap = new Map<string, number | null>();
-  for (const row of historicalRows as unknown as Array<{
-    player_id: string;
-    peak_fc_value: number | null;
-  }>) {
-    historicalMap.set(row.player_id, row.peak_fc_value ?? null);
-  }
-
+  const now = Date.now();
   const infoMap = new Map<string, TradeHealthPlayerInfo>();
-  for (const row of playerRows as unknown as Array<{
-    player_id: string;
-    full_name: string | null;
-    position: string | null;
-    age: number | null;
-  }>) {
-    const latest = latestMap.get(row.player_id);
-    infoMap.set(row.player_id, {
-      player_id: row.player_id,
-      full_name: row.full_name ?? null,
-      position: row.position ?? null,
-      age: row.age ?? null,
-      trend_30day: latest?.trend_30day ?? null,
-      current_fc_value: latest?.dynasty_value ?? null,
-      historical_peak_fc_value: historicalMap.get(row.player_id) ?? null,
-      edge_score: edgeScoreByPlayerId.get(row.player_id) ?? null,
-    });
+  const missing: string[] = [];
+  for (const playerId of uniqueIds) {
+    const cached = tradeHealthBaseCache.get(playerId);
+    if (cached && cached.expires > now) {
+      infoMap.set(playerId, {
+        ...cached.value,
+        edge_score: edgeScoreByPlayerId.get(playerId) ?? null,
+      });
+    } else {
+      missing.push(playerId);
+    }
+  }
+
+  if (missing.length === 0) return infoMap;
+
+  const inFlightKey = missing.sort().join(",");
+  let pending = tradeHealthBaseInFlight.get(inFlightKey);
+  if (!pending) {
+    pending = (async () => {
+      const [playerRows, latestFantasycalcRows, historicalRows] = await Promise.all([
+        db.execute(sql`
+          SELECT player_id, full_name, position, age
+          FROM players_master
+          WHERE player_id IN (${sql.join(missing.map((id) => sql`${id}`), sql`, `)})
+        `),
+        db.execute(sql`
+          SELECT sleeper_id AS player_id, dynasty_value::float AS dynasty_value, trend_30day::float AS trend_30day
+          FROM fantasycalc_daily
+          WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM fantasycalc_daily)
+            AND sleeper_id IN (${sql.join(missing.map((id) => sql`${id}`), sql`, `)})
+        `),
+        db.execute(sql`
+          SELECT player_id, MAX(fc_value)::float AS peak_fc_value
+          FROM player_value_snapshots
+          WHERE player_id IN (${sql.join(missing.map((id) => sql`${id}`), sql`, `)})
+          GROUP BY player_id
+        `),
+      ]);
+
+      const latestMap = new Map<string, { dynasty_value: number | null; trend_30day: number | null }>();
+      for (const row of latestFantasycalcRows as unknown as Array<{
+        player_id: string;
+        dynasty_value: number | null;
+        trend_30day: number | null;
+      }>) {
+        latestMap.set(row.player_id, {
+          dynasty_value: row.dynasty_value ?? null,
+          trend_30day: row.trend_30day ?? null,
+        });
+      }
+
+      const historicalMap = new Map<string, number | null>();
+      for (const row of historicalRows as unknown as Array<{
+        player_id: string;
+        peak_fc_value: number | null;
+      }>) {
+        historicalMap.set(row.player_id, row.peak_fc_value ?? null);
+      }
+
+      const loaded = new Map<string, TradeHealthBaseInfo>();
+      for (const row of playerRows as unknown as Array<{
+        player_id: string;
+        full_name: string | null;
+        position: string | null;
+        age: number | null;
+      }>) {
+        const latest = latestMap.get(row.player_id);
+        const value: TradeHealthBaseInfo = {
+          player_id: row.player_id,
+          full_name: row.full_name ?? null,
+          position: row.position ?? null,
+          age: row.age ?? null,
+          trend_30day: latest?.trend_30day ?? null,
+          current_fc_value: latest?.dynasty_value ?? null,
+          historical_peak_fc_value: historicalMap.get(row.player_id) ?? null,
+        };
+        loaded.set(row.player_id, value);
+        tradeHealthBaseCache.set(row.player_id, {
+          value,
+          expires: Date.now() + TRADE_LOOKUP_TTL_MS,
+        });
+      }
+
+      return loaded;
+    })();
+    tradeHealthBaseInFlight.set(inFlightKey, pending);
+  }
+
+  try {
+    const loaded = await pending;
+    for (const [playerId, value] of loaded) {
+      infoMap.set(playerId, {
+        ...value,
+        edge_score: edgeScoreByPlayerId.get(playerId) ?? null,
+      });
+    }
+  } finally {
+    tradeHealthBaseInFlight.delete(inFlightKey);
   }
 
   return infoMap;
@@ -531,31 +692,12 @@ async function evaluateAssets(
     .map((a) => a.player_id);
 
   const uniquePlayerIds = [...new Set(playerIds)];
-  const [compMap, nameRows, pickMaps] = await Promise.all([
+  const [compMap, names, pickMaps, leagueSize] = await Promise.all([
     getCompositeValues(uniquePlayerIds, mode, valueType, weights),
-    uniquePlayerIds.length > 0
-      ? db.execute(sql`
-          SELECT player_id, full_name, position
-          FROM players_master
-          WHERE player_id IN (${sql.join(uniquePlayerIds.map((id) => sql`${id}`), sql`, `)})
-        `)
-      : Promise.resolve([]),
+    loadPlayerNameMeta(uniquePlayerIds),
     loadPickValueMaps(mode),
+    loadLeagueSize(leagueId),
   ]);
-
-  let leagueSize = 12;
-  if (leagueId) {
-    const leagueRows = await db.execute(sql`
-      SELECT total_rosters FROM leagues WHERE league_id = ${leagueId} LIMIT 1
-    `);
-    const totalRosters = (leagueRows as unknown as Array<{ total_rosters: number | null }>)[0]?.total_rosters;
-    if (totalRosters && totalRosters > 0) leagueSize = totalRosters;
-  }
-
-  const names = new Map<string, { full_name: string; position: string }>();
-  for (const r of nameRows as unknown as { player_id: string; full_name: string; position: string }[]) {
-    names.set(r.player_id, { full_name: r.full_name, position: r.position });
-  }
 
   return Promise.all(assets.map(async (asset) => {
     if (asset.type === "player" && asset.player_id) {

@@ -26,6 +26,14 @@ describe("trade finder URL helpers", () => {
     expect(parsed.opponentRosterId).toBe(6);
   });
 
+  it("supports explicit leagueId and playerId aliases from shared links", () => {
+    const parsed = parseTradeFinderQuery("mode=shop&leagueId=league-1&playerId=6904");
+
+    expect(parsed.mode).toBe("shop");
+    expect(parsed.leagueId).toBe("league-1");
+    expect(parsed.playerId).toBe("6904");
+  });
+
   it("keeps missing params null instead of throwing", () => {
     const parsed = parseTradeFinderQuery("?mode=scout");
 
@@ -59,7 +67,7 @@ describe("trade finder URL helpers", () => {
       opponentRosterId: 12,
       targetPlayerId: "player-9",
       avoidTargetPlayerIds: ["player-1", "player-2"],
-      constraints: ["more_realistic", "no_qbs"],
+      constraints: ["more_realistic", "no_qbs", "no_picks", "same_position_return"],
       strategyFocus: "tier_down",
       searchDepth: "deep",
     });
@@ -72,7 +80,7 @@ describe("trade finder URL helpers", () => {
       opponentRosterId: 12,
       targetPlayerId: "player-9",
       avoidTargetPlayerIds: ["player-1", "player-2"],
-      constraints: ["more_realistic", "no_qbs"],
+      constraints: ["more_realistic", "no_qbs", "no_picks", "same_position_return"],
       strategyFocus: "tier_down",
       searchDepth: "deep",
     });

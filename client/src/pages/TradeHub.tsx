@@ -13,7 +13,8 @@ import { formatTradeValue, humanize } from "../lib/format";
 import { buildTradeFinderUrl } from "../lib/trade-finder-url";
 import type { BuyingWindow, TradeAssetInput, TradeBoardLine, TradePackage, TradePackageAsset } from "@shared/types";
 
-const BOARD_LEAGUE_COUNT = 4;
+const BOARD_LEAGUE_SCAN_COUNT = 6;
+const BOARD_VISIBLE_LINE_COUNT = 3;
 
 const tools = [
   { label: "Calculator", description: "League-adjusted value check", href: "/trade-calculator", icon: Calculator },
@@ -64,16 +65,83 @@ function TicketSkeleton() {
   );
 }
 
-function LeagueBestLine({ line, leagueId, leagueName, isLoading }: {
+function BoardPreparingCard() {
+  return (
+    <div className="ticket-card">
+      <div className="ticket-card-head">
+        <span className="ticket-card-league">Preparing best lines</span>
+        <span className="ticket-tag">Building</span>
+      </div>
+      <div className="ticket-card-foot">
+        <span className="ticket-reason">
+          First load is warming league-adjusted values. Cached lines will appear here automatically.
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function BoardEmptyCard({ username }: { username: string }) {
+  return (
+    <div className="ticket-card">
+      <div className="ticket-card-head">
+        <span className="ticket-card-league">No strong lines cached</span>
+        <span className="ticket-tag">Refine</span>
+      </div>
+      <div className="ticket-card-foot">
+        <span className="ticket-reason">
+          The best-line scan did not find a default trade worth surfacing. Pick a league and partner for targeted lanes.
+        </span>
+      </div>
+      <Link
+        href={buildTradeFinderUrl(username, { mode: "find" })}
+        className="edge-secondary-button"
+        style={{ minHeight: 36, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 7, textDecoration: "none" }}
+      >
+        Open Finder
+      </Link>
+    </div>
+  );
+}
+
+function LeagueNoLineCard({ username, leagueId, leagueName }: {
+  username: string;
+  leagueId: string;
+  leagueName: string;
+}) {
+  return (
+    <div className="ticket-card">
+      <div className="ticket-card-head">
+        <span className="ticket-card-league">{leagueName}</span>
+        <span className="ticket-tag">No line</span>
+      </div>
+      <div className="ticket-card-foot">
+        <span className="ticket-reason">
+          No realistic default trade survived the board filter. Use partner-first Finder for targeted lanes.
+        </span>
+      </div>
+      <Link
+        href={buildTradeFinderUrl(username, { mode: "find", leagueId })}
+        className="edge-secondary-button"
+        style={{ minHeight: 36, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 7, textDecoration: "none" }}
+      >
+        Open Finder
+      </Link>
+    </div>
+  );
+}
+
+function LeagueBestLine({ line, leagueId, leagueName, username, isLoading }: {
   line: TradeBoardLine | undefined;
   leagueId: string;
   leagueName: string;
+  username: string;
   isLoading: boolean;
 }) {
   const slip = useSlip();
 
   if (isLoading) return <TicketSkeleton />;
-  if (!line) return null;
+  if (!line) return <LeagueNoLineCard username={username} leagueId={leagueId} leagueName={leagueName} />;
   const { package: pkg, partner } = line;
   const probability = pkg.acceptance?.probability ?? null;
   const band = acceptanceBand(probability);
@@ -170,15 +238,29 @@ export default function TradeHub() {
   const { data: windows = [] } = useBuyingWindows(username);
   const slip = useSlip();
 
-  const boardLeagues = leagues.slice(0, BOARD_LEAGUE_COUNT);
+  const boardLeagues = leagues.slice(0, BOARD_LEAGUE_SCAN_COUNT);
   const boardLeagueIds = boardLeagues.map((league) => league.league_id);
   const boardLinesQuery = useTradeBoardLines(username, boardLeagueIds);
+  const boardResponse = boardLinesQuery.data;
   const boardLinesByLeague = new Map(
-    (boardLinesQuery.data ?? []).map((line) => [line.league_id, line])
+    (boardResponse?.lines ?? []).map((line) => [line.league_id, line])
   );
+  const actionableBoardLines = boardLeagues
+    .map((league) => boardLinesByLeague.get(league.league_id))
+    .filter((line): line is TradeBoardLine => Boolean(line))
+    .slice(0, BOARD_VISIBLE_LINE_COUNT);
+  const boardBuilding =
+    boardResponse?.status === "building" && (boardResponse.lines?.length ?? 0) === 0;
   const boardLoading =
     boardLeagues.length > 0 &&
-    (boardLinesQuery.isLoading || (boardLinesQuery.isFetching && !boardLinesQuery.data));
+    !boardBuilding &&
+    (boardLinesQuery.isLoading || (boardLinesQuery.isFetching && !boardResponse));
+  const boardEmpty =
+    boardLeagues.length > 0 &&
+    !boardLoading &&
+    !boardBuilding &&
+    boardResponse?.status === "ready" &&
+    (boardResponse.lines?.length ?? 0) === 0;
 
   return (
     <AppShell>
@@ -202,19 +284,35 @@ export default function TradeHub() {
         </div>
       )}
       <div className="board-rail">
-        {boardLeagues.map((l) => (
-          <LeagueBestLine
-            key={l.league_id}
-            line={boardLinesByLeague.get(l.league_id)}
-            leagueId={l.league_id}
-            leagueName={l.league_name}
-            isLoading={boardLoading}
-          />
-        ))}
+        {boardBuilding
+          ? <BoardPreparingCard />
+          : boardEmpty
+            ? <BoardEmptyCard username={username} />
+            : actionableBoardLines.length > 0
+              ? actionableBoardLines.map((line) => (
+              <LeagueBestLine
+                key={line.league_id}
+                line={line}
+                leagueId={line.league_id}
+                leagueName={line.league_name}
+                username={username}
+                isLoading={boardLoading}
+              />
+              ))
+              : boardLeagues.slice(0, BOARD_VISIBLE_LINE_COUNT).map((l) => (
+                <LeagueBestLine
+                  key={l.league_id}
+                  line={undefined}
+                  leagueId={l.league_id}
+                  leagueName={l.league_name}
+                  username={username}
+                  isLoading={boardLoading}
+                />
+              ))}
       </div>
-      {leagues.length > BOARD_LEAGUE_COUNT && (
+      {leagues.length > BOARD_LEAGUE_SCAN_COUNT && (
         <p style={{ margin: "8px 0 0", color: "var(--text-muted)", fontSize: 11 }}>
-          Showing your top {BOARD_LEAGUE_COUNT} leagues. Open Finder for the full board.
+          Showing up to {BOARD_VISIBLE_LINE_COUNT} lines from your top {BOARD_LEAGUE_SCAN_COUNT} leagues. Open Finder for the full board.
         </p>
       )}
 

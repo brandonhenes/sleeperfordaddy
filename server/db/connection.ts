@@ -3,13 +3,14 @@ import postgres from "postgres";
 import * as schema from "./schema.js";
 
 const connectionString = process.env.DATABASE_URL;
+const poolMax = Number(process.env.PG_POOL_MAX ?? 5);
 
 if (!connectionString) {
   throw new Error("DATABASE_URL environment variable is required");
 }
 
 const client = postgres(connectionString, {
-  max: 10,
+  max: Number.isFinite(poolMax) && poolMax > 0 ? Math.floor(poolMax) : 5,
   idle_timeout: 20,
   connect_timeout: 10,
   ssl: { rejectUnauthorized: false },

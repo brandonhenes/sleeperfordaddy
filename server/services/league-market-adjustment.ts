@@ -95,10 +95,17 @@ const KTC_BASELINE_SCORING: Record<string, number> = {
 const PROJECTION_WEEKS = Array.from({ length: 17 }, (_, index) => index + 1);
 const PROJECTION_WINDOW_YEARS = 3;
 const SLEEPER_PROJECTION_CACHE_MS = 10 * 60 * 1000;
+const LEAGUE_MARKET_CONTEXT_CACHE_MS = 10 * 60 * 1000;
 const sleeperProjectionCache = new Map<string, {
   expiresAt: number;
   data: Record<string, Record<string, number>>;
 }>();
+const sleeperProjectionInFlight = new Map<string, Promise<Record<string, Record<string, number>>>>();
+const leagueMarketContextCache = new Map<string, {
+  expiresAt: number;
+  value: LeagueMarketContext | null;
+}>();
+const leagueMarketContextInFlight = new Map<string, Promise<LeagueMarketContext | null>>();
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
@@ -178,25 +185,53 @@ export async function loadLeagueMarketContext(
 ): Promise<LeagueMarketContext | null> {
   if (!leagueId) return null;
 
-  const rows = await db.execute(sql`
-    SELECT scoring_settings, roster_positions, total_rosters
-    FROM leagues
-    WHERE league_id = ${leagueId}
-    LIMIT 1
-  `);
-  const row = (rows as unknown as Array<{
-    scoring_settings: Record<string, unknown> | null;
-    roster_positions: string[] | null;
-    total_rosters: number | null;
-  }>)[0];
-  if (!row) return null;
+  const cacheKey = `${leagueId}:${mode}`;
+  const now = Date.now();
+  const cached = leagueMarketContextCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) return cached.value;
 
-  return buildLeagueMarketContext({
-    scoringSettings: row.scoring_settings ?? null,
-    rosterPositions: row.roster_positions ?? null,
-    totalRosters: row.total_rosters ?? 12,
-    fallbackMode: mode,
-  });
+  const pending = leagueMarketContextInFlight.get(cacheKey);
+  if (pending) return pending;
+
+  const work = (async () => {
+    const rows = await db.execute(sql`
+      SELECT scoring_settings, roster_positions, total_rosters
+      FROM leagues
+      WHERE league_id = ${leagueId}
+      LIMIT 1
+    `);
+    const row = (rows as unknown as Array<{
+      scoring_settings: Record<string, unknown> | null;
+      roster_positions: string[] | null;
+      total_rosters: number | null;
+    }>)[0];
+    if (!row) {
+      leagueMarketContextCache.set(cacheKey, {
+        value: null,
+        expiresAt: Date.now() + LEAGUE_MARKET_CONTEXT_CACHE_MS,
+      });
+      return null;
+    }
+
+    const value = buildLeagueMarketContext({
+      scoringSettings: row.scoring_settings ?? null,
+      rosterPositions: row.roster_positions ?? null,
+      totalRosters: row.total_rosters ?? 12,
+      fallbackMode: mode,
+    });
+    leagueMarketContextCache.set(cacheKey, {
+      value,
+      expiresAt: Date.now() + LEAGUE_MARKET_CONTEXT_CACHE_MS,
+    });
+    return value;
+  })();
+
+  leagueMarketContextInFlight.set(cacheKey, work);
+  try {
+    return await work;
+  } finally {
+    leagueMarketContextInFlight.delete(cacheKey);
+  }
 }
 
 export function scoringMultiplier(params: {
@@ -470,18 +505,36 @@ async function fetchSleeperProjectionWeek(
     return cached.data;
   }
 
-  const response = await fetch(
-    `https://api.sleeper.app/v1/projections/nfl/regular/${season}/${week}`
-  );
-  if (!response.ok) {
-    throw new Error(`Sleeper projections ${season} week ${week} returned ${response.status}`);
+  const pending = sleeperProjectionInFlight.get(cacheKey);
+  if (pending) return pending;
+
+  const work = (async () => {
+    const response = await fetch(
+      `https://api.sleeper.app/v1/projections/nfl/regular/${season}/${week}`
+    );
+    if (!response.ok) {
+      throw new Error(`Sleeper projections ${season} week ${week} returned ${response.status}`);
+    }
+    const data = await response.json() as Record<string, Record<string, number>>;
+    sleeperProjectionCache.set(cacheKey, {
+      expiresAt: Date.now() + SLEEPER_PROJECTION_CACHE_MS,
+      data,
+    });
+    return data;
+  })();
+
+  sleeperProjectionInFlight.set(cacheKey, work);
+  try {
+    return await work;
+  } finally {
+    sleeperProjectionInFlight.delete(cacheKey);
   }
-  const data = await response.json() as Record<string, Record<string, number>>;
-  sleeperProjectionCache.set(cacheKey, {
-    expiresAt: Date.now() + SLEEPER_PROJECTION_CACHE_MS,
-    data,
-  });
-  return data;
+}
+
+export async function prewarmSleeperProjectionWeeks(
+  season = projectionSeason()
+): Promise<void> {
+  await Promise.all(PROJECTION_WEEKS.map((week) => fetchSleeperProjectionWeek(season, week)));
 }
 
 export async function loadSleeperProjectionProfiles(

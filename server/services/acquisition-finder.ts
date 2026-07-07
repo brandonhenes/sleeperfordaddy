@@ -34,6 +34,8 @@ const POSITIONS = ["QB", "RB", "WR", "TE"] as const;
 type Pos = (typeof POSITIONS)[number];
 const MIN_STARTERS: Record<Pos, number> = { QB: 1, RB: 2, WR: 2, TE: 1 };
 const MIN_EDGE = 40;
+const ACQUISITION_CACHE_TTL_MS = 5 * 60 * 1000;
+const ACQUISITION_LEAGUE_CONCURRENCY = 4;
 
 const ARCHETYPE_WANTS: Record<string, string> = {
   "Dynasty Juggernaut": "depth and future insurance",
@@ -44,6 +46,53 @@ const ARCHETYPE_WANTS: Record<string, string> = {
   "Dead Zone": "any direction that breaks the stalemate",
   Competitor: "small upgrades to push into contention",
 };
+
+type AcquisitionCacheEntry = {
+  expiresAt: number;
+  data?: AcquisitionResult;
+  promise?: Promise<AcquisitionResult>;
+};
+
+interface AcquisitionFinderOptions {
+  maxOpportunities?: number;
+}
+
+const acquisitionCache = new Map<string, AcquisitionCacheEntry>();
+
+function acquisitionCacheKey(
+  username: string,
+  lookup: string,
+  classStrengths?: ClassStrengthMap,
+  weights?: SourceWeights,
+  options: AcquisitionFinderOptions = {}
+): string {
+  return JSON.stringify({
+    username: username.toLowerCase(),
+    lookup: lookup.toLowerCase(),
+    classStrengths: classStrengths ?? null,
+    weights: weights ?? null,
+    maxOpportunities: options.maxOpportunities ?? null,
+  });
+}
+
+async function mapLimit<T, R>(
+  items: T[],
+  limit: number,
+  mapper: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (true) {
+      const index = next;
+      next += 1;
+      if (index >= items.length) break;
+      results[index] = await mapper(items[index], index);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
 
 // ─── Helpers ───
 
@@ -828,21 +877,102 @@ async function getTradeHistory(
   return tradesByLeague;
 }
 
+function bestOfferScore(opportunity: AcquisitionOpportunity): number {
+  const best = opportunity.packages[0];
+  if (!best) return Number.NEGATIVE_INFINITY;
+  return (
+    (best.strategy_score ?? 0) * 2 +
+    best.acceptance_likelihood +
+    (best.valuation_edge ?? best.delta) / 100
+  );
+}
+
+export function rankAcquisitionOpportunities(
+  opportunities: AcquisitionOpportunity[]
+): AcquisitionOpportunity[] {
+  return opportunities
+    .filter((opportunity) => opportunity.packages.length > 0)
+    .sort((a, b) =>
+      a.difficulty.score - b.difficulty.score ||
+      bestOfferScore(b) - bestOfferScore(a)
+    );
+}
+
+export function buildAcquisitionSummary(
+  playerName: string,
+  ownedLeagueCount: number,
+  opportunities: AcquisitionOpportunity[],
+  shownCount = opportunities.length
+): string {
+  let summary = `${playerName} is owned in ${ownedLeagueCount} of your leagues (not counting leagues where you own them).`;
+  if (opportunities.length > 0) {
+    const easiest = opportunities[0];
+    if (shownCount < opportunities.length) {
+      summary += ` Showing the best ${shownCount} of ${opportunities.length} viable starting offers.`;
+    } else {
+      summary += ` ${opportunities.length} leagues produced viable starting offers.`;
+    }
+    summary += ` Easiest viable path is ${easiest.owner.display_name} in ${easiest.league_name} (${easiest.owner.archetype}, ${easiest.difficulty.positional_importance}).`;
+  } else {
+    summary += " No viable starting offers were generated from your current rosters.";
+  }
+  return summary;
+}
+
 // ─── Main Export ───
 
 export async function findAcquisitionPackages(
   username: string,
   playerId: string,
   classStrengths?: ClassStrengthMap,
-  weights?: SourceWeights
+  weights?: SourceWeights,
+  options: AcquisitionFinderOptions = {}
 ): Promise<AcquisitionResult> {
   const lookup = decodeURIComponent(playerId).trim();
+  const key = acquisitionCacheKey(username, lookup, classStrengths, weights, options);
+  const now = Date.now();
+  const cached = acquisitionCache.get(key);
+  if (cached?.data && cached.expiresAt > now) {
+    return cached.data;
+  }
+  if (cached?.promise) {
+    return cached.promise;
+  }
+
+  const promise = findAcquisitionPackagesUncached(username, lookup, classStrengths, weights, options)
+    .then((data) => {
+      acquisitionCache.set(key, {
+        expiresAt: Date.now() + ACQUISITION_CACHE_TTL_MS,
+        data,
+      });
+      return data;
+    })
+    .catch((error: unknown) => {
+      acquisitionCache.delete(key);
+      throw error;
+    });
+
+  acquisitionCache.set(key, {
+    expiresAt: now + ACQUISITION_CACHE_TTL_MS,
+    promise,
+  });
+  return promise;
+}
+
+async function findAcquisitionPackagesUncached(
+  username: string,
+  lookup: string,
+  classStrengths?: ClassStrengthMap,
+  weights?: SourceWeights,
+  options: AcquisitionFinderOptions = {}
+): Promise<AcquisitionResult> {
   const pm = await resolvePlayer(lookup);
-  if (!pm) return { target: { player_id: "", player_name: playerId, position: "", team: null, age: null, edge_score: 0 }, opportunities: [], summary: `Player not found.` };
+  if (!pm) return { target: { player_id: "", player_name: lookup, position: "", team: null, age: null, edge_score: 0 }, opportunities: [], summary: `Player not found.` };
 
   // 2. Get all power rankings
   const allLeagues = await getPowerRankings(username, "dynasty", weights, undefined, {
     forceDbOnly: true,
+    skipLeaguePoints: true,
   });
   if (allLeagues.length === 0) {
     return {
@@ -853,7 +983,15 @@ export async function findAcquisitionPackages(
   }
 
   // 3. Find the target in each league's rosters
-  const opportunities: AcquisitionOpportunity[] = [];
+  const candidates: Array<{
+    league: LeaguePowerRanking;
+    ownerRoster: RosterRanking;
+    userRoster: RosterRanking;
+    targetAsset: CoreAsset;
+    difficulty: AcquisitionDifficulty;
+    generatedPackages: AcquisitionOffer[];
+  }> = [];
+  let ownedLeagueCount = 0;
   let targetEdgeScore = 0;
   const leagueIds = allLeagues.map((l) => l.league_id);
 
@@ -879,6 +1017,7 @@ export async function findAcquisitionPackages(
     }
 
     if (!ownerRoster || !targetAsset) continue;
+    ownedLeagueCount += 1;
 
     // Find user's roster in this league
     const userRoster = league.rosters.find((r) => r.is_user);
@@ -891,46 +1030,70 @@ export async function findAcquisitionPackages(
     const generatedPackages = generateAcquisitionOffers(
       userRoster, ownerRoster, targetAsset, difficulty
     );
-    const packages = await valueAcquisitionOffersForLeague(
-      generatedPackages,
-      league.league_id,
-      league.mode,
-      classStrengths,
-      weights,
-      {
-        userArchetype: userRoster.archetype,
-        ownerArchetype: ownerRoster.archetype,
-      }
-    );
+    if (generatedPackages.length === 0) continue;
 
-    // Get trade comps for this league
-    const comps = tradeHistory.get(league.league_id) ?? [];
-
-    opportunities.push({
-      league_id: league.league_id,
-      league_name: league.league_name,
-      league_mode: league.mode,
-      owner: {
-        roster_id: ownerRoster.roster_id,
-        display_name: ownerRoster.display_name,
-        archetype: ownerRoster.archetype,
-      },
+    candidates.push({
+      league,
+      ownerRoster,
+      userRoster,
+      targetAsset,
       difficulty,
-      packages,
-      trade_history: comps.slice(0, 3),
+      generatedPackages,
     });
   }
 
-  // Sort by difficulty (easiest first)
-  opportunities.sort((a, b) => a.difficulty.score - b.difficulty.score);
+  candidates.sort((a, b) => a.difficulty.score - b.difficulty.score);
 
-  // Build summary
-  const total = opportunities.length;
-  const easiest = opportunities[0];
-  let summary = `${pm.full_name} is owned in ${total} of your leagues (not counting leagues where you own them).`;
-  if (easiest) {
-    summary += ` Easiest to acquire from ${easiest.owner.display_name} in ${easiest.league_name} (${easiest.owner.archetype}, ${easiest.difficulty.positional_importance}).`;
-  }
+  const candidateLimit = options.maxOpportunities
+    ? Math.min(candidates.length, options.maxOpportunities)
+    : candidates.length;
+  const candidatesToValue = candidates.slice(0, candidateLimit);
+
+  const valuedOpportunities = await mapLimit(
+    candidatesToValue,
+    ACQUISITION_LEAGUE_CONCURRENCY,
+    async (candidate) => {
+      const packages = await valueAcquisitionOffersForLeague(
+        candidate.generatedPackages,
+        candidate.league.league_id,
+        candidate.league.mode,
+        classStrengths,
+        weights,
+        {
+          userArchetype: candidate.userRoster.archetype,
+          ownerArchetype: candidate.ownerRoster.archetype,
+        }
+      );
+
+      const comps = tradeHistory.get(candidate.league.league_id) ?? [];
+
+      return {
+        league_id: candidate.league.league_id,
+        league_name: candidate.league.league_name,
+        league_mode: candidate.league.mode,
+        owner: {
+          roster_id: candidate.ownerRoster.roster_id,
+          display_name: candidate.ownerRoster.display_name,
+          archetype: candidate.ownerRoster.archetype,
+        },
+        difficulty: candidate.difficulty,
+        packages,
+        trade_history: comps.slice(0, 3),
+      };
+    }
+  );
+
+  const rankedOpportunities = rankAcquisitionOpportunities(valuedOpportunities);
+  const opportunities = options.maxOpportunities
+    ? rankedOpportunities.slice(0, options.maxOpportunities)
+    : rankedOpportunities;
+  const partialResults = candidateLimit < candidates.length || opportunities.length < rankedOpportunities.length;
+  const summary = buildAcquisitionSummary(
+    pm.full_name,
+    ownedLeagueCount,
+    rankedOpportunities,
+    opportunities.length
+  );
 
   return {
     target: {
@@ -943,5 +1106,10 @@ export async function findAcquisitionPackages(
     },
     opportunities,
     summary,
+    partial_results: partialResults || undefined,
+    total_opportunities: partialResults ? candidates.length : rankedOpportunities.length,
+    warnings: partialResults
+      ? [`Showing the fastest ${opportunities.length} acquisition paths first. Load the full board to evaluate every owner.`]
+      : undefined,
   };
 }

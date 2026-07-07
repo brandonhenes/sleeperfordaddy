@@ -17,7 +17,8 @@ export default function SyncGate({
   checkingDescription = "Checking if data is available...",
   syncingDescription = "First-time sync may take a minute. Pulling leagues, rosters, and player data from Sleeper.",
 }: SyncGateProps) {
-  const { phase, syncProgress, errorMsg, retry } = useEnsureUser(username || undefined);
+  const { phase, syncProgress, syncStep, syncDetail, errorMsg, retry } = useEnsureUser(username || undefined);
+  const progressLabel = syncProgress ? `${syncProgress.done}/${syncProgress.total}` : null;
 
   if (!username) {
     return (
@@ -34,13 +35,17 @@ export default function SyncGate({
           <span className="animate-pulse">.</span>
           {phase === "checking"
             ? `Looking up ${username}...`
-            : `Syncing ${username}'s leagues${
-                syncProgress ? ` (${syncProgress.done}/${syncProgress.total})` : "..."
-              }`}
+            : `Syncing ${username}'s leagues${progressLabel ? ` (${progressLabel})` : "..."}`}
         </div>
         <p>
           {phase === "syncing" ? syncingDescription : checkingLabel || checkingDescription}
         </p>
+        {phase === "syncing" && (syncStep || syncDetail) && (
+          <div className="edge-sync-detail" aria-live="polite">
+            {syncStep && <span>{syncStep}</span>}
+            {syncDetail && <span>{syncDetail}</span>}
+          </div>
+        )}
       </Card>
     );
   }
@@ -51,7 +56,14 @@ export default function SyncGate({
         message={errorMsg || "Something went wrong."}
         actionLabel="Try Again"
         onAction={retry}
-      />
+      >
+        {(syncStep || syncDetail) && (
+          <div className="edge-sync-detail edge-sync-detail-error">
+            {syncStep && <span>Failed at {syncStep}</span>}
+            {syncDetail && <span>{syncDetail}</span>}
+          </div>
+        )}
+      </ErrorState>
     );
   }
 

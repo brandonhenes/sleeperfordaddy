@@ -12,6 +12,7 @@ import {
 } from "./edge-score.js";
 import {
   buildDraftPickInventory, getLeagueDraftPicks, getRookieDraftOrder, estimatePickTiers, scoreDraftPicks,
+  mergeLiveCompletedDraftSeasonsByLeague,
   type DraftPick, type TieredPick,
 } from "./draft-picks.js";
 import { optimizeLineup } from "./lineup-optimizer.js";
@@ -40,6 +41,7 @@ const PR_DB_ONLY = process.env.POWER_RANKINGS_DB_ONLY === "true";
 interface PowerRankingsOptions {
   leagueIds?: string[];
   forceDbOnly?: boolean;
+  skipLeaguePoints?: boolean;
 }
 
 export function clearPowerRankingsCache(username?: string) {
@@ -107,7 +109,7 @@ export async function getPowerRankings(
       : "dynasty";
   const weights = typeof valueTypeOrWeights === "string" ? maybeWeights : valueTypeOrWeights;
   const leagueFilter = options.leagueIds?.filter(Boolean).sort() ?? [];
-  const cacheKey = `${username.toLowerCase()}:${valueType}:${sourceWeightsKey(weights)}:${leagueFilter.length > 0 ? leagueFilter.join(",") : "all"}`;
+  const cacheKey = `${username.toLowerCase()}:${valueType}:${sourceWeightsKey(weights)}:${leagueFilter.length > 0 ? leagueFilter.join(",") : "all"}:${options.skipLeaguePoints ? "no-league-points" : "league-points"}`;
   const now = Date.now();
   const hit = prCache.get(cacheKey);
   if (hit && hit.expires > now) {
@@ -144,14 +146,22 @@ export async function getPowerRankings(
 
   if (PR_DB_ONLY || options.forceDbOnly) {
     try {
-      const dbOnly = await getPowerRankingsDbOnly(username, userId, leagueIds, valueType, weights);
+      const dbOnly = await getPowerRankingsDbOnly(
+        username,
+        userId,
+        leagueIds,
+        valueType,
+        weights,
+        options.skipLeaguePoints
+      );
       setPowerRankingsCache(cacheKey, dbOnly);
       return dbOnly;
     } catch (err) {
-      console.error("[power-rankings] DB-only path failed, falling back to legacy path", err);
       if (options.forceDbOnly) {
+        console.error("[power-rankings] Forced DB-only path failed", err);
         return [];
       }
+      console.error("[power-rankings] DB-only path failed, falling back to legacy path", err);
     }
   }
 
@@ -314,7 +324,7 @@ export async function getPowerRankings(
     const rawScoring = (scoring ?? {}) as Record<string, number>;
     const idPosMap = new Map<string, string>();
     for (const [, ps] of owners) for (const p of ps) idPosMap.set(p.player_id, p.position);
-    const leaguePointsMap = Object.keys(rawScoring).length > 0
+    const leaguePointsMap = !options.skipLeaguePoints && Object.keys(rawScoring).length > 0
       ? await scorePlayersForLeague(
           [...idPosMap.entries()].map(([sleeper_id, position]) => ({ sleeper_id, position })),
           rawScoring,
@@ -556,9 +566,10 @@ function buildDraftPicksFromDB(
 }
 
 async function loadCompletedDraftSeasonsByLeague(
-  leagueIds: string[]
+  targets: Array<{ leagueId: string; currentSeason?: string | number | null }>
 ): Promise<Map<string, Set<string>>> {
   const result = new Map<string, Set<string>>();
+  const leagueIds = targets.map((target) => target.leagueId).filter(Boolean);
   if (leagueIds.length === 0) return result;
 
   const leagueIdFrags = leagueIds.map((id) => sql`${id}`);
@@ -569,25 +580,25 @@ async function loadCompletedDraftSeasonsByLeague(
       SELECT to_regclass('public.league_draft_results')::text AS table_name
     `);
     const exists = (tableCheck as unknown as Array<{ table_name: string | null }>)[0]?.table_name != null;
-    if (!exists) return result;
+    if (exists) {
+      const rows = await db.execute(sql`
+        SELECT league_id, season
+        FROM league_draft_results
+        WHERE league_id IN (${inClause})
+        GROUP BY league_id, season
+      `);
 
-    const rows = await db.execute(sql`
-      SELECT league_id, season
-      FROM league_draft_results
-      WHERE league_id IN (${inClause})
-      GROUP BY league_id, season
-    `);
-
-    for (const row of rows as unknown as Array<{ league_id: string; season: string }>) {
-      const seasons = result.get(row.league_id) ?? new Set<string>();
-      seasons.add(String(row.season));
-      result.set(row.league_id, seasons);
+      for (const row of rows as unknown as Array<{ league_id: string; season: string }>) {
+        const seasons = result.get(row.league_id) ?? new Set<string>();
+        seasons.add(String(row.season));
+        result.set(row.league_id, seasons);
+      }
     }
   } catch {
-    return result;
+    // Continue with the live draft-status fallback when persisted results are unavailable.
   }
 
-  return result;
+  return mergeLiveCompletedDraftSeasonsByLeague(targets, result, { concurrency: 4 });
 }
 
 async function getPowerRankingsDbOnly(
@@ -595,13 +606,14 @@ async function getPowerRankingsDbOnly(
   userId: string,
   leagueIds: string[],
   valueType: ValueType = "dynasty",
-  weights?: SourceWeights
+  weights?: SourceWeights,
+  skipLeaguePoints = false
 ): Promise<LeaguePowerRanking[]> {
   const leagueIdFrags = leagueIds.map((id) => sql`${id}`);
   const leagueInClause = sql.join(leagueIdFrags, sql`, `);
 
   const leagueRows = await db.execute(sql`
-    SELECT league_id, name AS league_name, total_rosters,
+    SELECT league_id, name AS league_name, season, total_rosters,
            roster_positions, draft_rounds, scoring_settings
     FROM leagues
     WHERE league_id IN (${leagueInClause})
@@ -610,6 +622,7 @@ async function getPowerRankingsDbOnly(
   type LeagueRow = {
     league_id: string;
     league_name: string;
+    season: string | number | null;
     total_rosters: number;
     roster_positions: string[] | null;
     draft_rounds: number | null;
@@ -632,7 +645,12 @@ async function getPowerRankingsDbOnly(
     db.execute(sql`SELECT league_id, user_id, display_name, team_name FROM league_users WHERE league_id IN (${inClause})`),
     db.execute(sql`SELECT league_id, season, round, roster_id, owner_id FROM league_traded_picks WHERE league_id IN (${inClause})`),
     db.execute(sql`SELECT league_id, season, roster_id, draft_position FROM league_draft_orders WHERE league_id IN (${inClause})`),
-    loadCompletedDraftSeasonsByLeague(leagueIds),
+    loadCompletedDraftSeasonsByLeague(
+      leagues.map((league) => ({
+        leagueId: league.league_id,
+        currentSeason: league.season,
+      }))
+    ),
   ]);
 
   type RR = { league_id: string; owner_id: string; player_id: string; full_name: string; position: string; age: number | null; team: string | null; status: string | null; external_flags_fa: boolean };
@@ -738,7 +756,7 @@ async function getPowerRankingsDbOnly(
     const rawScoring = (league.scoring_settings ?? {}) as Record<string, number>;
     const idPosMap = new Map<string, string>();
     for (const [, ps] of owners) for (const p of ps) idPosMap.set(p.player_id, p.position);
-    const leaguePointsMap = Object.keys(rawScoring).length > 0
+    const leaguePointsMap = !skipLeaguePoints && Object.keys(rawScoring).length > 0
       ? await scorePlayersForLeague(
           [...idPosMap.entries()].map(([sleeper_id, position]) => ({ sleeper_id, position })),
           rawScoring,

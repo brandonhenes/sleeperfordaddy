@@ -24,6 +24,8 @@ const CONSTRAINTS = new Set<TradeFinderConstraint>([
   "more_realistic",
   "more_picks_back",
   "no_qbs",
+  "no_picks",
+  "same_position_return",
   "win_now_only",
 ]);
 const STRATEGIES = new Set<TradeStrategyType>([
@@ -89,8 +91,8 @@ export function parseTradeFinderQuery(input: string | URLSearchParams): TradeFin
 
   return {
     mode: parseMode(params.get("mode")),
-    leagueId: params.get("league") || null,
-    playerId: params.get("player") || null,
+    leagueId: params.get("league") || params.get("leagueId") || null,
+    playerId: params.get("player") || params.get("playerId") || null,
     opponentRosterId: roster.id,
     targetPlayerId: params.get("target") || params.get("targetPlayerId") || null,
     avoidTargetPlayerIds: parseList(params.get("avoid") ?? params.get("avoidTargetPlayerIds")),
