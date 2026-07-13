@@ -26,6 +26,9 @@ const STAT_KEYS = [
   "rec", "rec_yd", "rec_td", "rec_tgt",
 ] as const;
 type StatKey = (typeof STAT_KEYS)[number];
+const STATS_REFRESH_MS = 6 * 60 * 60 * 1000;
+const lastRefreshAttempt = new Map<number, number>();
+const refreshInFlight = new Map<number, Promise<Awaited<ReturnType<typeof syncSleeperStats>>>>();
 
 // A player "played" a given week if they have ANY of these measurable activities.
 // Using non-zero presence rather than a `gp` field because Sleeper's weekly
@@ -207,4 +210,59 @@ export async function syncSleeperStats(
     weekly_rows_written: weeklyRowsWritten,
     weeks_included: WEEKS_INCLUDED,
   };
+}
+
+export async function pruneSleeperStatsHistory(
+  currentSeason: number,
+  seasonsToKeep = 4
+): Promise<{ weekly_deleted: number; seasonal_deleted: number }> {
+  const oldestSeason = currentSeason - Math.max(1, seasonsToKeep) + 1;
+  const weeklyRows = await db.execute(sql`
+    DELETE FROM player_weekly_stats
+    WHERE season < ${oldestSeason}
+    RETURNING sleeper_id
+  `);
+  const seasonalRows = await db.execute(sql`
+    DELETE FROM player_seasonal_stats
+    WHERE season < ${oldestSeason}
+    RETURNING sleeper_id
+  `);
+  return {
+    weekly_deleted: weeklyRows.length,
+    seasonal_deleted: seasonalRows.length,
+  };
+}
+
+export async function ensureSleeperStatsFresh(
+  season: number,
+  maxAgeMs = STATS_REFRESH_MS
+): Promise<Awaited<ReturnType<typeof syncSleeperStats>> | null> {
+  const pending = refreshInFlight.get(season);
+  if (pending) return pending;
+
+  const now = Date.now();
+  const lastAttempt = lastRefreshAttempt.get(season) ?? 0;
+  if (now - lastAttempt < maxAgeMs) return null;
+
+  const rows = await db.execute(sql`
+    SELECT MAX(updated_at) AS latest
+    FROM player_weekly_stats
+    WHERE season = ${season}
+  `);
+  const latestRaw = (rows as unknown as Array<{ latest: string | Date | null }>)[0]?.latest;
+  const latest = latestRaw ? new Date(latestRaw).getTime() : 0;
+  if (latest > 0 && now - latest < maxAgeMs) return null;
+
+  lastRefreshAttempt.set(season, now);
+  const work = (async () => {
+    const result = await syncSleeperStats(season);
+    await pruneSleeperStatsHistory(season);
+    return result;
+  })();
+  refreshInFlight.set(season, work);
+  try {
+    return await work;
+  } finally {
+    refreshInFlight.delete(season);
+  }
 }

@@ -4,6 +4,15 @@ import {
   getScoringMultiplier,
   normalizeScoringSettings,
 } from "./scoring-adjuster.js";
+import {
+  buildCompactPlayerWeekPoints,
+  buildCompactTeamWeekMap,
+  type LeagueWeekOverridesRow,
+  type ProfileAssignmentRow,
+  type ProfileWeekPointsRow,
+  type TeamWeekRow,
+  type TeamWeekSummary,
+} from "./trade-matchup-context.js";
 
 type ValueSource = "fantasycalc" | "dynastyprocess";
 type ValueVerdict = "won" | "lost" | "push" | null;
@@ -116,31 +125,6 @@ interface PickResolutionUpdate {
   sleeperId: string;
   name: string;
   position: string | null;
-}
-
-interface MatchupRow {
-  league_id: string;
-  season: number;
-  week: number;
-  roster_id: number;
-  player_id: string;
-  points: number;
-  is_starter: boolean | null;
-  opponent_roster_id: number | null;
-  opponent_total: number | null;
-  league_median: number | null;
-  roster_total: number | null;
-}
-
-interface TeamWeekSummary {
-  league_id: string;
-  season: number;
-  week: number;
-  roster_id: number;
-  roster_total: number;
-  opponent_total: number;
-  league_median: number;
-  rows: MatchupRow[];
 }
 
 interface ValuePoint {
@@ -454,38 +438,6 @@ function estimateStartWeek(tradeDate: Date, seasonYear: number): number {
   return tradeWeek + 1; // in-season trade, start after trade week
 }
 
-function buildTeamWeekMap(rows: MatchupRow[]): Map<string, TeamWeekSummary> {
-  const map = new Map<string, TeamWeekSummary>();
-  for (const row of rows) {
-    const key = `${row.league_id}:${row.season}:${row.week}:${row.roster_id}`;
-    const existing = map.get(key);
-    if (existing) {
-      existing.rows.push(row);
-      continue;
-    }
-    map.set(key, {
-      league_id: row.league_id,
-      season: row.season,
-      week: row.week,
-      roster_id: row.roster_id,
-      roster_total: row.roster_total ?? 0,
-      opponent_total: row.opponent_total ?? 0,
-      league_median: row.league_median ?? 0,
-      rows: [row],
-    });
-  }
-  return map;
-}
-
-function buildPlayerWeekPointsMap(rows: MatchupRow[]): Map<string, number> {
-  const map = new Map<string, number>();
-  for (const row of rows) {
-    const key = `${row.league_id}:${row.season}:${row.week}:${row.player_id}`;
-    map.set(key, row.points);
-  }
-  return map;
-}
-
 async function loadLeagueRows(): Promise<LeagueRow[]> {
   const rows = await db.execute(sql`
     SELECT league_id, season, previous_league_id, roster_positions, scoring_settings
@@ -527,7 +479,8 @@ function getLeagueTimeline(leagueId: string, leagueRows: LeagueRow[]): LeagueRow
 
 async function loadTradeSeasonContext(
   leagueId: string,
-  leagueRows: LeagueRow[]
+  leagueRows: LeagueRow[],
+  relevantPlayerIds: string[]
 ): Promise<TradeSeasonContext> {
   const timeline = getLeagueTimeline(leagueId, leagueRows);
   const leagueIds = [...new Set(timeline.map((row) => row.league_id))];
@@ -542,7 +495,9 @@ async function loadTradeSeasonContext(
   }
 
   const leagueIdSql = sql.join(leagueIds.map((id) => sql`${id}`), sql`, `);
-  const [rosterRowsRaw, matchupRowsRaw] = await Promise.all([
+  const seasons = [...new Set(timeline.map((row) => row.season))];
+  const seasonSql = sql.join(seasons.map((season) => sql`${season}`), sql`, `);
+  const [rosterRowsRaw, teamRowsRaw, assignmentRowsRaw, overrideRowsRaw] = await Promise.all([
     db.execute(sql`
       SELECT league_id, roster_id, owner_id
       FROM rosters
@@ -554,14 +509,23 @@ async function loadTradeSeasonContext(
         season,
         week,
         roster_id,
-        player_id,
-        points::real AS points,
-        is_starter,
+        player_ids,
+        starter_ids,
         opponent_roster_id,
         opponent_total::real AS opponent_total,
         league_median::real AS league_median,
         roster_total::real AS roster_total
-      FROM weekly_matchup_scores
+      FROM weekly_team_results
+      WHERE league_id IN (${leagueIdSql}) AND week <= 17
+    `),
+    db.execute(sql`
+      SELECT league_id, profile_id
+      FROM league_scoring_profile_assignments
+      WHERE league_id IN (${leagueIdSql})
+    `),
+    db.execute(sql`
+      SELECT league_id, season, week, points
+      FROM weekly_league_point_overrides
       WHERE league_id IN (${leagueIdSql}) AND week <= 17
     `),
   ]);
@@ -573,13 +537,28 @@ async function loadTradeSeasonContext(
     rosterIdByLeagueOwner.set(`${row.league_id}:${row.owner_id}`, row.roster_id);
   }
 
-  const matchupRows = matchupRowsRaw as unknown as MatchupRow[];
+  const assignments = assignmentRowsRaw as unknown as ProfileAssignmentRow[];
+  const profileIds = [...new Set(assignments.map((row) => row.profile_id))];
+  const profileRowsRaw = profileIds.length > 0
+    ? await db.execute(sql`
+        SELECT profile_id, season, week, points
+        FROM weekly_scoring_profile_points
+        WHERE profile_id IN (${sql.join(profileIds.map((id) => sql`${id}`), sql`, `)})
+          AND season IN (${seasonSql})
+          AND week <= 17
+      `)
+    : [];
   return {
     timeline,
     ownerIdByLeagueRoster,
     rosterIdByLeagueOwner,
-    teamWeeks: buildTeamWeekMap(matchupRows),
-    playerWeekPoints: buildPlayerWeekPointsMap(matchupRows),
+    teamWeeks: buildCompactTeamWeekMap(teamRowsRaw as unknown as TeamWeekRow[]),
+    playerWeekPoints: buildCompactPlayerWeekPoints(
+      assignments,
+      profileRowsRaw as unknown as ProfileWeekPointsRow[],
+      relevantPlayerIds,
+      overrideRowsRaw as unknown as LeagueWeekOverridesRow[]
+    ),
   };
 }
 
@@ -796,18 +775,22 @@ function computeSeasonOutcomes(
       );
       if (!summary) continue;
 
-      const receivedStartPoints = summary.rows
-        .filter((row) => receivedPlayers.includes(row.player_id) && row.is_starter === true)
-        .reduce((sum, row) => sum + row.points, 0);
-
-      for (const row of summary.rows) {
-        if (!receivedPlayers.includes(row.player_id)) continue;
+      let receivedStartPoints = 0;
+      for (const playerId of receivedPlayers) {
+        if (!summary.playerIds.has(playerId)) continue;
+        const points =
+          seasonContext.playerWeekPoints.get(
+            `${league.league_id}:${league.season}:${week}:${playerId}`
+          ) ?? 0;
         receivedRows += 1;
-        if (row.is_starter) receivedStartedRows += 1;
-        seasonPointsReceived += row.points;
+        if (summary.starterIds.has(playerId)) {
+          receivedStartedRows += 1;
+          receivedStartPoints += points;
+        }
+        seasonPointsReceived += points;
         receivedByAsset.set(
-          row.player_id,
-          (receivedByAsset.get(row.player_id) ?? 0) + row.points
+          playerId,
+          (receivedByAsset.get(playerId) ?? 0) + points
         );
       }
 
@@ -1688,7 +1671,6 @@ export async function gradeLeagueTrades(
   await persistPickResolutions(leagueId);
 
   const leagueRows = await loadLeagueRows();
-  const seasonContext = await loadTradeSeasonContext(leagueId, leagueRows);
   const allAssetsRaw = await db.execute(sql`
     SELECT
       trade_id,
@@ -1707,6 +1689,16 @@ export async function gradeLeagueTrades(
 
   const allAssets = allAssetsRaw as unknown as TradeAssetRow[];
   if (allAssets.length === 0) return { graded: 0, skipped: 0 };
+  const relevantPlayerIds = [...new Set(
+    allAssets
+      .filter((asset) => asset.asset_type === "player")
+      .map((asset) => asset.asset_key)
+  )];
+  const seasonContext = await loadTradeSeasonContext(
+    leagueId,
+    leagueRows,
+    relevantPlayerIds
+  );
 
   const finalRowsRaw = await db.execute(sql`
     SELECT DISTINCT trade_id
@@ -1798,9 +1790,33 @@ export async function gradeAllTrades(
   }
 
   let graded = 0;
+  let skipped = 0;
+  const finalRowsRaw = await db.execute(sql`
+    SELECT DISTINCT trade_id
+    FROM trade_outcomes
+    WHERE is_final = true
+      ${options.leagueId ? sql`AND league_id = ${options.leagueId}` : sql``}
+  `);
+  const finalTradeIds = new Set(
+    (finalRowsRaw as unknown as Array<{ trade_id: string }>).map((row) => row.trade_id)
+  );
   for (const [leagueId, byTrade] of assetsByLeague.entries()) {
-    const seasonContext = await loadTradeSeasonContext(leagueId, leagueRows);
+    const relevantPlayerIds = [...new Set(
+      [...byTrade.values()]
+        .flat()
+        .filter((asset) => asset.asset_type === "player")
+        .map((asset) => asset.asset_key)
+    )];
+    const seasonContext = await loadTradeSeasonContext(
+      leagueId,
+      leagueRows,
+      relevantPlayerIds
+    );
     for (const [tradeId, tradeAssets] of byTrade.entries()) {
+      if (finalTradeIds.has(tradeId)) {
+        skipped += 1;
+        continue;
+      }
       try {
         await gradeTradeFromData(tradeId, tradeAssets, leagueRows, seasonContext);
         graded += 1;
@@ -1813,7 +1829,7 @@ export async function gradeAllTrades(
 
   return {
     graded,
-    skipped: 0,
+    skipped,
     leagues: assetsByLeague.size,
   };
 }

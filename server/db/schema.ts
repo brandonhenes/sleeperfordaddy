@@ -669,3 +669,72 @@ export const player_weekly_stats = pgTable(
   ]
 );
 
+// One row per roster/week. Exact player scores live in scoring-profile maps,
+// avoiding a duplicate copy of team metadata for every rostered player.
+export const weekly_team_results = pgTable(
+  "weekly_team_results",
+  {
+    league_id: text("league_id").notNull(),
+    season: integer("season").notNull(),
+    week: integer("week").notNull(),
+    roster_id: integer("roster_id").notNull(),
+    player_ids: text("player_ids").array().notNull().default([]),
+    starter_ids: text("starter_ids").array().notNull().default([]),
+    opponent_roster_id: integer("opponent_roster_id"),
+    opponent_total: real("opponent_total"),
+    league_median: real("league_median"),
+    roster_total: real("roster_total"),
+    updated_at: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.league_id, table.season, table.week, table.roster_id] }),
+  ]
+);
+
+export const league_scoring_profiles = pgTable(
+  "league_scoring_profiles",
+  {
+    profile_id: serial("profile_id").primaryKey(),
+    settings_hash: text("settings_hash").notNull().unique(),
+    scoring_settings: jsonb("scoring_settings"),
+    updated_at: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  }
+);
+
+export const league_scoring_profile_assignments = pgTable(
+  "league_scoring_profile_assignments",
+  {
+    league_id: text("league_id").primaryKey(),
+    profile_id: integer("profile_id").notNull(),
+    updated_at: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("idx_scoring_profile_assignments_profile").on(table.profile_id)]
+);
+
+// Exact Sleeper points, deduplicated across leagues that share scoring settings.
+// One JSON object replaces hundreds of per-league, per-roster player rows.
+export const weekly_scoring_profile_points = pgTable(
+  "weekly_scoring_profile_points",
+  {
+    profile_id: integer("profile_id").notNull(),
+    season: integer("season").notNull(),
+    week: integer("week").notNull(),
+    points: jsonb("points").notNull().default({}),
+    updated_at: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.profile_id, table.season, table.week] })]
+);
+
+// Rare exact-score differences between leagues that otherwise share a profile.
+export const weekly_league_point_overrides = pgTable(
+  "weekly_league_point_overrides",
+  {
+    league_id: text("league_id").notNull(),
+    season: integer("season").notNull(),
+    week: integer("week").notNull(),
+    points: jsonb("points").notNull().default({}),
+    updated_at: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.league_id, table.season, table.week] })]
+);
+

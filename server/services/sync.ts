@@ -39,6 +39,7 @@ import { isDynastyLeagueFromSleeperSettings } from "./dynasty-leagues.js";
 import { bustAllCaches } from "./cache-bus.js";
 import { backfillLeagueMatchups } from "./matchup-backfill.js";
 import { gradeLeagueTrades } from "./trade-intelligence.js";
+import { ensureSleeperStatsFresh } from "./sync-sleeper-stats.js";
 import type {
   SleeperLeague,
   SleeperRoster,
@@ -286,6 +287,18 @@ async function runSync(
     leagues_total: uniqueLeagues.length,
     leagues_done: 0,
   });
+
+  if (scope === "full" && !leagueId) {
+    await updateSyncJob(jobId, {
+      step: "syncing_weekly_stats",
+      detail: `Refreshing ${currentSeason} player scoring inputs...`,
+    });
+    try {
+      await ensureSleeperStatsFresh(currentSeason);
+    } catch (err) {
+      console.error(`[sync] Weekly stat refresh failed for ${currentSeason}:`, err);
+    }
+  }
 
   // Step 4: Process each league with concurrency limit
   let leaguesDone = 0;
@@ -566,19 +579,7 @@ async function processLeague(
   await processTrades(league.league_id, season);
 
   try {
-    const matchupCountRows = await db.execute(sql`
-      SELECT COUNT(*)::int AS cnt
-      FROM weekly_matchup_scores
-      WHERE league_id = ${league.league_id}
-    `);
-    const matchupCount = Number(
-      (matchupCountRows as unknown as Array<{ cnt: number | string }>)[0]?.cnt ?? 0
-    );
-
-    if (matchupCount === 0) {
-      console.log(`[sync] No matchup data for ${league.league_id}, pulling from Sleeper...`);
-      await backfillLeagueMatchups(league.league_id);
-    }
+    await backfillLeagueMatchups(league.league_id);
   } catch (err) {
     console.error(`[sync] Matchup backfill failed for ${league.league_id}:`, err);
   }

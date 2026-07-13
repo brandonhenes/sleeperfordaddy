@@ -17,14 +17,13 @@ interface SleeperMatchupEntry {
   players_points: Record<string, number> | null;
 }
 
-interface InsertRow {
+interface TeamInsertRow {
   league_id: string;
   season: number;
   week: number;
   roster_id: number;
-  player_id: string;
-  points: number;
-  is_starter: boolean;
+  player_ids: string[];
+  starter_ids: string[];
   opponent_roster_id: number | null;
   opponent_total: number | null;
   league_median: number | null;
@@ -66,12 +65,12 @@ function median(values: number[]): number {
     : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
-function buildRows(
+export function buildCompactMatchupRows(
   leagueId: string,
   season: number,
   week: number,
   matchups: SleeperMatchupEntry[]
-): InsertRow[] {
+): { teams: TeamInsertRow[]; playerPoints: Record<string, number> } {
   const matchupPairs = new Map<number, SleeperMatchupEntry[]>();
   for (const matchup of matchups) {
     if (matchup.matchup_id == null) continue;
@@ -84,10 +83,10 @@ function buildRows(
     matchups.filter((matchup) => matchup.points != null).map((matchup) => matchup.points ?? 0)
   );
 
-  const rows: InsertRow[] = [];
+  const teams: TeamInsertRow[] = [];
+  const playerPoints: Record<string, number> = {};
   for (const matchup of matchups) {
     const rosterTotal = matchup.points ?? 0;
-    const starters = new Set(matchup.starters ?? []);
     const players = matchup.players ?? [];
     const playersPoints = matchup.players_points ?? {};
 
@@ -102,43 +101,49 @@ function buildRows(
       }
     }
 
+    teams.push({
+      league_id: leagueId,
+      season,
+      week,
+      roster_id: matchup.roster_id,
+      player_ids: players,
+      starter_ids: matchup.starters ?? [],
+      opponent_roster_id: opponentRosterId,
+      opponent_total: opponentTotal,
+      league_median: leagueMedian,
+      roster_total: rosterTotal,
+    });
+
     for (const playerId of players) {
-      rows.push({
-        league_id: leagueId,
-        season,
-        week,
-        roster_id: matchup.roster_id,
-        player_id: playerId,
-        points: playersPoints[playerId] ?? 0,
-        is_starter: starters.has(playerId),
-        opponent_roster_id: opponentRosterId,
-        opponent_total: opponentTotal,
-        league_median: leagueMedian,
-        roster_total: rosterTotal,
-      });
+      playerPoints[playerId] = Number(playersPoints[playerId] ?? 0);
     }
   }
 
-  return rows;
+  return { teams, playerPoints };
 }
 
-async function batchInsert(rows: InsertRow[], dryRun: boolean): Promise<number> {
-  if (rows.length === 0) return 0;
-  if (dryRun) return rows.length;
+async function batchInsert(
+  rows: { teams: TeamInsertRow[]; playerPoints: Record<string, number> },
+  profileId: number,
+  season: number,
+  week: number,
+  dryRun: boolean
+): Promise<number> {
+  if (rows.teams.length === 0) return 0;
+  if (dryRun) return rows.teams.length;
 
   let inserted = 0;
   const batchSize = 300;
-  for (let i = 0; i < rows.length; i += batchSize) {
-    const batch = rows.slice(i, i + batchSize);
+  for (let i = 0; i < rows.teams.length; i += batchSize) {
+    const batch = rows.teams.slice(i, i + batchSize);
     const values = batch.map(
       (row) => sql`(
         ${row.league_id},
         ${row.season},
         ${row.week},
         ${row.roster_id},
-        ${row.player_id},
-        ${row.points},
-        ${row.is_starter},
+        ${row.player_ids},
+        ${row.starter_ids},
         ${row.opponent_roster_id},
         ${row.opponent_total},
         ${row.league_median},
@@ -147,27 +152,95 @@ async function batchInsert(rows: InsertRow[], dryRun: boolean): Promise<number> 
     );
 
     await db.execute(sql`
-      INSERT INTO weekly_matchup_scores (
+      INSERT INTO weekly_team_results (
         league_id,
         season,
         week,
         roster_id,
-        player_id,
-        points,
-        is_starter,
+        player_ids,
+        starter_ids,
         opponent_roster_id,
         opponent_total,
         league_median,
         roster_total
       )
       VALUES ${sql.join(values, sql`, `)}
-      ON CONFLICT DO NOTHING
+      ON CONFLICT (league_id, season, week, roster_id) DO UPDATE SET
+        player_ids = EXCLUDED.player_ids,
+        starter_ids = EXCLUDED.starter_ids,
+        opponent_roster_id = EXCLUDED.opponent_roster_id,
+        opponent_total = EXCLUDED.opponent_total,
+        league_median = EXCLUDED.league_median,
+        roster_total = EXCLUDED.roster_total,
+        updated_at = NOW()
     `);
 
     inserted += batch.length;
   }
 
+  const pointsJson = JSON.stringify(rows.playerPoints);
+  await db.execute(sql`
+    INSERT INTO weekly_scoring_profile_points (profile_id, season, week, points)
+    VALUES (${profileId}, ${season}, ${week}, ${pointsJson}::jsonb)
+    ON CONFLICT (profile_id, season, week) DO UPDATE SET
+      points = EXCLUDED.points || weekly_scoring_profile_points.points,
+      updated_at = NOW()
+  `);
+
+  await db.execute(sql`
+    WITH canonical AS (
+      SELECT points
+      FROM weekly_scoring_profile_points
+      WHERE profile_id = ${profileId} AND season = ${season} AND week = ${week}
+    ), differences AS (
+      SELECT jsonb_object_agg(entry.key, entry.value) AS points
+      FROM canonical, jsonb_each(${pointsJson}::jsonb) AS entry(key, value)
+      WHERE canonical.points -> entry.key IS DISTINCT FROM entry.value
+      HAVING COUNT(*) > 0
+    )
+    INSERT INTO weekly_league_point_overrides (league_id, season, week, points)
+    SELECT ${rows.teams[0].league_id}, ${season}, ${week}, points
+    FROM differences
+    ON CONFLICT (league_id, season, week) DO UPDATE SET
+      points = weekly_league_point_overrides.points || EXCLUDED.points,
+      updated_at = NOW()
+  `);
+
   return inserted;
+}
+
+async function ensureLeagueScoringProfile(leagueId: string): Promise<number> {
+  const rows = await db.execute(sql`
+    WITH league_profile AS (
+      SELECT
+        md5(COALESCE(scoring_settings::text, 'null')) AS settings_hash,
+        scoring_settings
+      FROM leagues
+      WHERE league_id = ${leagueId}
+    ), upserted AS (
+      INSERT INTO league_scoring_profiles (settings_hash, scoring_settings)
+      SELECT settings_hash, scoring_settings FROM league_profile
+      ON CONFLICT (settings_hash) DO UPDATE SET
+        scoring_settings = EXCLUDED.scoring_settings,
+        updated_at = NOW()
+      RETURNING profile_id
+    )
+    SELECT profile_id FROM upserted
+  `);
+  const profileId = Number(
+    (rows as unknown as Array<{ profile_id: number | string }>)[0]?.profile_id
+  );
+  if (!Number.isFinite(profileId)) {
+    throw new Error(`Unable to resolve scoring profile for league ${leagueId}`);
+  }
+  await db.execute(sql`
+    INSERT INTO league_scoring_profile_assignments (league_id, profile_id)
+    VALUES (${leagueId}, ${profileId})
+    ON CONFLICT (league_id) DO UPDATE SET
+      profile_id = EXCLUDED.profile_id,
+      updated_at = NOW()
+  `);
+  return profileId;
 }
 
 async function getLeagueRows(): Promise<LeagueRow[]> {
@@ -219,9 +292,10 @@ async function backfillSingleLeagueSeason(
   season: number,
   dryRun: boolean
 ): Promise<number> {
+  const profileId = await ensureLeagueScoringProfile(leagueId);
   const existingRows = await db.execute(sql`
     SELECT DISTINCT week
-    FROM weekly_matchup_scores
+    FROM weekly_team_results
     WHERE league_id = ${leagueId}
       AND season = ${season}
   `);
@@ -256,7 +330,13 @@ async function backfillSingleLeagueSeason(
       if (!retryData.length || retryData.every((entry) => !entry.points || entry.points === 0)) {
         continue;
       }
-      inserted += await batchInsert(buildRows(leagueId, season, week, retryData), dryRun);
+      inserted += await batchInsert(
+        buildCompactMatchupRows(leagueId, season, week, retryData),
+        profileId,
+        season,
+        week,
+        dryRun
+      );
       continue;
     }
 
@@ -272,7 +352,13 @@ async function backfillSingleLeagueSeason(
       continue;
     }
 
-    inserted += await batchInsert(buildRows(leagueId, season, week, data), dryRun);
+    inserted += await batchInsert(
+      buildCompactMatchupRows(leagueId, season, week, data),
+      profileId,
+      season,
+      week,
+      dryRun
+    );
   }
 
   return inserted;
