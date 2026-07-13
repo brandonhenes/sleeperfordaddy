@@ -2,9 +2,22 @@ import { describe, expect, it } from "vitest";
 import {
   buildCompactPlayerWeekPoints,
   buildCompactTeamWeekMap,
+  maxMatchupWeekForSeason,
 } from "../trade-matchup-context.js";
 
 describe("compact trade matchup context", () => {
+  it("does not scan future matchup weeks during preseason", () => {
+    const state = { season: "2026", season_type: "pre", week: 1 };
+    expect(maxMatchupWeekForSeason(2026, state)).toBe(0);
+    expect(maxMatchupWeekForSeason(2025, state)).toBe(18);
+  });
+
+  it("caps current-season matchup work at Sleeper's active week", () => {
+    const state = { season: "2026", season_type: "regular", week: 6 };
+    expect(maxMatchupWeekForSeason(2026, state)).toBe(6);
+    expect(maxMatchupWeekForSeason(2027, state)).toBe(0);
+  });
+
   it("stores one team summary while preserving roster and starter membership", () => {
     const map = buildCompactTeamWeekMap([
       {

@@ -11,6 +11,25 @@ export interface TeamWeekRow {
   roster_total: number | null;
 }
 
+export interface NflWeekState {
+  season: string;
+  season_type: string;
+  week: number;
+}
+
+export function maxMatchupWeekForSeason(
+  season: number,
+  state: NflWeekState | null
+): number {
+  const currentSeason = Number(state?.season ?? new Date().getFullYear());
+  if (season < currentSeason) return season <= 2021 ? 17 : 18;
+  if (season > currentSeason) return 0;
+  if (!state) return 0;
+  if (state.season_type === "post") return 18;
+  if (state.season_type !== "regular") return 0;
+  return Math.max(0, Math.min(18, Number(state.week) || 0));
+}
+
 export interface ProfileAssignmentRow {
   league_id: string;
   profile_id: number;

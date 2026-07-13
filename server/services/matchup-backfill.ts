@@ -1,6 +1,8 @@
 import { sql } from "drizzle-orm";
 import { db } from "../db/connection.js";
 import { SLEEPER_BASE_URL } from "../../shared/constants.js";
+import { maxMatchupWeekForSeason } from "./trade-matchup-context.js";
+import type { SleeperNflState } from "../../shared/types.js";
 
 interface LeagueRow {
   league_id: string;
@@ -265,8 +267,9 @@ export async function getLeagueTimeline(leagueId: string): Promise<LeagueRow[]> 
 
   let root = byId.get(leagueId) ?? null;
   while (root?.previous_league_id) {
-    root = byId.get(root.previous_league_id) ?? root;
-    if (root.previous_league_id == null) break;
+    const parent = byId.get(root.previous_league_id);
+    if (!parent) break;
+    root = parent;
   }
 
   if (!root) return [];
@@ -290,7 +293,8 @@ export async function getLeagueTimeline(leagueId: string): Promise<LeagueRow[]> 
 async function backfillSingleLeagueSeason(
   leagueId: string,
   season: number,
-  dryRun: boolean
+  dryRun: boolean,
+  maxWeek: number
 ): Promise<number> {
   const profileId = await ensureLeagueScoringProfile(leagueId);
   const existingRows = await db.execute(sql`
@@ -304,7 +308,6 @@ async function backfillSingleLeagueSeason(
   );
 
   let inserted = 0;
-  const maxWeek = season <= 2021 ? 17 : 18;
 
   for (let week = 1; week <= maxWeek; week += 1) {
     if (existingWeeks.has(week)) continue;
@@ -366,17 +369,21 @@ async function backfillSingleLeagueSeason(
 
 export async function backfillLeagueMatchups(
   leagueId: string,
-  options: { dryRun?: boolean } = {}
+  options: { dryRun?: boolean; nflState?: SleeperNflState | null } = {}
 ): Promise<number> {
   const timeline = await getLeagueTimeline(leagueId);
   if (timeline.length === 0) return 0;
+  const nflState = options.nflState ?? null;
 
   let inserted = 0;
   for (const league of timeline) {
+    const maxWeek = maxMatchupWeekForSeason(league.season, nflState);
+    if (maxWeek === 0) continue;
     inserted += await backfillSingleLeagueSeason(
       league.league_id,
       league.season,
-      options.dryRun === true
+      options.dryRun === true,
+      maxWeek
     );
   }
 

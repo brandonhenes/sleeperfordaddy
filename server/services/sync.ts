@@ -42,6 +42,7 @@ import { gradeLeagueTrades } from "./trade-intelligence.js";
 import { ensureSleeperStatsFresh } from "./sync-sleeper-stats.js";
 import type {
   SleeperLeague,
+  SleeperNflState,
   SleeperRoster,
   SleeperMatchup,
   SleeperTransaction,
@@ -55,6 +56,7 @@ const lastSyncStart = new Map<string, number>();
 type SyncScope = "full" | "latest";
 type ProcessLeagueOptions = {
   includeHistoricalWork?: boolean;
+  nflState?: SleeperNflState | null;
 };
 
 // Player data cache timestamp
@@ -310,6 +312,7 @@ async function runSync(
       try {
         await processLeague(league, sleeperUser.user_id, {
           includeHistoricalWork: scope === "full" && !leagueId,
+          nflState,
         });
       } catch (err) {
         console.error(
@@ -579,7 +582,7 @@ async function processLeague(
   await processTrades(league.league_id, season);
 
   try {
-    await backfillLeagueMatchups(league.league_id);
+    await backfillLeagueMatchups(league.league_id, { nflState: options.nflState });
   } catch (err) {
     console.error(`[sync] Matchup backfill failed for ${league.league_id}:`, err);
   }
