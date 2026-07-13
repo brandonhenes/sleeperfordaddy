@@ -28,7 +28,11 @@ const router = Router();
 
 // Health check
 router.get("/api/health", (_req, res) => {
-  res.json({ status: "ok", timestamp: Date.now() });
+  res.json({
+    status: "ok",
+    timestamp: Date.now(),
+    commit: process.env.RENDER_GIT_COMMIT?.slice(0, 7) ?? "local",
+  });
 });
 
 // Mount route files
